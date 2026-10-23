@@ -420,7 +420,7 @@
       }
       host.replaceChildren(...accounts.map((account) => {
         const card = document.createElement("article");
-        card.className = "account-card glow relative cursor-pointer rounded-3xl border border-neon/20 bg-card p-6" + (state.openId === account.id ? " is-open" : "");
+        card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
         card.addEventListener("click", (event) => {
           if (event.target.closest("button")) return;
           state.openId = state.openId === account.id ? null : account.id;
@@ -446,7 +446,7 @@
           grid.append(wrap);
         });
         const reveal = document.createElement("div");
-        reveal.className = "status-reveal mt-4 flex items-center justify-between gap-2";
+        reveal.className = "status-reveal mt-4 flex items-center gap-2";
         const badge = document.createElement("span");
         badge.className = "rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] st-" + (account.status || "none");
         badge.textContent = account.status_label;
@@ -455,20 +455,7 @@
         check.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
         check.textContent = "Verificar";
         check.addEventListener("click", () => verify(account));
-
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
-        editBtn.textContent = "Editar";
-        editBtn.addEventListener("click", () => editAccount(account));
-
-        const archiveBtn = document.createElement("button");
-        archiveBtn.type = "button";
-        archiveBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
-        archiveBtn.textContent = account.is_archived ? "Desarquivar" : "Arquivar";
-        archiveBtn.addEventListener("click", () => toggleArchive(account));
-
-        reveal.append(badge, check, editBtn, archiveBtn);
+        reveal.append(badge, check);
         const note = document.createElement("p");
         note.className = "status-reveal mt-2 text-[11px] text-mute";
         note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
@@ -520,19 +507,56 @@
     function renderOpsAccounts(accounts) {
       const host = document.getElementById("ops-accounts");
       if (!state.folderId) { host.replaceChildren(); return; }
-      const rows = accounts.filter((account) => account.folder_id === state.folderId);
+      const rows = accounts.filter((account) => account.folder_id === state.folderId && !account.is_archived);
+      if (!rows.length) {
+        const empty = document.createElement("p");
+        empty.className = "text-sm text-mute";
+        empty.textContent = "Nenhuma conta ativa nesta pasta.";
+        host.replaceChildren(empty);
+        return;
+      }
       host.replaceChildren(...rows.map((account) => {
-        const row = document.createElement("div");
-        row.className = "flex items-center justify-between rounded-2xl border border-neon/15 bg-card px-4 py-3";
-        const label = document.createElement("p");
-        label.textContent = (account.display_name ? account.display_name + " · " : "") + "@" + account.username;
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "text-xs text-mute";
-        remove.textContent = "Remover";
-        remove.addEventListener("click", () => removeAccount(account));
-        row.append(label, remove);
-        return row;
+        const card = document.createElement("article");
+        card.className = "glow rounded-2xl border border-neon/20 bg-card p-4";
+        const name = document.createElement("p");
+        name.className = "font-medium text-white";
+        name.textContent = account.display_name || "@" + account.username;
+        const handle = document.createElement("p");
+        handle.className = "text-sm text-mute";
+        handle.textContent = "@" + account.username + " · " + account.folder_name;
+        const grid = document.createElement("dl");
+        grid.className = "mt-3 grid grid-cols-3 gap-2 text-sm";
+        [["Impressões", num(account.impressions)], ["Engajamento", num(account.engagement)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
+          const wrap = document.createElement("div");
+          const dt = document.createElement("dt");
+          dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+          dt.textContent = label;
+          const dd = document.createElement("dd");
+          dd.className = "mt-1 text-white";
+          dd.textContent = value;
+          wrap.append(dt, dd);
+          grid.append(wrap);
+        });
+        const actions = document.createElement("div");
+        actions.className = "mt-4 flex flex-wrap gap-2";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        editBtn.textContent = "Editar";
+        editBtn.addEventListener("click", () => editAccount(account));
+        const archiveBtn = document.createElement("button");
+        archiveBtn.type = "button";
+        archiveBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        archiveBtn.textContent = "Arquivar";
+        archiveBtn.addEventListener("click", () => toggleArchive(account));
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs text-mute";
+        deleteBtn.textContent = "Excluir";
+        deleteBtn.addEventListener("click", () => removeAccount(account));
+        actions.append(editBtn, archiveBtn, deleteBtn);
+        card.append(name, handle, grid, actions);
+        return card;
       }));
     }
     async function load() {
