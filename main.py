@@ -54,7 +54,7 @@ from sqlalchemy.orm import (
 )
 
 ROOT = Path(__file__).resolve().parent
-INDEX = ROOT / "templates" / "index.html"
+INDEX = ROOT / "index.html"
 DB_FILE = ROOT / "data" / "suzana.db"
 X_API = "https://api.x.com/2"
 LOCAL_EMAIL = "local@suzana"
@@ -1255,8 +1255,9 @@ async def lifespan(_app: FastAPI):
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
-from fastapi.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory="static"), name="static")
+from routes import router
+
+app.include_router(router)
 
 
 @app.get("/avatars/{filename}")

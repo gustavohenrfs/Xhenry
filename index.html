@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07050a">
+  <title>XHenry</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@360;480;580&family=Syne:wght@620;750&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { display: ["Syne", "sans-serif"], sans: ["Outfit", "sans-serif"] },
+          colors: {
+            ink: "#07050a",
+            panel: "#100914",
+            card: "#140b18",
+            neon: "#ff2ec8",
+            blush: "#ffd6f2",
+            mute: "#b39ab4"
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    html, body { background: #07050a; color: #fff7fc; min-height: 100%; }
+    body { font-family: Outfit, sans-serif; }
+    ::selection { background: #ff2ec8; color: #1a0412; }
+    .nav-btn { color: #b39ab4; border: 1px solid transparent; }
+    .nav-btn.active {
+      color: #fff7fc;
+      background: rgba(255, 46, 200, .12);
+      border-color: rgba(255, 46, 200, .45);
+      box-shadow: 0 0 22px rgba(255, 46, 200, .16);
+    }
+    .glow { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
+    .glow:hover {
+      transform: translateY(-5px);
+      border-color: rgba(255, 46, 200, .72);
+      box-shadow: 0 0 0 1px rgba(255, 46, 200, .28), 0 16px 42px rgba(255, 46, 200, .16);
+    }
+    .status-reveal { opacity: 0; transform: translateY(6px); transition: opacity .18s ease, transform .18s ease; }
+    .account-card:hover .status-reveal,
+    .account-card.is-open .status-reveal { opacity: 1; transform: none; }
+    .st-healthy { color: #b8ffd8; border-color: rgba(80, 230, 150, .45); background: rgba(80, 230, 150, .1); }
+    .st-search_ban { color: #ffe0a3; border-color: rgba(255, 196, 80, .45); background: rgba(255, 196, 80, .1); }
+    .st-ghost_ban { color: #ffb4c4; border-color: rgba(255, 80, 120, .5); background: rgba(255, 46, 100, .12); }
+    .st-none, .st-unknown, .st-api_error, .st-rate_limited, .st-protected, .st-suspended, .st-not_found {
+      color: #ffd6f2; border-color: rgba(255, 46, 200, .35); background: rgba(255, 46, 200, .08);
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .pane { display: none !important; }
+    .pane.on { display: block !important; }
+    #pane-settings.on { display: block !important; }
+    .auth-modal {
+      position: fixed; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(7, 5, 10, .86);
+      backdrop-filter: blur(10px);
+    }
+    .auth-modal.off { display: none !important; }
+  </style>
+</head>
+<body class="bg-ink text-blush">
+  <div class="flex min-h-screen">
+    <aside class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-neon/20 bg-panel px-4 py-6 md:flex">
+      <div class="px-2">
+        <p class="font-display text-3xl tracking-tight text-white">XHenry</p>
+        <p class="mt-1 text-[11px] uppercase tracking-[0.22em] text-neon">Monitoramento Real</p>
+      </div>
+      <nav id="nav" class="mt-8 space-y-2">
+        <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Dashboard</button>
+        <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
+        <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
+        <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
+      </nav>
+      <div id="user-foot" class="mt-auto flex items-center gap-3 px-2">
+        <div data-user-avatar class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
+        <p data-user-name class="min-w-0 flex-1 truncate text-sm text-white">—</p>
+        <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
+      </div>
+    </aside>
+    <main class="min-w-0 flex-1">
+      <header class="sticky top-0 z-20 border-b border-neon/15 bg-ink/85 px-4 py-4 backdrop-blur md:px-8">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p class="text-[11px] uppercase tracking-[0.2em] text-neon">XHenry</p>
+            <h1 id="heading" class="font-display text-3xl text-white">Dashboard</h1>
+          </div>
+          <div class="flex items-center gap-2 md:hidden">
+            <div data-user-avatar class="flex h-8 w-8 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
+            <p data-user-name class="max-w-24 truncate text-sm text-white">—</p>
+            <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
+          </div>
+          <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
+            <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
+            <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
+            <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
+            <button type="button" data-period="30d" class="period rounded-full px-3 py-1.5 text-mute">30 dias</button>
+            <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
+          </div>
+        </div>
+        <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
+          <button type="button" data-tab="dashboard" class="nav-btn active shrink-0 rounded-full px-3 py-2 text-xs">Dashboard</button>
+          <button type="button" data-tab="ops" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Operações</button>
+          <button type="button" data-tab="post" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Verificar Post</button>
+          <button type="button" data-tab="settings" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Configurações</button>
+        </div>
+        <p id="banner" class="mt-3 hidden rounded-2xl border border-neon/40 bg-neon/10 px-3 py-2 text-sm text-neon"></p>
+      </header>
+      <div class="px-4 py-6 md:px-8">
+        <section id="pane-dashboard" class="pane on space-y-6">
+          <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
+          <div class="grid gap-4 xl:grid-cols-5">
+            <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
+              <h2 class="font-display text-xl text-white">Potencial de Crescimento</h2>
+              <p class="mb-3 text-xs text-mute">Curva de engajamento dos posts coletados</p>
+              <div class="h-64"><canvas id="line-chart"></canvas></div>
+            </article>
+            <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-2">
+              <h2 class="font-display text-xl text-white">Melhor Conta</h2>
+              <p id="bar-caption" class="mb-3 text-xs text-mute">Engajamento e impressões</p>
+              <div class="h-64"><canvas id="bar-chart"></canvas></div>
+            </article>
+          </div>
+          <section>
+            <div class="mb-3 flex items-baseline justify-between">
+              <h2 class="font-display text-2xl text-white">Contas</h2>
+              <p id="range-label" class="text-xs text-mute"></p>
+            </div>
+            <div id="accounts" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+          </section>
+        </section>
+        <section id="pane-ops" class="pane space-y-6">
+          <form id="folder-form" class="glow flex flex-wrap gap-2 rounded-3xl border border-neon/25 bg-card p-4">
+            <input id="folder-name" required maxlength="120" placeholder="Nome da pasta" class="min-w-56 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Criar pasta</button>
+          </form>
+          <div id="folder-cards" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+          <form id="account-form" class="flex flex-wrap gap-2">
+            <input id="account-handle" maxlength="16" placeholder="@handle" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-card px-3 py-3 text-sm outline-none focus:border-neon">
+            <input id="account-label" maxlength="80" placeholder="Nome de exibição, ex: Conta 01" class="min-w-48 flex-1 rounded-2xl border border-neon/25 bg-card px-3 py-3 text-sm outline-none focus:border-neon">
+            <button class="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-ink" type="submit">Adicionar conta</button>
+          </form>
+          <div id="ops-accounts" class="space-y-2"></div>
+        </section>
+        <section id="pane-post" class="pane">
+          <form id="post-form" class="glow mx-auto max-w-2xl space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
+            <div>
+              <h2 class="font-display text-2xl text-white">Verificar Post</h2>
+              <p class="mt-1 text-sm text-mute">Legenda obrigatória. Mídia é opcional.</p>
+            </div>
+            <textarea id="post-caption" required rows="5" placeholder="Legenda do post" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></textarea>
+            <input id="post-media" type="file" accept="image/jpeg,image/png" class="block w-full text-sm text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
+            <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Verificar Post</button>
+            <article id="verdict" class="hidden rounded-2xl border border-neon/20 bg-ink p-4 text-sm leading-6"></article>
+          </form>
+        </section>
+        <section id="pane-settings" class="pane">
+          <div class="grid gap-4 lg:grid-cols-2">
+          <form id="profile-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
+            <h2 class="font-display text-2xl text-white">Perfil</h2>
+            <div class="flex items-center gap-4">
+              <div id="profile-avatar" data-user-avatar class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-neon/40 text-lg text-neon"></div>
+              <label class="text-xs uppercase tracking-[0.14em] text-mute">
+                Foto
+                <input id="profile-photo" type="file" accept="image/jpeg,image/png" class="mt-2 block text-sm normal-case tracking-normal text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
+              </label>
+            </div>
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="profile-name">Nome de exibição</label>
+            <input id="profile-name" required maxlength="120" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar perfil</button>
+          </form>
+          <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
+            <h2 class="font-display text-2xl text-white">Configurações</h2>
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-token">Token do bot</label>
+            <input id="tg-token" type="password" autocomplete="off" placeholder="123456:ABC..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-chat">Chat ID</label>
+            <input id="tg-chat" placeholder="-1001234567890" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="xai-key">Chave da xAI (análise do post)</label>
+            <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de impressões</label>
+            <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <div class="flex flex-wrap gap-2 pt-2">
+              <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
+              <button id="test-note" class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar Notificação</button>
+            </div>
+            <p class="text-xs leading-5 text-mute">Alerta de queda: se o engajamento cair mais de 30% do dia para a noite, ou se o alcance indicar ban.</p>
+          </form>
+          <article class="rounded-3xl border border-neon/25 bg-card p-6">
+            <p class="text-[11px] uppercase tracking-[0.16em] text-neon">Prévia da mensagem</p>
+            <pre class="mt-4 whitespace-pre-wrap font-sans text-sm leading-7 text-white">🚀 Post viralizando!
+👤 Conta: [Nome] ([@User])
+👁 Ganho de impressao no post: [Quantidade]
+⏰ Horário do post: [Data/Hora]
+💬 Engajamento: [Curtidas+RTs]
+🔗 Link do Post: [Link]</pre>
+          </article>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="pointer-events-none fixed bottom-4 right-4 z-[60] hidden max-w-sm rounded-2xl border border-neon/40 bg-panel px-4 py-3 text-sm"></div>
+  <div id="auth-modal" class="auth-modal">
+    <form id="auth-form" class="w-full max-w-sm rounded-3xl border border-neon/30 bg-panel p-6 shadow-[0_0_40px_rgba(255,46,200,.16)]">
+      <p class="font-display text-3xl text-white">XHenry</p>
+      <p class="mt-1 text-[11px] uppercase tracking-[0.2em] text-neon">Monitoramento Real</p>
+      <h2 id="auth-title" class="mt-6 text-sm text-white">Entrar</h2>
+      <label id="auth-name-label" class="mt-4 hidden text-xs uppercase tracking-[0.14em] text-mute" for="auth-name">Nome</label>
+      <input id="auth-name" maxlength="120" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Seu nome">
+      <label class="mt-4 block text-xs uppercase tracking-[0.14em] text-mute" for="auth-email">Email</label>
+      <input id="auth-email" type="email" required maxlength="320" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="voce@email.com">
+      <label class="mt-4 block text-xs uppercase tracking-[0.14em] text-mute" for="auth-password">Senha</label>
+      <input id="auth-password" type="password" required minlength="8" maxlength="128" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
+      <p id="auth-error" class="mt-3 hidden text-sm text-neon"></p>
+      <button class="mt-5 w-full rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Entrar</button>
+      <button id="auth-switch" class="mt-3 w-full text-xs text-mute" type="button">Criar conta</button>
+    </form>
+  </div>
+  <script>
+    const fmt = new Intl.NumberFormat("pt-BR");
+    const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações" };
+    const TOKEN_KEY = "access_token";
+    const state = { tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login" };
+    let lineChart = null;
+    let barChart = null;
+    let toastTimer = 0;
+    if (window.Chart) {
+      Chart.defaults.color = "#b39ab4";
+      Chart.defaults.borderColor = "rgba(255,46,200,.12)";
+      Chart.defaults.font.family = "Outfit, sans-serif";
+      Chart.defaults.animation.duration = 700;
+    }
+    function num(value) { return value === null || value === undefined ? "—" : fmt.format(value); }
+    function toast(message) {
+      const box = document.getElementById("toast");
+      box.textContent = message;
+      box.classList.remove("hidden");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => box.classList.add("hidden"), 4200);
+    }
+    function detailOf(body, fallback) {
+      if (!body) return fallback;
+      if (typeof body.detail === "string") return body.detail;
+      if (Array.isArray(body.detail)) return body.detail.map((item) => item.msg || String(item)).join(" ");
+      return fallback;
+    }
+    function token() { return localStorage.getItem(TOKEN_KEY) || ""; }
+    function logout() {
+      localStorage.removeItem(TOKEN_KEY);
+      location.reload();
+    }
+    function showAuth(on) {
+      document.getElementById("auth-modal").classList.toggle("off", !on);
+    }
+    function paintUser(user) {
+      const name = user ? (user.nome_exibicao || user.email || "—") : "—";
+      document.querySelectorAll("[data-user-name]").forEach((el) => { el.textContent = name; });
+      document.querySelectorAll("[data-user-avatar]").forEach((el) => {
+        el.replaceChildren();
+        const url = user && user.avatar_url;
+        if (url && (String(url).startsWith("https://") || String(url).startsWith("/"))) {
+          const img = document.createElement("img");
+          img.src = String(url).startsWith("/") ? url + "?v=" + Date.now() : url;
+          img.alt = "";
+          img.className = "h-full w-full rounded-full object-cover";
+          el.append(img);
+        } else {
+          el.textContent = name.slice(0, 1).toUpperCase();
+        }
+      });
+    }
+    function setAuthMode(mode) {
+      state.authMode = mode;
+      const register = mode === "register";
+      document.getElementById("auth-title").textContent = register ? "Criar conta" : "Entrar";
+      document.getElementById("auth-name").classList.toggle("hidden", !register);
+      document.getElementById("auth-name-label").classList.toggle("hidden", !register);
+      document.getElementById("auth-name").required = register;
+      document.querySelector("#auth-form button[type=submit]").textContent = register ? "Criar conta" : "Entrar";
+      document.getElementById("auth-switch").textContent = register ? "Já tenho conta" : "Criar conta";
+    }
+    async function api(path, options) {
+      const opts = Object.assign({}, options);
+      const headers = new Headers(opts.headers || {});
+      if (token() && !headers.has("Authorization")) headers.set("Authorization", "Bearer " + token());
+      opts.headers = headers;
+      const response = await fetch(path, opts);
+      if (response.status === 204) return null;
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(detailOf(body, response.statusText));
+      return body;
+    }
+    function setPeriod(period) {
+      state.period = period;
+      document.querySelectorAll(".period").forEach((button) => {
+        const on = button.dataset.period === period;
+        button.classList.toggle("bg-neon", on);
+        button.classList.toggle("text-ink", on);
+        button.classList.toggle("text-mute", !on);
+      });
+    }
+    function setTab(tab) {
+      state.tab = tab;
+      document.querySelectorAll(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+      document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("on", pane.id === "pane-" + tab));
+      document.getElementById("heading").textContent = titles[tab];
+      document.getElementById("period-wrap").classList.toggle("invisible", tab !== "dashboard");
+      if (tab === "settings") loadSettings();
+    }
+    function kpi(label, value, hot) {
+      const card = document.createElement("article");
+      card.className = "glow rounded-3xl border bg-card px-4 py-4 " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
+      const k = document.createElement("p");
+      k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
+      k.textContent = label;
+      const v = document.createElement("p");
+      v.className = "mt-2 font-display text-3xl text-white";
+      v.textContent = value;
+      card.append(k, v);
+      return card;
+    }
+    function renderKpis(kpis) {
+      document.getElementById("kpis").replaceChildren(
+        kpi("Impressões", num(kpis.impressions), true),
+        kpi("Engajamento", num(kpis.engagement), false),
+        kpi("Seguidores", num(kpis.followers), false),
+        kpi("Contas", num(kpis.accounts), false)
+      );
+    }
+    function chartOptions() {
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { boxWidth: 10 } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+          y: { beginAtZero: true, ticks: { precision: 0 } }
+        }
+      };
+    }
+    function renderCharts(data) {
+      if (!window.Chart) return;
+      if (lineChart) lineChart.destroy();
+      if (barChart) barChart.destroy();
+      lineChart = new Chart(document.getElementById("line-chart"), {
+        type: "line",
+        data: {
+          labels: data.series.map((row) => row.date.slice(5)),
+          datasets: [{
+            label: "Engajamento",
+            data: data.series.map((row) => row.engagement),
+            borderColor: "#ff2ec8",
+            backgroundColor: "rgba(255,46,200,.16)",
+            fill: true,
+            tension: 0.35,
+            pointRadius: data.series.length > 40 ? 0 : 3,
+            borderWidth: 2
+          }]
+        },
+        options: chartOptions()
+      });
+      const names = data.by_account.map((row) => "@" + row.username);
+      const hasImpressions = data.by_account.some((row) => row.impressions !== null);
+      document.getElementById("bar-caption").textContent = hasImpressions ? "Engajamento e impressões" : "Engajamento — impressões ainda não vieram da API";
+      barChart = new Chart(document.getElementById("bar-chart"), {
+        type: "bar",
+        data: {
+          labels: names.length ? names : ["—"],
+          datasets: [
+            { label: "Engajamento", data: names.length ? data.by_account.map((row) => row.engagement) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 },
+            { label: "Impressões", data: names.length ? data.by_account.map((row) => row.impressions) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
+          ]
+        },
+        options: chartOptions()
+      });
+    }
+    function renderAccounts(accounts) {
+      const host = document.getElementById("accounts");
+      if (!accounts.length) {
+        const empty = document.createElement("p");
+        empty.className = "text-sm text-mute";
+        empty.textContent = "Nenhuma conta ainda. Abra Operações e crie uma pasta.";
+        host.replaceChildren(empty);
+        return;
+      }
+      host.replaceChildren(...accounts.map((account) => {
+        const card = document.createElement("article");
+        card.className = "account-card glow relative cursor-pointer rounded-3xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
+        card.addEventListener("click", (event) => {
+          if (event.target.closest("button")) return;
+          state.openId = state.openId === account.id ? null : account.id;
+          renderAccounts(accounts);
+        });
+        const name = document.createElement("p");
+        name.className = "font-medium text-white";
+        name.textContent = account.display_name || "@" + account.username;
+        const handle = document.createElement("p");
+        handle.className = "text-sm text-mute";
+        handle.textContent = "@" + account.username + " · " + account.folder_name;
+        const grid = document.createElement("dl");
+        grid.className = "mt-4 grid grid-cols-3 gap-2 text-sm";
+        [["Impressões", num(account.impressions)], ["Engajamento", num(account.engagement)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
+          const wrap = document.createElement("div");
+          const dt = document.createElement("dt");
+          dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+          dt.textContent = label;
+          const dd = document.createElement("dd");
+          dd.className = "mt-1 text-white";
+          dd.textContent = value;
+          wrap.append(dt, dd);
+          grid.append(wrap);
+        });
+        const reveal = document.createElement("div");
+        reveal.className = "status-reveal mt-4 flex items-center justify-between gap-2";
+        const badge = document.createElement("span");
+        badge.className = "rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] st-" + (account.status || "none");
+        badge.textContent = account.status_label;
+        const check = document.createElement("button");
+        check.type = "button";
+        check.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        check.textContent = "Verificar";
+        check.addEventListener("click", () => verify(account));
+        reveal.append(badge, check);
+        const note = document.createElement("p");
+        note.className = "status-reveal mt-2 text-[11px] text-mute";
+        note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
+        card.append(name, handle, grid, reveal, note);
+        return card;
+      }));
+    }
+    function renderFolders(folders) {
+      const host = document.getElementById("folder-cards");
+      if (!folders.length) {
+        const empty = document.createElement("p");
+        empty.className = "text-sm text-mute";
+        empty.textContent = "Nenhuma pasta. Crie a primeira acima.";
+        host.replaceChildren(empty);
+        return;
+      }
+      host.replaceChildren(...folders.map((folder) => {
+        const card = document.createElement("div");
+        const on = state.folderId === folder.id;
+        card.className = "glow flex items-start justify-between gap-3 rounded-3xl border px-4 py-5 text-left " + (on ? "border-neon bg-neon/10 shadow-[0_0_28px_rgba(255,46,200,.18)]" : "border-neon/20 bg-card");
+        const info = document.createElement("button");
+        info.type = "button";
+        info.className = "min-w-0 flex-1 text-left";
+        const name = document.createElement("p");
+        name.className = "font-display text-2xl text-white";
+        name.textContent = folder.name;
+        const meta = document.createElement("p");
+        meta.className = "mt-2 text-xs uppercase tracking-[0.14em] text-mute";
+        meta.textContent = folder.accounts + " contas";
+        info.append(name, meta);
+        info.addEventListener("click", () => { state.folderId = folder.id; load(); });
+        const actions = document.createElement("div");
+        actions.className = "flex shrink-0 gap-2";
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        edit.textContent = "Editar";
+        edit.addEventListener("click", () => editFolder(folder));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "rounded-full border border-neon/40 px-3 py-1 text-xs text-mute";
+        remove.textContent = "Excluir";
+        remove.addEventListener("click", () => deleteFolder(folder));
+        actions.append(edit, remove);
+        card.append(info, actions);
+        return card;
+      }));
+    }
+    function renderOpsAccounts(accounts) {
+      const host = document.getElementById("ops-accounts");
+      if (!state.folderId) { host.replaceChildren(); return; }
+      const rows = accounts.filter((account) => account.folder_id === state.folderId);
+      host.replaceChildren(...rows.map((account) => {
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between rounded-2xl border border-neon/15 bg-card px-4 py-3";
+        const label = document.createElement("p");
+        label.textContent = (account.display_name ? account.display_name + " · " : "") + "@" + account.username;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "text-xs text-mute";
+        remove.textContent = "Remover";
+        remove.addEventListener("click", () => removeAccount(account));
+        row.append(label, remove);
+        return row;
+      }));
+    }
+    async function load() {
+      const query = new URLSearchParams({ period: state.period });
+      if (state.folderId) query.set("folder_id", String(state.folderId));
+      try {
+        const data = await api("/api/dashboard?" + query.toString());
+        state.data = data;
+        const banner = document.getElementById("banner");
+        if (!data.token_configured) {
+          banner.textContent = "X_BEARER_TOKEN ausente. O visual lê o banco; Verificar só chama a API do X com o token no .env.";
+          banner.classList.remove("hidden");
+        } else banner.classList.add("hidden");
+        document.getElementById("range-label").textContent = data.start + " → " + data.end;
+        renderKpis(data.kpis);
+        renderCharts(data);
+        renderAccounts(data.accounts);
+        renderFolders(data.folders);
+        renderOpsAccounts(data.accounts);
+      } catch (error) { toast(error.message || "Falha ao carregar."); }
+    }
+    async function verify(account) {
+      try {
+        const result = await api("/api/check/" + encodeURIComponent(account.username) + "?folder_id=" + account.folder_id);
+        toast("@" + account.username + ": " + result.status_label);
+        await load();
+      } catch (error) { toast(error.message || "Falha na verificação."); }
+    }
+    async function editFolder(folder) {
+      const name = prompt("Novo nome da pasta", folder.name);
+      if (!name || !name.trim() || name.trim() === folder.name) return;
+      try {
+        await api("/api/folders/" + folder.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim() })
+        });
+        await load();
+      } catch (error) { toast(error.message || "Não editou a pasta."); }
+    }
+    async function deleteFolder(folder) {
+      if (!confirm("Excluir a pasta " + folder.name + "?")) return;
+      try {
+        await api("/api/folders/" + folder.id, { method: "DELETE" });
+        if (state.folderId === folder.id) state.folderId = null;
+        await load();
+      } catch (error) { toast(error.message || "Não excluiu a pasta."); }
+    }
+    async function removeAccount(account) {
+      if (!confirm("Remover @" + account.username + "?")) return;
+      try { await api("/api/accounts/" + account.id, { method: "DELETE" }); await load(); }
+      catch (error) { toast(error.message || "Não removeu."); }
+    }
+    document.getElementById("nav").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-tab]");
+      if (button) setTab(button.dataset.tab);
+    });
+    document.getElementById("mobile-nav").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-tab]");
+      if (button) setTab(button.dataset.tab);
+    });
+    document.getElementById("period-wrap").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-period]");
+      if (!button) return;
+      setPeriod(button.dataset.period);
+      load();
+    });
+    document.getElementById("folder-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const created = await api("/api/folders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: document.getElementById("folder-name").value, color: "#FF2EC8" })
+        });
+        event.target.reset();
+        state.folderId = created.id;
+        await load();
+      } catch (error) { toast(error.message || "Não criou a pasta."); }
+    });
+    document.getElementById("account-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!state.folderId) { toast("Selecione uma pasta."); return; }
+      try {
+        const created = await api("/api/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            folder_id: state.folderId,
+            username: document.getElementById("account-handle").value,
+            display_name: document.getElementById("account-label").value
+          })
+        });
+        document.getElementById("account-handle").value = "";
+        document.getElementById("account-label").value = "";
+        if (created.warning) toast(created.warning);
+        await load();
+      } catch (error) { toast(error.message || "Não adicionou a conta."); }
+    });
+    document.getElementById("post-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const verdict = document.getElementById("verdict");
+      verdict.classList.remove("hidden");
+      verdict.textContent = "Analisando…";
+      const body = new FormData();
+      body.set("caption", document.getElementById("post-caption").value);
+      const file = document.getElementById("post-media").files[0];
+      if (file) body.set("media", file);
+      try {
+        const result = await api("/api/posts/review", { method: "POST", body });
+        verdict.textContent = result.verdict;
+      } catch (error) {
+        verdict.textContent = error.message || "Não foi possível analisar o post.";
+      }
+    });
+    async function loadSettings() {
+      try {
+        const settings = await api("/api/settings");
+        document.getElementById("tg-chat").value = settings.telegram_chat_id || "";
+        document.getElementById("goal").value = settings.impression_goal;
+        document.getElementById("tg-token").placeholder = settings.telegram_token_set ? "Token já salvo" : "123456:ABC...";
+        document.getElementById("xai-key").placeholder = settings.xai_key_set ? "Chave já salva" : "xai-...";
+        const me = await api("/api/me");
+        document.getElementById("profile-name").value = me.nome_exibicao || "";
+        paintUser(me);
+      } catch (error) { toast(error.message || "Não leu as configurações."); }
+    }
+    document.getElementById("profile-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const body = new FormData();
+      body.set("nome_exibicao", document.getElementById("profile-name").value);
+      const file = document.getElementById("profile-photo").files[0];
+      if (file) body.set("avatar", file);
+      try {
+        paintUser(await api("/api/me", { method: "PATCH", body }));
+        document.getElementById("profile-photo").value = "";
+        toast("Perfil salvo.");
+      } catch (error) { toast(error.message || "Não salvou o perfil."); }
+    });
+    document.getElementById("settings-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const payload = {
+        telegram_chat_id: document.getElementById("tg-chat").value,
+        impression_goal: Number(document.getElementById("goal").value)
+      };
+      const token = document.getElementById("tg-token").value.trim();
+      const xai = document.getElementById("xai-key").value.trim();
+      if (token) payload.telegram_token = token;
+      if (xai) payload.xai_api_key = xai;
+      try {
+        await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        document.getElementById("tg-token").value = "";
+        document.getElementById("xai-key").value = "";
+        toast("Configuração salva.");
+        await loadSettings();
+      } catch (error) { toast(error.message || "Não salvou."); }
+    });
+    document.getElementById("test-note").addEventListener("click", async () => {
+      try {
+        await api("/api/telegram/test", { method: "POST" });
+        toast("Notificação de teste enviada.");
+      } catch (error) { toast(error.message || "O teste falhou."); }
+    });
+    document.getElementById("auth-switch").addEventListener("click", () => {
+      setAuthMode(state.authMode === "login" ? "register" : "login");
+    });
+    document.getElementById("auth-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.getElementById("auth-error");
+      error.classList.add("hidden");
+      const email = document.getElementById("auth-email").value;
+      const senha = document.getElementById("auth-password").value;
+      try {
+        if (state.authMode === "register") {
+          await api("/api/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome: document.getElementById("auth-name").value, email, senha })
+          });
+        }
+        const session = await api("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, senha })
+        });
+        localStorage.setItem(TOKEN_KEY, session.access_token);
+        paintUser(session.user);
+        showAuth(false);
+        setTab("dashboard");
+        await load();
+      } catch (err) {
+        error.textContent = err.message || "Não entrou.";
+        error.classList.remove("hidden");
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (event.target.closest("[data-logout]")) logout();
+    });
+    async function boot() {
+      if (!token()) {
+        showAuth(true);
+        return;
+      }
+      try {
+        paintUser(await api("/api/me"));
+        showAuth(false);
+        setTab("dashboard");
+        await load();
+      } catch (err) {
+        localStorage.removeItem(TOKEN_KEY);
+        showAuth(true);
+      }
+    }
+    setPeriod("today");
+    setAuthMode("login");
+    boot();
+  </script>
+</body>
+</html>
