@@ -78,6 +78,7 @@
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
+        <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Arquivadas</button>
       </nav>
       <div id="user-foot" class="mt-auto flex items-center gap-3 px-2">
         <div data-user-avatar class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
@@ -120,6 +121,18 @@
         </div>
         <p id="banner" class="mt-3 hidden rounded-2xl border border-neon/40 bg-neon/10 px-3 py-2 text-sm text-neon"></p>
       </header>
+
+      <!-- Modal de Confirmação Customizado -->
+      <div id="confirm-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80">
+        <div class="w-full max-w-md rounded-3xl border border-neon/40 bg-card p-6">
+          <h3 id="confirm-title" class="font-display text-xl text-white"></h3>
+          <p id="confirm-message" class="mt-2 text-sm text-mute"></p>
+          <div class="mt-6 flex gap-3">
+            <button id="confirm-cancel" class="flex-1 rounded-2xl border border-neon/40 py-3 text-sm">Cancelar</button>
+            <button id="confirm-ok" class="flex-1 rounded-2xl bg-neon py-3 text-sm font-medium text-ink">Confirmar</button>
+          </div>
+        </div>
+      </div>
       <div class="px-4 py-6 md:px-8">
         <section id="pane-dashboard" class="pane on space-y-6">
           <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
@@ -232,7 +245,7 @@
   </div>
   <script>
     const fmt = new Intl.NumberFormat("pt-BR");
-    const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações" };
+    const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações", archived: "Arquivadas" };
     const TOKEN_KEY = "access_token";
     const state = { tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login" };
     let lineChart = null;
@@ -321,24 +334,31 @@
       const controls = document.getElementById("dashboard-controls");
       if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
       if (tab === "settings") loadSettings();
+      if (tab === "archived") loadArchived();
     }
-    function kpi(label, value, hot) {
+    function kpi(label, value, hot, trend) {
       const card = document.createElement("article");
-      card.className = "glow rounded-3xl border bg-card px-4 py-4 " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
+      card.className = "glow rounded-3xl border bg-card px-4 py-4 relative " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
       const k = document.createElement("p");
       k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
       k.textContent = label;
       const v = document.createElement("p");
       v.className = "mt-2 font-mono text-3xl text-white tracking-tight";
       v.textContent = value;
+      if (trend) {
+        const t = document.createElement("span");
+        t.className = "absolute top-3 right-4 text-lg";
+        t.textContent = trend === "up" ? "📈" : "📉";
+        card.append(t);
+      }
       card.append(k, v);
       return card;
     }
     function renderKpis(kpis) {
       document.getElementById("kpis").replaceChildren(
-        kpi("Impressões", num(kpis.impressions), true),
-        kpi("Engajamento", num(kpis.engagement), false),
-        kpi("Seguidores", num(kpis.followers), false),
+        kpi("Impressões", num(kpis.impressions), true, kpis.trend_impressions),
+        kpi("Engajamento", num(kpis.engagement), false, kpis.trend_engagement),
+        kpi("Seguidores", num(kpis.followers), false, kpis.trend_followers),
         kpi("Contas", num(kpis.accounts), false)
       );
     }
@@ -400,7 +420,7 @@
       }
       host.replaceChildren(...accounts.map((account) => {
         const card = document.createElement("article");
-        card.className = "account-card glow relative cursor-pointer rounded-3xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
+        card.className = "account-card glow relative cursor-pointer rounded-3xl border border-neon/20 bg-card p-6" + (state.openId === account.id ? " is-open" : "");
         card.addEventListener("click", (event) => {
           if (event.target.closest("button")) return;
           state.openId = state.openId === account.id ? null : account.id;
@@ -435,7 +455,20 @@
         check.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
         check.textContent = "Verificar";
         check.addEventListener("click", () => verify(account));
-        reveal.append(badge, check);
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        editBtn.textContent = "Editar";
+        editBtn.addEventListener("click", () => editAccount(account));
+
+        const archiveBtn = document.createElement("button");
+        archiveBtn.type = "button";
+        archiveBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        archiveBtn.textContent = account.is_archived ? "Desarquivar" : "Arquivar";
+        archiveBtn.addEventListener("click", () => toggleArchive(account));
+
+        reveal.append(badge, check, editBtn, archiveBtn);
         const note = document.createElement("p");
         note.className = "status-reveal mt-2 text-[11px] text-mute";
         note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
@@ -541,7 +574,8 @@
       } catch (error) { toast(error.message || "Não editou a pasta."); }
     }
     async function deleteFolder(folder) {
-      if (!confirm("Excluir a pasta " + folder.name + "?")) return;
+      const ok = await showConfirm("Excluir pasta", "Tem certeza que deseja excluir a pasta \"" + folder.name + "\"?");
+      if (!ok) return;
       try {
         await api("/api/folders/" + folder.id, { method: "DELETE" });
         if (state.folderId === folder.id) state.folderId = null;
@@ -549,9 +583,34 @@
       } catch (error) { toast(error.message || "Não excluiu a pasta."); }
     }
     async function removeAccount(account) {
-      if (!confirm("Remover @" + account.username + "?")) return;
+      const ok = await showConfirm("Remover conta", "Tem certeza que deseja remover @" + account.username + "?");
+      if (!ok) return;
       try { await api("/api/accounts/" + account.id, { method: "DELETE" }); await load(); }
       catch (error) { toast(error.message || "Não removeu."); }
+    }
+
+    async function editAccount(account) {
+      const newName = prompt("Novo nome de exibição para @" + account.username, account.display_name || "");
+      if (!newName || newName.trim() === "") return;
+      try {
+        await api("/api/accounts/" + account.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: newName.trim() })
+        });
+        await load();
+      } catch (error) { toast(error.message || "Não editou."); }
+    }
+
+    async function toggleArchive(account) {
+      try {
+        await api("/api/accounts/" + account.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_archived: !account.is_archived })
+        });
+        await load();
+      } catch (error) { toast(error.message || "Não foi possível arquivar/desarquivar."); }
     }
     document.getElementById("nav").addEventListener("click", (event) => {
       const button = event.target.closest("[data-tab]");
@@ -611,10 +670,34 @@
       try {
         const result = await api("/api/posts/review", { method: "POST", body });
         verdict.textContent = result.verdict;
+        // Auto-reset após 1 minuto
+        setTimeout(() => {
+          document.getElementById("post-caption").value = "";
+          document.getElementById("post-media").value = "";
+          verdict.classList.add("hidden");
+        }, 60000);
       } catch (error) {
         verdict.textContent = error.message || "Não foi possível analisar o post.";
       }
     });
+
+    // Botão Limpar manual
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "rounded-2xl border border-neon/40 px-4 py-2 text-sm ml-2";
+    clearBtn.textContent = "Limpar";
+    clearBtn.onclick = () => {
+      document.getElementById("post-caption").value = "";
+      document.getElementById("post-media").value = "";
+      document.getElementById("verdict").classList.add("hidden");
+    };
+    document.getElementById("post-form").appendChild(clearBtn);
+
+    // Nota sobre fotos
+    const note = document.createElement("p");
+    note.className = "text-[10px] text-mute mt-1";
+    note.textContent = "(o arquivo só aceita fotos por enquanto)";
+    document.getElementById("post-form").appendChild(note);
     async function loadSettings() {
       try {
         const settings = await api("/api/settings");
@@ -626,6 +709,35 @@
         document.getElementById("profile-name").value = me.nome_exibicao || "";
         paintUser(me);
       } catch (error) { toast(error.message || "Não leu as configurações."); }
+    }
+
+    async function loadArchived() {
+      const host = document.getElementById("archived-accounts");
+      if (!host) return;
+      try {
+        const data = await api("/api/dashboard?period=total");
+        const archived = (data.accounts || []).filter(a => a.is_archived);
+        if (!archived.length) {
+          host.innerHTML = '<p class="text-sm text-mute">Nenhuma conta arquivada.</p>';
+          return;
+        }
+        host.innerHTML = "";
+        archived.forEach(account => {
+          const div = document.createElement("div");
+          div.className = "flex items-center justify-between rounded-2xl border border-neon/15 bg-card px-4 py-3";
+          div.innerHTML = `
+            <div>
+              <p class="font-medium">${account.display_name || "@" + account.username}</p>
+              <p class="text-xs text-mute">@${account.username}</p>
+            </div>
+            <button class="rounded-full border border-neon/40 px-3 py-1 text-xs">Desarquivar</button>
+          `;
+          div.querySelector("button").onclick = () => toggleArchive(account);
+          host.appendChild(div);
+        });
+      } catch (e) {
+        host.innerHTML = '<p class="text-sm text-mute">Erro ao carregar.</p>';
+      }
     }
     document.getElementById("profile-form").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -710,6 +822,27 @@
     });
     document.addEventListener("click", (event) => {
       if (event.target.closest("[data-logout]")) logout();
+    });
+
+    // Modal de confirmação customizado
+    let confirmResolve = null;
+    function showConfirm(title, message) {
+      return new Promise((resolve) => {
+        confirmResolve = resolve;
+        document.getElementById("confirm-title").textContent = title;
+        document.getElementById("confirm-message").textContent = message;
+        document.getElementById("confirm-modal").classList.remove("hidden");
+      });
+    }
+
+    document.getElementById("confirm-cancel").addEventListener("click", () => {
+      document.getElementById("confirm-modal").classList.add("hidden");
+      if (confirmResolve) confirmResolve(false);
+    });
+
+    document.getElementById("confirm-ok").addEventListener("click", () => {
+      document.getElementById("confirm-modal").classList.add("hidden");
+      if (confirmResolve) confirmResolve(true);
     });
     async function boot() {
       if (!token()) {
