@@ -224,6 +224,7 @@ class User(IntPK, TimestampMixin, Base):
     senha_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nome_exibicao: Mapped[str | None] = mapped_column(String(120), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     folders: Mapped[list[Folder]] = relationship(
         back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
