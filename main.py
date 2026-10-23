@@ -1732,7 +1732,7 @@ async def review_post(
     return {"verdict": verdict}
 
 
-@app.post("/fix-db")
+@app.get("/fix-db")
 def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
     """Rota temporária para adicionar a coluna is_archived.
     Acesse via navegador: https://seu-app.onrender.com/fix-db
