@@ -227,8 +227,36 @@
 💬 Engajamento: [Curtidas+RTs]
 🔗 Link do Post: [Link]</pre>
           </article>
+
+          <!-- Change Password Form -->
+          <form id="password-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
+            <h2 class="font-display text-2xl text-white">Trocar Senha</h2>
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
+            <input id="new-password" type="password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
+            <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Atualizar senha</button>
+          </form>
+
+          <!-- Delete Account -->
+          <div class="glow rounded-3xl border border-red-500/40 bg-card p-6">
+            <h2 class="font-display text-2xl text-white">Excluir Conta</h2>
+            <p class="mt-2 text-sm text-mute">Esta ação é irreversível. Todos os seus dados serão apagados permanentemente.</p>
+            <button id="delete-account-btn" type="button" class="mt-4 rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir Minha Conta</button>
+          </div>
           </div>
         </section>
+
+        <!-- Delete Confirm Modal -->
+        <div id="delete-modal" class="hidden fixed inset-0 z-[110] flex items-center justify-center bg-black/90">
+          <div class="w-full max-w-md rounded-3xl border border-red-500/40 bg-card p-6">
+            <h3 class="font-display text-xl text-white">Excluir conta permanentemente?</h3>
+            <p class="mt-2 text-sm text-mute">Digite <strong>CONFIRM</strong> para confirmar a exclusão da sua conta e todos os dados.</p>
+            <input id="delete-confirm-input" type="text" class="mt-4 w-full rounded-2xl border border-red-500/40 bg-ink px-3 py-3 text-sm outline-none focus:border-red-500" placeholder="CONFIRM">
+            <div class="mt-6 flex gap-3">
+              <button id="delete-cancel" class="flex-1 rounded-2xl border border-neon/40 py-3 text-sm">Cancelar</button>
+              <button id="delete-confirm" class="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-medium text-white hover:bg-red-700" disabled>Excluir</button>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -814,6 +842,63 @@
         toast("Notificação de teste enviada.");
       } catch (error) { toast(error.message || "O teste falhou."); }
     });
+
+    // Change Password
+    document.getElementById("password-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const nova = document.getElementById("new-password").value.trim();
+      if (!nova || nova.length < 8) {
+        toast("Senha deve ter pelo menos 8 caracteres.");
+        return;
+      }
+      try {
+        await api("/api/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nova_senha: nova })
+        });
+        document.getElementById("new-password").value = "";
+        toast("Senha atualizada com sucesso.");
+      } catch (error) { toast(error.message || "Falha ao trocar senha."); }
+    });
+
+    // Delete Account with CONFIRM modal
+    const deleteBtn = document.getElementById("delete-account-btn");
+    const deleteModal = document.getElementById("delete-modal");
+    const deleteInput = document.getElementById("delete-confirm-input");
+    const deleteConfirmBtn = document.getElementById("delete-confirm");
+    const deleteCancelBtn = document.getElementById("delete-cancel");
+
+    deleteBtn.addEventListener("click", () => {
+      deleteInput.value = "";
+      deleteConfirmBtn.disabled = true;
+      deleteModal.classList.remove("hidden");
+      deleteInput.focus();
+    });
+
+    deleteCancelBtn.addEventListener("click", () => {
+      deleteModal.classList.add("hidden");
+    });
+
+    deleteInput.addEventListener("input", () => {
+      deleteConfirmBtn.disabled = deleteInput.value.trim().toUpperCase() !== "CONFIRM";
+    });
+
+    deleteConfirmBtn.addEventListener("click", async () => {
+      if (deleteInput.value.trim().toUpperCase() !== "CONFIRM") return;
+      deleteModal.classList.add("hidden");
+      try {
+        await api("/api/me", { method: "DELETE" });
+        toast("Conta excluída. Saindo...");
+        setTimeout(() => {
+          localStorage.removeItem(TOKEN_KEY);
+          location.reload();
+        }, 1200);
+      } catch (error) {
+        toast(error.message || "Falha ao excluir conta.");
+      }
+    });
+
     document.getElementById("refresh-all").addEventListener("click", async () => {
       const btn = document.getElementById("refresh-all");
       const orig = btn.textContent;
