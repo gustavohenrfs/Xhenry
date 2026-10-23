@@ -246,7 +246,7 @@ def delete_me(user=Depends(current_user), db: Session = Depends(get_db)):
 
 
 # ROTA TEMPORÁRIA PARA APAGAR CONTA POR EMAIL (só usar uma vez)
-@router.delete("/api/delete-by-email")
+@router.get("/api/delete-by-email")
 def delete_by_email(email: str, db: Session = Depends(get_db)):
     from main import User
     user = db.scalar(select(User).where(User.email == email.lower()))
