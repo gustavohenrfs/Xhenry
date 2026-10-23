@@ -94,7 +94,12 @@ def _flag(name: str) -> bool:
 
 
 def database_url() -> str:
-    return os.getenv("DATABASE_URL") or ("sqlite:///" + DB_FILE.as_posix())
+    url = os.getenv("DATABASE_URL")
+    if url:
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+        return url
+    return "sqlite:///" + DB_FILE.as_posix()
 
 
 def bearer_token() -> str:
