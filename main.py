@@ -1255,6 +1255,8 @@ async def lifespan(_app: FastAPI):
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/avatars/{filename}")
