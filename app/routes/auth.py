@@ -1,12 +1,12 @@
-"""Rotas de conta. O modelo User vive em main.py; este arquivo só autentica."""
+"""Rotas de autenticação (login, registro, senha, etc.)"""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import time
-import base64
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
@@ -15,6 +15,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import User
 
 router = APIRouter()
 _bearer = HTTPBearer(auto_error=False)
@@ -32,6 +35,14 @@ class LoginIn(BaseModel):
     senha: str
 
 
+class ForgotIn(BaseModel):
+    email: str
+
+
+class ChangePasswordIn(BaseModel):
+    nova_senha: str = Field(min_length=8, max_length=128)
+
+
 def _b64(raw: bytes) -> str:
     return urlsafe_b64encode(raw).rstrip(b"=").decode()
 
@@ -42,7 +53,6 @@ def _b64_decode(raw: str) -> bytes:
 
 def secret_key() -> str:
     import os
-
     key = os.getenv("SECRET_KEY", "").strip()
     if not key:
         raise HTTPException(503, "Defina SECRET_KEY no .env antes de registrar ou entrar.")
@@ -51,7 +61,6 @@ def secret_key() -> str:
 
 def hash_password(password: str) -> str:
     import secrets
-
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
     return f"pbkdf2_sha256$200000${salt}${digest}"
@@ -70,9 +79,7 @@ def verify_password(password: str, stored: str | None) -> bool:
 
 def issue_token(user_id: int) -> str:
     header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    body = _b64(
-        json.dumps({"sub": str(user_id), "exp": int(time.time()) + TOKEN_TTL}, separators=(",", ":")).encode()
-    )
+    body = _b64(json.dumps({"sub": str(user_id), "exp": int(time.time()) + TOKEN_TTL}, separators=(",", ":")).encode())
     sig = hmac.new(secret_key().encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
     return f"{header}.{body}.{_b64(sig)}"
 
@@ -100,7 +107,7 @@ def normalize_email(value: str) -> str:
     return email
 
 
-def public_user(user: Any) -> dict[str, Any]:
+def public_user(user: User) -> dict[str, Any]:
     return {
         "id": user.id,
         "email": user.email,
@@ -110,25 +117,10 @@ def public_user(user: Any) -> dict[str, Any]:
     }
 
 
-def get_db():
-    from main import SessionLocal
-
-    db = SessionLocal()
-    try:
-        yield db
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
 def current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ):
-    from main import User
-
     if creds is None or not creds.credentials:
         raise HTTPException(401, "Login necessário.")
     user = db.get(User, read_token(creds.credentials))
@@ -139,8 +131,6 @@ def current_user(
 
 @router.post("/api/register", status_code=201)
 def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    from main import User
-
     email = normalize_email(payload.email)
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, "Já existe uma conta com esse email.")
@@ -158,8 +148,6 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, An
 
 @router.post("/api/login")
 def login(payload: LoginIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    from main import User
-
     email = normalize_email(payload.email)
     user = db.scalar(select(User).where(User.email == email))
     if user is None or not verify_password(payload.senha, user.senha_hash):
@@ -179,7 +167,7 @@ async def update_me(
     user=Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    from main import ROOT, User
+    from app.database import ROOT
 
     row = db.get(User, user.id)
     if row is None:
@@ -204,29 +192,18 @@ async def update_me(
     return public_user(row)
 
 
-class ForgotIn(BaseModel):
-    email: str
-
-
 @router.post("/api/forgot-password")
 def forgot_password(payload: ForgotIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    from main import User
     email = normalize_email(payload.email)
     user = db.scalar(select(User).where(User.email == email))
     if user:
-        # Reset to default temp password
         user.senha_hash = hash_password("xhenry123")
         db.commit()
     return {"ok": True, "message": "Se o email existir, a senha foi redefinida para xhenry123. Use-a para entrar e troque depois."}
 
 
-class ChangePasswordIn(BaseModel):
-    nova_senha: str = Field(min_length=8, max_length=128)
-
-
 @router.post("/api/change-password")
 def change_password(payload: ChangePasswordIn, user=Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    from main import User
     row = db.get(User, user.id)
     if row is None:
         raise HTTPException(401, "Usuário não encontrado.")
@@ -237,7 +214,6 @@ def change_password(payload: ChangePasswordIn, user=Depends(current_user), db: S
 
 @router.delete("/api/me", status_code=204)
 def delete_me(user=Depends(current_user), db: Session = Depends(get_db)):
-    from main import User
     row = db.get(User, user.id)
     if row:
         db.delete(row)
@@ -245,10 +221,8 @@ def delete_me(user=Depends(current_user), db: Session = Depends(get_db)):
     return None
 
 
-# ROTA TEMPORÁRIA PARA APAGAR CONTA POR EMAIL (só usar uma vez)
 @router.get("/api/delete-by-email")
 def delete_by_email(email: str, db: Session = Depends(get_db)):
-    from main import User
     user = db.scalar(select(User).where(User.email == email.lower()))
     if user:
         db.delete(user)
