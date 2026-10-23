@@ -586,7 +586,7 @@
       } catch (error) { toast(error.message || "Falha na verificação."); }
     }
     async function editFolder(folder) {
-      const name = prompt("Novo nome da pasta", folder.name);
+      const name = await showPrompt("Novo nome da pasta", folder.name);
       if (!name || !name.trim() || name.trim() === folder.name) return;
       try {
         await api("/api/folders/" + folder.id, {
@@ -614,7 +614,7 @@
     }
 
     async function editAccount(account) {
-      const newName = prompt("Novo nome de exibição para @" + account.username, account.display_name || "");
+      const newName = await showPrompt("Novo nome de exibição para @" + account.username, account.display_name || "");
       if (!newName || newName.trim() === "") return;
       try {
         await api("/api/accounts/" + account.id, {
@@ -633,6 +633,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ is_archived: !account.is_archived })
         });
+        toast(account.is_archived ? "Conta desarquivada." : "Conta arquivada.");
         await load();
       } catch (error) { toast(error.message || "Não foi possível arquivar/desarquivar."); }
     }
@@ -850,6 +851,7 @@
 
     // Modal de confirmação customizado
     let confirmResolve = null;
+    let promptResolve = null;
     function showConfirm(title, message) {
       return new Promise((resolve) => {
         confirmResolve = resolve;
@@ -859,14 +861,30 @@
       });
     }
 
+    function showPrompt(title, defaultValue = "") {
+      return new Promise((resolve) => {
+        promptResolve = resolve;
+        const titleEl = document.getElementById("confirm-title");
+        const messageEl = document.getElementById("confirm-message");
+        titleEl.textContent = title;
+        messageEl.innerHTML = `<input id="prompt-input" type="text" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" value="${defaultValue.replace(/"/g, '&quot;')}">`;
+        document.getElementById("confirm-modal").classList.remove("hidden");
+      });
+    }
+
     document.getElementById("confirm-cancel").addEventListener("click", () => {
       document.getElementById("confirm-modal").classList.add("hidden");
       if (confirmResolve) confirmResolve(false);
+      if (promptResolve) promptResolve(null);
     });
 
     document.getElementById("confirm-ok").addEventListener("click", () => {
       document.getElementById("confirm-modal").classList.add("hidden");
       if (confirmResolve) confirmResolve(true);
+      if (promptResolve) {
+        const input = document.getElementById("prompt-input");
+        promptResolve(input ? input.value : null);
+      }
     });
     async function boot() {
       if (!token()) {
