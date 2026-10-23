@@ -164,3 +164,9 @@ class XAccount(IntPK, TimestampMixin, Base):
 
 # (Rest of the models would continue here in a full extraction - HealthCheck, DailyMetric, etc.)
 # For brevity in this step, the core models are moved. Full extraction can continue in next steps.
+class AppSetting(IntPK, Base):
+    __tablename__ = "app_settings"
+    telegram_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    impression_goal: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
+    xai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
