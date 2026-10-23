@@ -1404,6 +1404,25 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=204)
 
 
+class AccountUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=80)
+    is_archived: bool | None = None
+
+
+@app.patch("/api/accounts/{account_id}")
+def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    account = db.get(XAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Conta não encontrada.")
+    if payload.display_name is not None:
+        account.display_name = payload.display_name.strip() or None
+    if payload.is_archived is not None:
+        account.is_archived = payload.is_archived
+    db.commit()
+    db.refresh(account)
+    return {"id": account.id, "display_name": account.display_name, "is_archived": account.is_archived}
+
+
 @app.get("/api/check/{handle}")
 def check_account(
     handle: str,
