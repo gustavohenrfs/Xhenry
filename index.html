@@ -41,8 +41,8 @@
     .glow { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
     .glow:hover {
       transform: translateY(-5px);
-      border-color: rgba(255, 46, 200, .72);
-      box-shadow: 0 0 0 1px rgba(255, 46, 200, .28), 0 16px 42px rgba(255, 46, 200, .16);
+      border-color: rgba(255, 46, 200, .85);
+      box-shadow: 0 0 0 1px rgba(255, 46, 200, .6), 0 0 18px rgba(255, 46, 200, .55), 0 20px 50px rgba(255, 46, 200, .25);
     }
     .status-reveal { opacity: 0; transform: translateY(6px); transition: opacity .18s ease, transform .18s ease; }
     .account-card:hover .status-reveal,
@@ -97,7 +97,7 @@
             <p data-user-name class="max-w-24 truncate text-sm text-white">—</p>
             <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
           </div>
-          <div class="flex items-center gap-3">
+          <div id="dashboard-controls" class="flex items-center gap-3">
             <button id="refresh-all" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
             <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
               <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
@@ -108,7 +108,8 @@
               <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
               <button type="button" data-period="total" class="period rounded-full px-3 py-1.5 text-mute">Total</button>
             </div>
-            <input type="date" id="specific-date" class="rounded-full border border-neon/30 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-neon" />
+            <div id="date-display" class="cursor-pointer rounded-full border border-neon/30 bg-ink px-4 py-1.5 text-sm text-white font-mono select-none" title="Clique para escolher data">24/10/2026</div>
+            <input type="date" id="specific-date" class="hidden" />
           </div>
         </div>
         <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
@@ -317,7 +318,8 @@
       document.querySelectorAll(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
       document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("on", pane.id === "pane-" + tab));
       document.getElementById("heading").textContent = titles[tab];
-      document.getElementById("period-wrap").classList.toggle("invisible", tab !== "dashboard");
+      const controls = document.getElementById("dashboard-controls");
+      if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
       if (tab === "settings") loadSettings();
     }
     function kpi(label, value, hot) {
@@ -724,6 +726,41 @@
         showAuth(true);
       }
     }
+    // Date display + native picker
+    const dateDisplay = document.getElementById("date-display");
+    const dateInput = document.getElementById("specific-date");
+
+    function formatBR(d) {
+      return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, "/");
+    }
+
+    function updateDateDisplay() {
+      if (!dateDisplay || !dateInput) return;
+      const val = dateInput.value;
+      if (val) {
+        const [y, m, d] = val.split("-").map(Number);
+        const dt = new Date(y, m - 1, d);
+        dateDisplay.textContent = formatBR(dt);
+      } else {
+        const today = new Date();
+        dateDisplay.textContent = formatBR(today);
+        dateInput.value = today.toISOString().slice(0, 10);
+      }
+    }
+
+    if (dateDisplay && dateInput) {
+      dateDisplay.addEventListener("click", () => {
+        if (dateInput.showPicker) dateInput.showPicker();
+        else dateInput.click();
+      });
+      dateInput.addEventListener("change", () => {
+        updateDateDisplay();
+        // optional: trigger load with new date if needed
+        if (state.tab === "dashboard") load();
+      });
+      updateDateDisplay();
+    }
+
     setPeriod("today");
     setAuthMode("login");
     boot();

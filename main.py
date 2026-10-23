@@ -549,9 +549,9 @@ def period_window(period: str, today: date | None = None) -> tuple[date, date]:
     if period in {"yesterday", "ontem"}:
         day = today - timedelta(days=1)
         return day, day
-    span = {"7d": 7, "30d": 30, "1y": 365, "365d": 365}.get(period)
+    span = {"7d": 7, "30d": 30, "3m": 90, "1y": 365, "365d": 365, "total": 3650}.get(period)
     if span is None:
-        raise HTTPException(400, "Período inválido. Use today, yesterday, 7d, 30d ou 1y.")
+        raise HTTPException(400, "Período inválido. Use today, yesterday, 7d, 30d, 3m, 1y ou total.")
     return today - timedelta(days=span - 1), today
 
 
