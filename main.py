@@ -224,6 +224,7 @@ class User(IntPK, TimestampMixin, Base):
     senha_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nome_exibicao: Mapped[str | None] = mapped_column(String(120), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     folders: Mapped[list[Folder]] = relationship(
         back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
@@ -1753,7 +1754,7 @@ async def review_post(
 
 @app.get("/fix-db")
 def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
-    """Rota temporária para adicionar a coluna is_archived.
+    """Rota temporária para adicionar colunas novas.
     Acesse via navegador: https://seu-app.onrender.com/fix-db
     Depois de usar, pode remover esta rota.
     """
@@ -1762,8 +1763,12 @@ def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
             ALTER TABLE x_accounts 
             ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
         """))
+        db.execute(text("""
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS logo_url VARCHAR(512);
+        """))
         db.commit()
-        return {"status": "ok", "message": "Coluna is_archived adicionada com sucesso!"}
+        return {"status": "ok", "message": "Colunas atualizadas com sucesso!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

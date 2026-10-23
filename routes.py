@@ -106,6 +106,7 @@ def public_user(user: Any) -> dict[str, Any]:
         "email": user.email,
         "nome_exibicao": user.nome_exibicao or user.name,
         "avatar_url": user.avatar_url,
+        "logo_url": user.logo_url,
     }
 
 
