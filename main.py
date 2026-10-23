@@ -21,24 +21,9 @@ from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-
-from app.schemas import AccountIn, FolderIn, SettingsIn, TokenMissing
-from app.models import (
-    AppSetting,
-    DailyMetric,
-    Folder,
-    FolderDailyMetric,
-    HealthCheck,
-    TweetSample,
-    User,
-    XAccount,
-)
-from app.utils import ensure_owner, get_settings, normalize_username
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -58,7 +43,6 @@ from sqlalchemy import (
     event,
     func,
     select,
-    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -110,14 +94,7 @@ def _flag(name: str) -> bool:
 
 
 def database_url() -> str:
-    url = os.getenv("DATABASE_URL")
-    if url:
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql+psycopg://", 1)
-        elif url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-        return url
-    return "sqlite:///" + DB_FILE.as_posix()
+    return os.getenv("DATABASE_URL") or ("sqlite:///" + DB_FILE.as_posix())
 
 
 def bearer_token() -> str:
@@ -126,6 +103,10 @@ def bearer_token() -> str:
 
 def token_configured() -> bool:
     return bool(bearer_token())
+
+
+class Base(DeclarativeBase):
+    pass
 
 
 def _is_sqlite(url: str) -> bool:
@@ -227,6 +208,20 @@ class TimestampMixin:
     )
 
 
+class User(IntPK, TimestampMixin, Base):
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    senha_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    nome_exibicao: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    folders: Mapped[list[Folder]] = relationship(
+        back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
 class Folder(IntPK, TimestampMixin, Base):
     __tablename__ = "folders"
     __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_folders_owner_name"),)
@@ -263,7 +258,6 @@ class XAccount(IntPK, TimestampMixin, Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     is_protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
-    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_health_status: Mapped[HealthStatus | None] = mapped_column(_enum(HealthStatus, "health_status"), nullable=True)
@@ -448,6 +442,30 @@ class DayBaseline(IntPK, Base):
     drop_alerted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
 
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    kind: FolderKind = FolderKind.CUSTOM
+    description: str | None = Field(default=None, max_length=2000)
+    color: str = "#E0B15A"
+
+
+class AccountIn(BaseModel):
+    folder_id: int
+    username: str = Field(min_length=1, max_length=16)
+    display_name: str | None = Field(default=None, max_length=80)
+
+
+class SettingsIn(BaseModel):
+    telegram_token: str | None = None
+    telegram_chat_id: str | None = None
+    impression_goal: int | None = Field(default=None, ge=1, le=10_000_000)
+    xai_api_key: str | None = None
+
+
+class TokenMissing(Exception):
+    pass
+
+
 def get_db() -> Iterator[Session]:
     db = SessionLocal()
     try:
@@ -524,9 +542,9 @@ def period_window(period: str, today: date | None = None) -> tuple[date, date]:
     if period in {"yesterday", "ontem"}:
         day = today - timedelta(days=1)
         return day, day
-    span = {"7d": 7, "30d": 30, "3m": 90, "1y": 365, "365d": 365, "total": 3650}.get(period)
+    span = {"7d": 7, "30d": 30, "1y": 365, "365d": 365}.get(period)
     if span is None:
-        raise HTTPException(400, "Período inválido. Use today, yesterday, 7d, 30d, 3m, 1y ou total.")
+        raise HTTPException(400, "Período inválido. Use today, yesterday, 7d, 30d ou 1y.")
     return today - timedelta(days=span - 1), today
 
 
@@ -1222,15 +1240,13 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     }
 
 
-from app.database import Base, SessionLocal, engine, get_db
-from app.utils import ensure_owner
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     Base.metadata.create_all(bind=engine)
+    ensure_user_auth_columns()
     with SessionLocal() as db:
         ensure_owner(db)
     log.info("token X: %s", "configurado" if token_configured() else "ausente")
@@ -1239,18 +1255,9 @@ async def lifespan(_app: FastAPI):
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
+from routes import router
 
-# Servir arquivos estáticos e templates
-app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
-templates = Jinja2Templates(directory=ROOT / "templates")
-
-from app.routes.auth import router as auth_router
-from app.routes.accounts import router as accounts_router
-from app.routes.checks import router as checks_router
-
-app.include_router(auth_router)
-app.include_router(accounts_router)
-app.include_router(checks_router)
+app.include_router(router)
 
 
 @app.get("/avatars/{filename}")
@@ -1268,8 +1275,10 @@ def avatar_file(filename: str) -> FileResponse:
 
 
 @app.get("/")
-async def root(request: Request):
-    return templates.TemplateResponse(request=request, name="index.html")
+def root() -> FileResponse:
+    if not INDEX.is_file():
+        raise HTTPException(500, "index.html não está ao lado do main.py.")
+    return FileResponse(INDEX, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/favicon.ico")
@@ -1386,25 +1395,6 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=204)
 
 
-class AccountUpdate(BaseModel):
-    display_name: str | None = Field(default=None, max_length=80)
-    is_archived: bool | None = None
-
-
-@app.patch("/api/accounts/{account_id}")
-def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
-    account = db.get(XAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "Conta não encontrada.")
-    if payload.display_name is not None:
-        account.display_name = payload.display_name.strip() or None
-    if payload.is_archived is not None:
-        account.is_archived = payload.is_archived
-    db.commit()
-    db.refresh(account)
-    return {"id": account.id, "display_name": account.display_name, "is_archived": account.is_archived}
-
-
 @app.get("/api/check/{handle}")
 def check_account(
     handle: str,
@@ -1429,21 +1419,6 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
         seen.add(account.username)
         results.append(check_handle(db, account.username, folder_id))
     return {"checked": len(results), "results": results}
-
-
-@app.post("/api/refresh-all")
-def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
-    if not token_configured():
-        raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
-    accounts = selected_accounts(db, folder_id)
-    refreshed = 0
-    for account in accounts:
-        try:
-            check_handle(db, account.username, folder_id)
-            refreshed += 1
-        except Exception:
-            pass
-    return {"refreshed": refreshed, "total": len(accounts)}
 
 
 @app.get("/api/dashboard")
@@ -1731,27 +1706,6 @@ async def review_post(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
     return {"verdict": verdict}
-
-
-@app.get("/fix-db")
-def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
-    """Rota temporária para adicionar colunas novas.
-    Acesse via navegador: https://seu-app.onrender.com/fix-db
-    Depois de usar, pode remover esta rota.
-    """
-    try:
-        db.execute(text("""
-            ALTER TABLE x_accounts 
-            ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
-        """))
-        db.execute(text("""
-            ALTER TABLE users 
-            ADD COLUMN IF NOT EXISTS logo_url VARCHAR(512);
-        """))
-        db.commit()
-        return {"status": "ok", "message": "Colunas atualizadas com sucesso!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":
