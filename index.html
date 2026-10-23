@@ -97,12 +97,18 @@
             <p data-user-name class="max-w-24 truncate text-sm text-white">—</p>
             <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
           </div>
-          <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
-            <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
-            <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
-            <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
-            <button type="button" data-period="30d" class="period rounded-full px-3 py-1.5 text-mute">30 dias</button>
-            <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
+          <div class="flex items-center gap-3">
+            <button id="refresh-all" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
+            <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
+              <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
+              <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
+              <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
+              <button type="button" data-period="30d" class="period rounded-full px-3 py-1.5 text-mute">30 dias</button>
+              <button type="button" data-period="3m" class="period rounded-full px-3 py-1.5 text-mute">3 meses</button>
+              <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
+              <button type="button" data-period="total" class="period rounded-full px-3 py-1.5 text-mute">Total</button>
+            </div>
+            <input type="date" id="specific-date" class="rounded-full border border-neon/30 bg-ink px-3 py-1.5 text-sm text-white outline-none focus:border-neon" />
           </div>
         </div>
         <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
@@ -321,7 +327,7 @@
       k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
       k.textContent = label;
       const v = document.createElement("p");
-      v.className = "mt-2 font-display text-3xl text-white";
+      v.className = "mt-2 font-mono text-3xl text-white tracking-tight";
       v.textContent = value;
       card.append(k, v);
       return card;
@@ -654,6 +660,19 @@
         await api("/api/telegram/test", { method: "POST" });
         toast("Notificação de teste enviada.");
       } catch (error) { toast(error.message || "O teste falhou."); }
+    });
+    document.getElementById("refresh-all").addEventListener("click", async () => {
+      const btn = document.getElementById("refresh-all");
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Atualizando...";
+      try {
+        await api("/api/refresh-all", { method: "POST" });
+        toast("Dados atualizados com sucesso.");
+        await load();
+      } catch (error) { toast(error.message || "Falha ao atualizar."); }
+      btn.disabled = false;
+      btn.textContent = orig;
     });
     document.getElementById("auth-switch").addEventListener("click", () => {
       setAuthMode(state.authMode === "login" ? "register" : "login");

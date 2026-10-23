@@ -1421,6 +1421,21 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
     return {"checked": len(results), "results": results}
 
 
+@app.post("/api/refresh-all")
+def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
+    if not token_configured():
+        raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
+    accounts = selected_accounts(db, folder_id)
+    refreshed = 0
+    for account in accounts:
+        try:
+            check_handle(db, account.username, folder_id)
+            refreshed += 1
+        except Exception:
+            pass
+    return {"refreshed": refreshed, "total": len(accounts)}
+
+
 @app.get("/api/dashboard")
 def get_dashboard(
     period: str = Query(default="7d"),
