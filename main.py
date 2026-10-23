@@ -1255,9 +1255,6 @@ async def lifespan(_app: FastAPI):
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
-from routes import router
-
-app.include_router(router)
 
 
 @app.get("/avatars/{filename}")
