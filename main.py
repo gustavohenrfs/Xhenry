@@ -43,6 +43,7 @@ from sqlalchemy import (
     event,
     func,
     select,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -1729,6 +1730,23 @@ async def review_post(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
     return {"verdict": verdict}
+
+
+@app.post("/fix-db")
+def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Rota temporária para adicionar a coluna is_archived.
+    Acesse via navegador: https://seu-app.onrender.com/fix-db
+    Depois de usar, pode remover esta rota.
+    """
+    try:
+        db.execute(text("""
+            ALTER TABLE x_accounts 
+            ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+        """))
+        db.commit()
+        return {"status": "ok", "message": "Coluna is_archived adicionada com sucesso!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":
