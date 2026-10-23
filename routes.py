@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import time
+import base64
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
@@ -194,13 +195,9 @@ async def update_me(
         kind = (avatar.content_type or "").lower()
         if kind not in {"image/jpeg", "image/jpg", "image/png"}:
             raise HTTPException(400, "Use JPG ou PNG.")
-        suffix = "png" if kind == "image/png" else "jpg"
-        folder = ROOT / "data" / "avatars"
-        folder.mkdir(parents=True, exist_ok=True)
-        for old in folder.glob(f"{row.id}.*"):
-            old.unlink(missing_ok=True)
-        (folder / f"{row.id}.{suffix}").write_bytes(raw)
-        row.avatar_url = f"/avatars/{row.id}.{suffix}"
+        mime = "image/png" if kind == "image/png" else "image/jpeg"
+        b64 = base64.b64encode(raw).decode("ascii")
+        row.avatar_url = f"data:{mime};base64,{b64}"
     db.commit()
     db.refresh(row)
     return public_user(row)

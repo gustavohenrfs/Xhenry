@@ -291,9 +291,15 @@
       document.querySelectorAll("[data-user-avatar]").forEach((el) => {
         el.replaceChildren();
         const url = user && user.avatar_url;
-        if (url && (String(url).startsWith("https://") || String(url).startsWith("/"))) {
+        if (url && (String(url).startsWith("https://") || String(url).startsWith("data:") || String(url).startsWith("/"))) {
           const img = document.createElement("img");
-          img.src = String(url).startsWith("/") ? url + "?v=" + Date.now() : url;
+          if (String(url).startsWith("data:")) {
+            img.src = url;
+          } else if (String(url).startsWith("/")) {
+            img.src = url + "?v=" + Date.now();
+          } else {
+            img.src = url;
+          }
           img.alt = "";
           img.className = "h-full w-full rounded-full object-cover";
           el.append(img);
