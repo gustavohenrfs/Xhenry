@@ -1,14 +1,29 @@
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+import base64
+import secrets
+import httpx
+from datetime import datetime
+from typing import Any
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app.utils import ensure_owner, normalize_username
+from app.schemas import FolderIn, AccountIn
 import app.models as models
+from app.models import Folder, XAccount, AppSetting, AlertSent, DayBaseline, HealthStatus
 
 router = APIRouter()
 
-@app.get("/api/folders")
+# --- Funções auxiliares importadas do main ou definidas aqui ---
+# (Caso algumas dessas funções estejam no main.py, você pode precisar ajustar os imports no futuro)
+from main import check_handle, dashboard, selected_accounts, period_window, build_suggestions, token_configured, log, now_utc, engagement_of, metric_value, parse_time, as_utc, zone, STATUS_LABELS, DEFAULT_TZ, ROOT
+
+@router.get("/api/folders")
 def list_folders(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     rows = db.scalars(select(Folder).where(Folder.is_archived.is_(False)).order_by(Folder.name)).all()
     return [
@@ -23,8 +38,7 @@ def list_folders(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
         for row in rows
     ]
 
-
-@app.post("/api/folders", status_code=201)
+@router.post("/api/folders", status_code=201)
 def create_folder(payload: FolderIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     if not payload.color.startswith("#") or len(payload.color) != 7:
         raise HTTPException(400, "Cor inválida. Use #RRGGBB.")
@@ -45,8 +59,7 @@ def create_folder(payload: FolderIn, db: Session = Depends(get_db)) -> dict[str,
     db.refresh(folder)
     return {"id": folder.id, "name": folder.name, "kind": folder.kind.value, "color": folder.color}
 
-
-@app.patch("/api/folders/{folder_id}")
+@router.patch("/api/folders/{folder_id}")
 def update_folder(folder_id: int, payload: FolderIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     folder = db.get(Folder, folder_id)
     if folder is None:
@@ -59,8 +72,7 @@ def update_folder(folder_id: int, payload: FolderIn, db: Session = Depends(get_d
     db.commit()
     return {"id": folder.id, "name": folder.name}
 
-
-@app.delete("/api/folders/{folder_id}", status_code=204)
+@router.delete("/api/folders/{folder_id}", status_code=204)
 def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
     folder = db.get(Folder, folder_id)
     if folder is None:
@@ -69,8 +81,7 @@ def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
     db.commit()
     return Response(status_code=204)
 
-
-@app.post("/api/accounts", status_code=201)
+@router.post("/api/accounts", status_code=201)
 def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     folder = db.get(Folder, payload.folder_id)
     if folder is None or folder.is_archived:
@@ -95,14 +106,10 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
     try:
         checked = check_handle(db, username, folder.id)
     except HTTPException as exc:
-        if exc.status_code == 503:
-            warning = str(exc.detail)
-        else:
-            warning = str(exc.detail)
+        warning = str(exc.detail)
     return {"id": account.id, "folder_id": folder.id, "username": username, "warning": warning, "check": checked}
 
-
-@app.delete("/api/accounts/{account_id}", status_code=204)
+@router.delete("/api/accounts/{account_id}", status_code=204)
 def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     account = db.get(XAccount, account_id)
     if account is None:
@@ -111,13 +118,11 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     db.commit()
     return Response(status_code=204)
 
-
 class AccountUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=80)
     is_archived: bool | None = None
 
-
-@app.patch("/api/accounts/{account_id}")
+@router.patch("/api/accounts/{account_id}")
 def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
     account = db.get(XAccount, account_id)
     if account is None:
@@ -130,8 +135,7 @@ def update_account(account_id: int, payload: AccountUpdate, db: Session = Depend
     db.refresh(account)
     return {"id": account.id, "display_name": account.display_name, "is_archived": account.is_archived}
 
-
-@app.get("/api/check/{handle}")
+@router.get("/api/check/{handle}")
 def check_account(
     handle: str,
     folder_id: int | None = Query(default=None),
@@ -139,8 +143,7 @@ def check_account(
 ) -> dict[str, Any]:
     return check_handle(db, normalize_username(handle), folder_id)
 
-
-@app.post("/api/check-all")
+@router.post("/api/check-all")
 def check_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not token_configured():
         raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
@@ -156,8 +159,7 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
         results.append(check_handle(db, account.username, folder_id))
     return {"checked": len(results), "results": results}
 
-
-@app.post("/api/refresh-all")
+@router.post("/api/refresh-all")
 def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not token_configured():
         raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
@@ -171,8 +173,7 @@ def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depen
             pass
     return {"refreshed": refreshed, "total": len(accounts)}
 
-
-@app.get("/api/dashboard")
+@router.get("/api/dashboard")
 def get_dashboard(
     period: str = Query(default="7d"),
     folder_id: int | None = Query(default=None),
@@ -180,8 +181,7 @@ def get_dashboard(
 ) -> dict[str, Any]:
     return dashboard(db, period, folder_id)
 
-
-@app.get("/api/suggestions")
+@router.get("/api/suggestions")
 def get_suggestions(
     period: str = Query(default="7d"),
     folder_id: int | None = Query(default=None),
@@ -189,7 +189,6 @@ def get_suggestions(
 ) -> dict[str, Any]:
     start, end = period_window(period)
     return build_suggestions(db, selected_accounts(db, folder_id), start, end)
-
 
 def get_settings(db: Session) -> AppSetting:
     row = db.get(AppSetting, 1)
@@ -200,18 +199,15 @@ def get_settings(db: Session) -> AppSetting:
         db.refresh(row)
     return row
 
-
 def telegram_creds(db: Session) -> tuple[str, str]:
     row = get_settings(db)
     token = (row.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     chat = (row.telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip()
     return token, chat
 
-
 def xai_key(db: Session) -> str:
     row = get_settings(db)
     return (row.xai_api_key or os.getenv("XAI_API_KEY") or "").strip()
-
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
     if not token or not chat_id:
@@ -232,7 +228,6 @@ def send_telegram(token: str, chat_id: str, text: str) -> None:
             detail = ""
         raise HTTPException(502, detail or "O Telegram recusou a mensagem.")
 
-
 def viral_message(name: str, username: str, gain: int, when: str, likes: int, reposts: int, link: str) -> str:
     return (
         "🚀 Post viralizando!\n"
@@ -242,7 +237,6 @@ def viral_message(name: str, username: str, gain: int, when: str, likes: int, re
         f"💬 Engajamento: {likes + reposts}\n"
         f"🔗 Link do Post: {link}"
     )
-
 
 def try_send(db: Session, key: str, kind: str, text: str) -> bool:
     token, chat = telegram_creds(db)
@@ -258,7 +252,6 @@ def try_send(db: Session, key: str, kind: str, text: str) -> bool:
     db.add(AlertSent(dedupe_key=key, kind=kind, detail=text[:500], sent_at=now_utc()))
     db.commit()
     return True
-
 
 def dispatch_alerts(
     db: Session,
@@ -324,7 +317,6 @@ def dispatch_alerts(
         baseline.drop_alerted = sent or baseline.drop_alerted
     db.commit()
 
-
 def settings_payload(row: AppSetting) -> dict[str, Any]:
     return {
         "telegram_token_set": bool(row.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")),
@@ -332,7 +324,6 @@ def settings_payload(row: AppSetting) -> dict[str, Any]:
         "impression_goal": row.impression_goal,
         "xai_key_set": bool(row.xai_api_key or os.getenv("XAI_API_KEY")),
     }
-
 
 def grok_text(body: dict) -> str:
     parts: list[str] = []
@@ -350,7 +341,6 @@ def grok_text(body: dict) -> str:
         if isinstance(content, str):
             parts.append(content)
     return "\n".join(part.strip() for part in parts if part and part.strip())
-
 
 def ask_grok(key: str, caption: str, image_uri: str | None) -> str:
     prompt = (
@@ -390,8 +380,7 @@ def ask_grok(key: str, caption: str, image_uri: str | None) -> str:
         raise HTTPException(502, "A xAI não devolveu um veredito legível.") from exc
     return text or "A análise não devolveu texto."
 
-
-@app.post("/api/posts/review")
+@router.post("/api/posts/review")
 async def review_post(
     caption: str = Form(...),
     media: UploadFile | None = File(default=None),
@@ -427,13 +416,8 @@ async def review_post(
             tmp_path.unlink(missing_ok=True)
     return {"verdict": verdict}
 
-
-@app.get("/fix-db")
+@router.get("/fix-db")
 def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
-    """Rota temporária para adicionar colunas novas.
-    Acesse via navegador: https://seu-app.onrender.com/fix-db
-    Depois de usar, pode remover esta rota.
-    """
     try:
         db.execute(text("""
             ALTER TABLE x_accounts 
@@ -447,10 +431,3 @@ def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
         return {"status": "ok", "message": "Colunas atualizadas com sucesso!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
-
