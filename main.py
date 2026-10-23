@@ -54,7 +54,7 @@ from sqlalchemy.orm import (
 )
 
 ROOT = Path(__file__).resolve().parent
-INDEX = ROOT / "index.html"
+INDEX = ROOT / "templates" / "index.html"
 DB_FILE = ROOT / "data" / "suzana.db"
 X_API = "https://api.x.com/2"
 LOCAL_EMAIL = "local@suzana"
