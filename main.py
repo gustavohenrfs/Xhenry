@@ -21,8 +21,10 @@ from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import (
     BigInteger,
@@ -1265,8 +1267,12 @@ async def lifespan(_app: FastAPI):
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
-from routes import router
 
+# Servir arquivos estáticos e templates
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+templates = Jinja2Templates(directory=ROOT / "templates")
+
+from routes import router
 app.include_router(router)
 
 
@@ -1285,10 +1291,8 @@ def avatar_file(filename: str) -> FileResponse:
 
 
 @app.get("/")
-def root() -> FileResponse:
-    if not INDEX.is_file():
-        raise HTTPException(500, "index.html não está ao lado do main.py.")
-    return FileResponse(INDEX, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+async def root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/favicon.ico")
