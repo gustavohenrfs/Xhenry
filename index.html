@@ -199,11 +199,17 @@
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-token">Token do bot</label>
-            <input id="tg-token" type="password" autocomplete="off" placeholder="123456:ABC..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <div class="relative">
+              <input id="tg-token" type="password" autocomplete="off" placeholder="123456:ABC..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 pr-10 text-sm outline-none focus:border-neon">
+              <button type="button" data-toggle="tg-token" class="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-white">👁️</button>
+            </div>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-chat">Chat ID</label>
             <input id="tg-chat" placeholder="-1001234567890" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="xai-key">Chave da xAI (análise do post)</label>
-            <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <div class="relative">
+              <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 pr-10 text-sm outline-none focus:border-neon">
+              <button type="button" data-toggle="xai-key" class="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-white">👁️</button>
+            </div>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de impressões</label>
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
@@ -411,14 +417,15 @@
     }
     function renderAccounts(accounts) {
       const host = document.getElementById("accounts");
-      if (!accounts.length) {
+      const visible = accounts.filter((a) => !a.is_archived);
+      if (!visible.length) {
         const empty = document.createElement("p");
         empty.className = "text-sm text-mute";
         empty.textContent = "Nenhuma conta ainda. Abra Operações e crie uma pasta.";
         host.replaceChildren(empty);
         return;
       }
-      host.replaceChildren(...accounts.map((account) => {
+      host.replaceChildren(...visible.map((account) => {
         const card = document.createElement("article");
         card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
         card.addEventListener("click", (event) => {
@@ -886,6 +893,23 @@
         promptResolve(input ? input.value : null);
       }
     });
+
+    // Toggle senha (olho) para campos de token e xai-key
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-toggle]");
+      if (!btn) return;
+      const id = btn.dataset.toggle;
+      const input = document.getElementById(id);
+      if (!input) return;
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈";
+      } else {
+        input.type = "password";
+        btn.textContent = "👁️";
+      }
+    });
+
     async function boot() {
       if (!token()) {
         showAuth(true);
