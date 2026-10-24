@@ -192,11 +192,8 @@ def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depen
     accounts = selected_accounts(db, folder_id)
     refreshed = 0
     for account in accounts:
-        try:
-            check_handle(db, account.username, folder_id)
-            refreshed += 1
-        except Exception:
-            pass
+        check_handle(db, account.username, folder_id)
+        refreshed += 1
     return {"refreshed": refreshed, "total": len(accounts)}
 
 
