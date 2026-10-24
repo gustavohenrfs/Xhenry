@@ -93,4 +93,18 @@ def debug_metrics(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     ]
 
 
+@router.get("/debug-limpar")
+def debug_limpar(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Rota temporária para limpar dados antigos.
+    Executa DELETEs para limpar lixo de 2013 e dados anteriores a 2026-10-20.
+    Acesse via navegador: /debug-limpar
+    """
+    try:
+        db.execute(text("DELETE FROM daily_metrics WHERE metric_date < '2026-10-20'"))
+        db.execute(text("DELETE FROM tweet_samples WHERE posted_at < '2026-10-20'"))
+        db.commit()
+        return {"status": "ok", "message": "Dados antigos removidos com sucesso!"}
+    except Exception as e:
+        db.rollback()
+        return {"status": "error", "message": str(e)}
 
