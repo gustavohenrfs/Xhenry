@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -106,7 +106,7 @@ def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
 
 
 @router.post("/api/accounts", status_code=201)
-def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+def create_account(payload: AccountIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> dict[str, Any]:
     folder = db.get(Folder, payload.folder_id)
     if folder is None or folder.is_archived:
         raise HTTPException(404, "Pasta não encontrada.")
@@ -125,16 +125,17 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
     db.add(account)
     db.commit()
     db.refresh(account)
-    warning = None
-    checked = None
-    try:
-        checked = check_handle(db, username, folder.id)
-    except HTTPException as exc:
-        if exc.status_code == 503:
-            warning = str(exc.detail)
-        else:
-            warning = str(exc.detail)
-    return {"id": account.id, "folder_id": folder.id, "username": username, "warning": warning, "check": checked}
+
+    # Retorna imediatamente; verificação roda em background para não travar a UI
+    def _background_check():
+        try:
+            check_handle(db, username, folder.id)
+        except Exception:
+            pass
+
+    background_tasks.add_task(_background_check)
+
+    return {"id": account.id, "folder_id": folder.id, "username": username, "warning": None, "check": None}
 
 
 @router.delete("/api/accounts/{account_id}", status_code=204)
