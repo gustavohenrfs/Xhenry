@@ -179,11 +179,11 @@ async def update_me(
     row.name = name
     if avatar is not None and avatar.filename:
         raw = await avatar.read()
-        if not raw or len(raw) > 2_000_000:
-            raise HTTPException(400, "A foto deve ter até 2 MB.")
+        if not raw or len(raw) > 10_000_000:
+            raise HTTPException(400, "A imagem é muito grande ou o formato é inválido")
         kind = (avatar.content_type or "").lower()
         if kind not in {"image/jpeg", "image/jpg", "image/png"}:
-            raise HTTPException(400, "Use JPG ou PNG.")
+            raise HTTPException(400, "A imagem é muito grande ou o formato é inválido")
         mime = "image/png" if kind == "image/png" else "image/jpeg"
         b64 = base64.b64encode(raw).decode("ascii")
         row.avatar_url = f"data:{mime};base64,{b64}"

@@ -10,6 +10,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@360;480;580&family=Syne:wght@620;750&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
   <script>
     tailwind.config = {
       theme: {
@@ -274,6 +276,21 @@
       <button id="auth-switch" class="mt-3 w-full text-xs text-mute" type="button">Criar conta</button>
     </form>
   </div>
+
+  <!-- Cropper Modal -->
+  <div id="crop-modal" class="auth-modal off">
+    <div class="w-full max-w-lg rounded-3xl border border-neon/30 bg-panel p-6">
+      <p class="font-display text-xl text-white mb-4">Recortar foto (1080×1080)</p>
+      <div class="relative bg-ink rounded-2xl overflow-hidden">
+        <img id="crop-image" class="max-h-[60vh] w-full object-contain" />
+      </div>
+      <div class="mt-4 flex gap-3">
+        <button id="crop-cancel" type="button" class="flex-1 rounded-2xl border border-neon/40 px-4 py-3 text-sm">Cancelar</button>
+        <button id="crop-confirm" type="button" class="flex-1 rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink">Confirmar recorte</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const fmt = new Intl.NumberFormat("pt-BR");
     const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações", archived: "Arquivadas" };

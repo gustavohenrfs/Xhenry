@@ -5,6 +5,8 @@ const state = { tab: "dashboard", period: "today", folderId: null, data: null, o
 let lineChart = null;
 let barChart = null;
 let toastTimer = 0;
+let croppedFile = null;
+let cropper = null;
 if (window.Chart) {
   Chart.defaults.color = "#b39ab4";
   Chart.defaults.borderColor = "rgba(255,46,200,.12)";
@@ -529,14 +531,72 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
   event.preventDefault();
   const body = new FormData();
   body.set("nome_exibicao", document.getElementById("profile-name").value);
-  const file = document.getElementById("profile-photo").files[0];
-  if (file) body.set("avatar", file);
+  const originalFile = document.getElementById("profile-photo").files[0];
+  const avatarFile = croppedFile || originalFile;
+  if (avatarFile) body.set("avatar", avatarFile);
   try {
     paintUser(await api("/api/me", { method: "PATCH", body }));
     document.getElementById("profile-photo").value = "";
+    croppedFile = null;
     toast("Perfil salvo.");
   } catch (error) { toast(error.message || "Não salvou o perfil."); }
 });
+
+// Cropper.js integration for 1080x1080 square crop
+const profilePhotoInput = document.getElementById("profile-photo");
+const cropModal = document.getElementById("crop-modal");
+const cropImage = document.getElementById("crop-image");
+const cropCancel = document.getElementById("crop-cancel");
+const cropConfirm = document.getElementById("crop-confirm");
+
+if (profilePhotoInput) {
+  profilePhotoInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      cropImage.src = ev.target.result;
+      cropModal.classList.remove("off");
+      if (cropper) cropper.destroy();
+      cropper = new Cropper(cropImage, {
+        aspectRatio: 1,
+        viewMode: 1,
+        autoCropArea: 1,
+        responsive: true,
+        background: false,
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+if (cropCancel) {
+  cropCancel.addEventListener("click", () => {
+    if (cropper) {
+      cropper.destroy();
+      cropper = null;
+    }
+    cropModal.classList.add("off");
+    if (profilePhotoInput) profilePhotoInput.value = "";
+    croppedFile = null;
+  });
+}
+
+if (cropConfirm) {
+  cropConfirm.addEventListener("click", () => {
+    if (!cropper) return;
+    const canvas = cropper.getCroppedCanvas({ width: 1080, height: 1080 });
+    canvas.toBlob((blob) => {
+      if (blob) {
+        croppedFile = new File([blob], "avatar.jpg", { type: "image/jpeg" });
+      }
+      cropper.destroy();
+      cropper = null;
+      cropModal.classList.add("off");
+    }, "image/jpeg", 0.9);
+  });
+}
+
 document.getElementById("settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = {
