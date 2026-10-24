@@ -1,10 +1,10 @@
-html, body { background: #07050a; color: #fff7fc; min-height: 100%; }
+html, body { min-height: 100%; }
 body {
   font-family: Outfit, sans-serif;
-  background:
-    radial-gradient(circle at top left, rgba(255,0,127,0.15), transparent 40%),
-    radial-gradient(circle at bottom right, rgba(128,0,255,0.15), transparent 40%),
-    #0a0a0a;
+  background: transparent; /* DEIXAR TRANSPARENTE PARA VER AS ESFERAS */
+  position: relative;
+  overflow-x: hidden;
+  color: #fff7fc;
 }
 
 /* Space Grotesk for titles, numbers, metrics, sidebar */
