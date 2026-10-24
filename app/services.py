@@ -436,70 +436,69 @@ def save_snapshot_only(db: Session, account: XAccount, metrics: dict | None) -> 
 
 def collect_via_apify(username: str) -> dict[str, dict]:
     """Busca métricas (views, likes, RTs, replies) EXCLUSIVAMENTE via Apify.
-    Tenta eiv/twitter-scraper primeiro, fallback para scrapelabsapi/twitter-tweets-scraper.
+    Usa apenas eiv/twitter-scraper (ator público confiável).
     Nenhuma outra API (TwitterAPI.io removida, X oficial só para health/profile).
     """
     token = os.getenv("APIFY_TOKEN", "").strip()
     if not token or not username:
         return {}
 
-    actors = ["eiv/twitter-scraper", "scrapelabsapi/twitter-tweets-scraper"]
-    for actor in actors:
-        try:
-            client = ApifyClient(token)
-            run_input = {
-                "profiles": [username],
-                "max_items": 50,
-            }
-            run = client.actor(actor).call(run_input=run_input)
-            dataset_id = getattr(run, "defaultDatasetId", None) or getattr(run, "default_dataset_id", None)
-            if not dataset_id:
+    # Apenas ator público confiável (evita erro de permissão em fallback)
+    actor = "eiv/twitter-scraper"
+    try:
+        client = ApifyClient(token)
+        run_input = {
+            "profiles": [username],
+            "max_items": 50,
+        }
+        run = client.actor(actor).call(run_input=run_input)
+        dataset_id = getattr(run, "defaultDatasetId", None) or getattr(run, "default_dataset_id", None)
+        if not dataset_id:
+            return {}
+        items = client.dataset(dataset_id).list_items().items or []
+        result = {}
+        for t in items:
+            if not isinstance(t, dict):
                 continue
-            items = client.dataset(dataset_id).list_items().items or []
-            result = {}
-            for t in items:
-                if not isinstance(t, dict):
-                    continue
-                tid = str(t.get("id") or t.get("tweet_id") or "")
-                if not tid:
-                    continue
-                # Normaliza campos (viewCount, views, view_count etc.)
-                v = t.get("viewCount") or t.get("views") or t.get("view_count")
-                if isinstance(v, str):
-                    try:
-                        v = int(v)
-                    except ValueError:
-                        v = None
-                l = t.get("likeCount") or t.get("like_count") or t.get("likes")
-                if isinstance(l, str):
-                    try:
-                        l = int(l)
-                    except ValueError:
-                        l = None
-                r = t.get("retweetCount") or t.get("retweet_count") or t.get("retweets")
-                if isinstance(r, str):
-                    try:
-                        r = int(r)
-                    except ValueError:
-                        r = None
-                p = t.get("replyCount") or t.get("reply_count") or t.get("replies")
-                if isinstance(p, str):
-                    try:
-                        p = int(p)
-                    except ValueError:
-                        p = None
-                result[tid] = {
-                    "view_count": v,
-                    "like_count": l,
-                    "retweet_count": r,
-                    "reply_count": p,
-                }
-            if result:
-                return result
-        except Exception as exc:
-            log.warning("Apify actor %s error for @%s: %s", actor, username, exc)
-            continue
-    return {}
+            tid = str(t.get("id") or t.get("tweet_id") or "")
+            if not tid:
+                continue
+            # Campos mais comuns para views em scrapers do Apify
+            v = (t.get("viewCount") or t.get("views") or t.get("view_count")
+                 or t.get("view_count") or t.get("impressionCount"))
+            if isinstance(v, str):
+                try:
+                    v = int(v)
+                except ValueError:
+                    v = None
+            l = t.get("likeCount") or t.get("like_count") or t.get("likes")
+            if isinstance(l, str):
+                try:
+                    l = int(l)
+                except ValueError:
+                    l = None
+            r = t.get("retweetCount") or t.get("retweet_count") or t.get("retweets")
+            if isinstance(r, str):
+                try:
+                    r = int(r)
+                except ValueError:
+                    r = None
+            p = t.get("replyCount") or t.get("reply_count") or t.get("replies")
+            if isinstance(p, str):
+                try:
+                    p = int(p)
+                except ValueError:
+                    p = None
+            result[tid] = {
+                "view_count": v,
+                "like_count": l,
+                "retweet_count": r,
+                "reply_count": p,
+            }
+        return result
+    except Exception as exc:
+        log.warning("Apify actor %s error for @%s: %s", actor, username, exc)
+        return {}
 
 
 def collect(username: str) -> dict[str, Any]:
