@@ -216,7 +216,7 @@ function renderAccounts(accounts) {
     handle.textContent = "@" + account.username + " · " + account.folder_name;
     const grid = document.createElement("dl");
     grid.className = "mt-4 grid grid-cols-3 gap-2 text-sm";
-    [["Impressões", num(account.impressions)], ["Engajamento", num(account.engagement)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
+    [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
       dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
@@ -309,7 +309,7 @@ function renderOpsAccounts(accounts) {
     handle.textContent = "@" + account.username + " · " + account.folder_name;
     const grid = document.createElement("dl");
     grid.className = "mt-3 grid grid-cols-3 gap-2 text-sm";
-    [["Impressões", num(account.impressions)], ["Engajamento", num(account.engagement)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
+    [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
       dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
