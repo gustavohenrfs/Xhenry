@@ -66,3 +66,17 @@ def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
         return {"status": "ok", "message": "Colunas atualizadas com sucesso!"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/fix-avatar")
+def fix_avatar_column(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Rota temporária para alterar avatar_url para TEXT.
+    Acesse via navegador: https://seu-app.onrender.com/fix-avatar
+    Depois de usar, pode remover esta rota.
+    """
+    try:
+        db.execute(text("ALTER TABLE users ALTER COLUMN avatar_url TYPE TEXT;"))
+        db.commit()
+        return {"status": "ok", "message": "Coluna avatar_url alterada para TEXT com sucesso!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
