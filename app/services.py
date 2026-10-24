@@ -466,16 +466,17 @@ def collect(username: str) -> dict[str, Any]:
                 )
                 if resp.status_code == 200:
                     tw_data = resp.json()
+                    log.info("TwitterAPI.io response for @%s: %s", username, str(tw_data)[:500])
                     tw_tweets = tw_data.get("data", []) if isinstance(tw_data, dict) else []
                     tw_map = {}
                     for t in tw_tweets:
                         tid = str(t.get("id") or t.get("tweet_id") or "")
                         if tid:
                             tw_map[tid] = {
-                                "view_count": t.get("viewCount") or t.get("views"),
-                                "like_count": t.get("likeCount") or t.get("likes"),
-                                "retweet_count": t.get("retweetCount") or t.get("retweets"),
-                                "reply_count": t.get("replyCount") or t.get("replies"),
+                                "view_count": t.get("viewCount") or t.get("view_count") or t.get("views"),
+                                "like_count": t.get("likeCount") or t.get("like_count") or t.get("likes"),
+                                "retweet_count": t.get("retweetCount") or t.get("retweet_count") or t.get("retweets"),
+                                "reply_count": t.get("replyCount") or t.get("reply_count") or t.get("replies"),
                             }
                     for t in timeline:
                         tid = str(t.get("id") or "")
@@ -485,7 +486,8 @@ def collect(username: str) -> dict[str, Any]:
                             pm["like_count"] = tw_map[tid].get("like_count")
                             pm["retweet_count"] = tw_map[tid].get("retweet_count")
                             pm["reply_count"] = tw_map[tid].get("reply_count")
-        except Exception:
+        except Exception as exc:
+            log.warning("TwitterAPI.io error for @%s: %s", username, exc)
             pass
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
@@ -824,6 +826,10 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             }
         )
     followers = [card["followers"] for card in cards if card["followers"] is not None]
+    views_values = [card.get("views") for card in cards if card.get("views") is not None]
+    likes_values = [card.get("likes") for card in cards if card.get("likes") is not None]
+    retweets_values = [card.get("retweets") for card in cards if card.get("retweets") is not None]
+    replies_values = [card.get("replies") for card in cards if card.get("replies") is not None]
     impression_values = [card["impressions"] for card in cards if card["impressions"] is not None]
     return {
         "period": period,
@@ -836,6 +842,10 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             "search_ban": sum(1 for card in cards if card["status"] == "search_ban"),
             "ghost_ban": sum(1 for card in cards if card["status"] == "ghost_ban"),
             "followers": sum(followers) if followers else None,
+            "views": sum(views_values) if views_values else None,
+            "likes": sum(likes_values) if likes_values else None,
+            "retweets": sum(retweets_values) if retweets_values else None,
+            "replies": sum(replies_values) if replies_values else None,
             "engagement": sum(int(card["engagement"] or 0) for card in cards),
             "impressions": sum(impression_values) if impression_values else None,
         },
