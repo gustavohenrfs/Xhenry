@@ -38,6 +38,11 @@ function showAuth(on) {
 function paintUser(user) {
   const name = user ? (user.nome_exibicao || user.email || "—") : "—";
   document.querySelectorAll("[data-user-name]").forEach((el) => { el.textContent = name; });
+  const greet = document.getElementById("greeting-name");
+  if (greet && user) {
+    const handle = user.username || (user.email ? user.email.split("@")[0] : "nome");
+    greet.textContent = "@" + handle;
+  }
   document.querySelectorAll("[data-user-avatar]").forEach((el) => {
     el.replaceChildren();
     const url = user && user.avatar_url;

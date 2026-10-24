@@ -7,7 +7,7 @@
   <title>XHenry</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@360;480;580&family=Syne:wght@620;750&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@360;480;580&family=Syne:wght@620;750&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
@@ -16,7 +16,7 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: { display: ["Syne", "sans-serif"], sans: ["Outfit", "sans-serif"] },
+          fontFamily: { display: ["Space Grotesk", "Syne", "sans-serif"], sans: ["Outfit", "Space Grotesk", "sans-serif"] },
           colors: {
             ink: "#07050a",
             panel: "#100914",
@@ -69,6 +69,11 @@
   </style>
 </head>
 <body class="bg-ink text-blush">
+  <div id="bg-orbs">
+    <div class="orb pink"></div>
+    <div class="orb purple"></div>
+    <div class="orb gold"></div>
+  </div>
   <div class="flex min-h-screen">
     <aside class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-neon/20 bg-panel px-4 py-6 md:flex">
       <div class="px-2">
@@ -135,6 +140,9 @@
       </div>
       <div class="px-4 py-6 md:px-8">
         <section id="pane-dashboard" class="pane on space-y-6">
+          <div class="text-center mb-6">
+            <p class="text-lg tracking-wide text-mute">Bem vindo, <span id="greeting-name" class="font-display text-[22px] metallic-pink glow-slow"></span></p>
+          </div>
           <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
           <div class="grid gap-4 xl:grid-cols-5">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
@@ -329,6 +337,11 @@
     function paintUser(user) {
       const name = user ? (user.nome_exibicao || user.email || "—") : "—";
       document.querySelectorAll("[data-user-name]").forEach((el) => { el.textContent = name; });
+      const greet = document.getElementById("greeting-name");
+      if (greet && user) {
+        const handle = user.username || (user.email ? user.email.split("@")[0] : "nome");
+        greet.textContent = "@" + handle;
+      }
       document.querySelectorAll("[data-user-avatar]").forEach((el) => {
         el.replaceChildren();
         const url = user && user.avatar_url;

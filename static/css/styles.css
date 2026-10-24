@@ -1,5 +1,75 @@
 html, body { background: #07050a; color: #fff7fc; min-height: 100%; }
 body { font-family: Outfit, sans-serif; }
+
+/* Space Grotesk for titles, numbers, metrics, sidebar */
+.font-display, h1, h2, .nav-btn, .kpi-value, [id^="greeting"], .font-mono {
+  font-family: 'Space Grotesk', Outfit, sans-serif !important;
+  font-feature-settings: "tnum";
+}
+
+/* Metallic pink + slow glow for @nome */
+.metallic-pink {
+  color: #ff7ac2;
+  background: linear-gradient(90deg, #ff2ec8, #ffd6f2, #ff2ec8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 8px rgba(255, 46, 200, .6);
+}
+.glow-slow {
+  animation: glow-pulse 4s ease-in-out infinite;
+}
+@keyframes glow-pulse {
+  0%, 100% { text-shadow: 0 0 8px rgba(255, 46, 200, .6); }
+  50% { text-shadow: 0 0 22px rgba(255, 46, 200, .95), 0 0 38px rgba(180, 80, 220, .5); }
+}
+
+/* Premium Space Command Background */
+body {
+  background:
+    radial-gradient(ellipse at 20% 15%, rgba(255,46,200,.18) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 85%, rgba(140,80,220,.22) 0%, transparent 60%),
+    #07050a;
+  position: relative;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: 
+    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+  mix-blend-mode: screen;
+}
+
+/* Floating light orbs (mesh spheres) */
+#bg-orbs {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: .55;
+  animation: orb-float 28s ease-in-out infinite;
+}
+.orb.pink { background: #ff2ec8; width: 420px; height: 420px; top: 8%; left: 12%; animation-delay: 0s; }
+.orb.purple { background: #8c50dc; width: 380px; height: 380px; bottom: 12%; right: 18%; animation-delay: -9s; }
+.orb.gold { background: #d4af37; width: 320px; height: 320px; top: 55%; left: 65%; animation-delay: -18s; }
+
+@keyframes orb-float {
+  0%,100% { transform: translate(0,0) scale(1); }
+  25% { transform: translate(35px, -28px) scale(1.04); }
+  50% { transform: translate(-22px, 32px) scale(0.96); }
+  75% { transform: translate(18px, -15px) scale(1.02); }
+}
 ::selection { background: #ff2ec8; color: #1a0412; }
 .nav-btn { color: #b39ab4; border: 1px solid transparent; }
 .nav-btn.active {
