@@ -482,39 +482,34 @@
     }
     function renderCharts(data) {
       if (!window.Chart) return;
-      if (lineChart) lineChart.destroy();
-      if (barChart) barChart.destroy();
-      lineChart = new Chart(document.getElementById("line-chart"), {
-        type: "line",
-        data: {
-          labels: data.series.map((row) => row.date.slice(5)),
-          datasets: [{
-            label: "Engajamento",
-            data: data.series.map((row) => row.engagement),
-            borderColor: "#ff2ec8",
-            backgroundColor: "rgba(255,46,200,.16)",
-            fill: true,
-            tension: 0.35,
-            pointRadius: data.series.length > 40 ? 0 : 3,
-            borderWidth: 2
-          }]
-        },
-        options: chartOptions()
-      });
+      const lineData = {
+        labels: data.series.map((row) => row.date.slice(5)),
+        datasets: [{
+          label: "Engajamento",
+          data: data.series.map((row) => row.engagement),
+          borderColor: "#ff2ec8",
+          backgroundColor: "rgba(255,46,200,.16)",
+          fill: true,
+          tension: 0.35,
+          pointRadius: data.series.length > 40 ? 0 : 3,
+          borderWidth: 2
+        }]
+      };
       const names = data.by_account.map((row) => "@" + row.username);
       const hasViews = data.by_account.some((row) => row.views !== null && row.views !== undefined);
       document.getElementById("bar-caption").textContent = hasViews ? "Engajamento e views" : "Engajamento — views ainda não vieram da API";
-      barChart = new Chart(document.getElementById("bar-chart"), {
-        type: "bar",
-        data: {
-          labels: names.length ? names : ["—"],
-          datasets: [
-            { label: "Engajamento", data: names.length ? data.by_account.map((row) => row.engagement) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 },
-            { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
-          ]
-        },
-        options: chartOptions()
-      });
+      const barData = {
+        labels: names.length ? names : ["—"],
+        datasets: [
+          { label: "Engajamento", data: names.length ? data.by_account.map((row) => row.engagement) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 },
+          { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
+        ]
+      };
+      // Atualiza os gráficos no lugar (sem destruir/recriar), para não piscar no auto-refresh.
+      if (lineChart) { lineChart.data = lineData; lineChart.update("none"); }
+      else lineChart = new Chart(document.getElementById("line-chart"), { type: "line", data: lineData, options: chartOptions() });
+      if (barChart) { barChart.data = barData; barChart.update("none"); }
+      else barChart = new Chart(document.getElementById("bar-chart"), { type: "bar", data: barData, options: chartOptions() });
     }
     function renderAccounts(accounts) {
       const host = document.getElementById("accounts");
@@ -674,22 +669,35 @@
       el.textContent = "Última coleta: " + stamp + " (" + ago + ")";
       if (mins > 90) el.classList.add("text-amber-300");
     }
-    async function load() {
+    let loadSeq = 0;
+    let loadInflight = false;
+    let lastSig = "";
+    async function load({ silent = false } = {}) {
+      if (silent && loadInflight) return;       // auto-refresh nunca empilha requisições
+      const seq = ++loadSeq;
+      loadInflight = true;
       const query = new URLSearchParams({ period: state.period });
       if (state.folderId) query.set("folder_id", String(state.folderId));
       try {
         const data = await api("/api/dashboard?" + query.toString());
-        state.data = data;
-        const banner = document.getElementById("banner");
-        banner.classList.add("hidden");
-        document.getElementById("range-label").textContent = data.start + " → " + data.end;
+        if (seq !== loadSeq) return;            // chegou uma resposta mais nova: descarta esta
         renderLastCollect(data.last_collected_at);
+        const sig = JSON.stringify(data);
+        if (silent && sig === lastSig) return;  // nada mudou: não mexe no DOM (zero flicker)
+        lastSig = sig;
+        state.data = data;
+        document.getElementById("banner").classList.add("hidden");
+        document.getElementById("range-label").textContent = data.start + " → " + data.end;
         renderKpis(data.kpis);
         renderCharts(data);
         renderAccounts(data.accounts);
         renderFolders(data.folders);
         renderOpsAccounts(data.accounts);
-      } catch (error) { toast(error.message || "Falha ao carregar."); }
+      } catch (error) {
+        if (!silent) toast(error.message || "Falha ao carregar.");
+      } finally {
+        if (seq === loadSeq) loadInflight = false;
+      }
     }
     async function verify(account) {
       try {
@@ -1115,6 +1123,14 @@
 
     setPeriod("today");
     setAuthMode("login");
+    // Auto-refresh: a cada 60s, só na aba Dashboard, com a página visível e logado.
+    const AUTO_REFRESH_MS = 60000;
+    function autoRefresh() {
+      if (state.tab === "dashboard" && token() && !document.hidden) load({ silent: true });
+    }
+    setInterval(autoRefresh, AUTO_REFRESH_MS);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) autoRefresh(); });
+
     boot();
   </script>
 </body>
