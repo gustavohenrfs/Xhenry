@@ -9,4 +9,3 @@ opencv-python-headless>=4.10.0.84
 jinja2
 passlib[bcrypt]
 pyjwt
-apify-client>=1.8.0

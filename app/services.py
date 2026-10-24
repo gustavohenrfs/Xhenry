@@ -1,4 +1,9 @@
-"""Lógica de negócio compartilhada pelos roteadores."""
+"""Lógica de negócio compartilhada pelos roteadores.
+
+Dashboard lê tweet_samples e daily_metrics.
+A API oficial do X entra só no health check (/api/check).
+Métricas de tweets vêm do robo.py no VPS.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,6 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import httpx
-from apify_client import ApifyClient
 from fastapi import HTTPException
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
@@ -22,7 +26,6 @@ from app.models import (
     AlertSent,
     AppSetting,
     DailyMetric,
-    DayBaseline,
     Folder,
     FolderDailyMetric,
     HealthCheck,
@@ -434,74 +437,8 @@ def save_snapshot_only(db: Session, account: XAccount, metrics: dict | None) -> 
     rebuild_folder_day(db, account.folder_id, day)
 
 
-def collect_via_apify(username: str) -> dict[str, dict]:
-    """Busca métricas (views, likes, RTs, replies) EXCLUSIVAMENTE via Apify.
-    Usa apenas eiv/twitter-scraper (ator público confiável).
-    Nenhuma outra API (TwitterAPI.io removida, X oficial só para health/profile).
-    """
-    token = os.getenv("APIFY_TOKEN", "").strip()
-    if not token or not username:
-        return {}
-
-    # Apenas ator público confiável (evita erro de permissão em fallback)
-    actor = "eiv/twitter-scraper"
-    try:
-        client = ApifyClient(token)
-        run_input = {
-            "profiles": [username],
-            "max_items": 50,
-        }
-        run = client.actor(actor).call(run_input=run_input)
-        dataset_id = getattr(run, "defaultDatasetId", None) or getattr(run, "default_dataset_id", None)
-        if not dataset_id:
-            return {}
-        items = client.dataset(dataset_id).list_items().items or []
-        result = {}
-        for t in items:
-            if not isinstance(t, dict):
-                continue
-            tid = str(t.get("id") or t.get("tweet_id") or "")
-            if not tid:
-                continue
-            # Campos mais comuns para views em scrapers do Apify
-            v = (t.get("viewCount") or t.get("views") or t.get("view_count")
-                 or t.get("view_count") or t.get("impressionCount"))
-            if isinstance(v, str):
-                try:
-                    v = int(v)
-                except ValueError:
-                    v = None
-            l = t.get("likeCount") or t.get("like_count") or t.get("likes")
-            if isinstance(l, str):
-                try:
-                    l = int(l)
-                except ValueError:
-                    l = None
-            r = t.get("retweetCount") or t.get("retweet_count") or t.get("retweets")
-            if isinstance(r, str):
-                try:
-                    r = int(r)
-                except ValueError:
-                    r = None
-            p = t.get("replyCount") or t.get("reply_count") or t.get("replies")
-            if isinstance(p, str):
-                try:
-                    p = int(p)
-                except ValueError:
-                    p = None
-            result[tid] = {
-                "view_count": v,
-                "like_count": l,
-                "retweet_count": r,
-                "reply_count": p,
-            }
-        return result
-    except Exception as exc:
-        log.warning("Apify actor %s error for @%s: %s", actor, username, exc)
-        return {}
-
-
-def collect(username: str) -> dict[str, Any]:
+def collect_health(username: str) -> dict[str, Any]:
+    """Health check via API oficial. Não grava métricas de tweets."""
     profile_status, profile_body = lookup_user(username)
     data = profile_body.get("data") if isinstance(profile_body.get("data"), dict) else None
     user_id = str(data.get("id")) if data and data.get("id") else None
@@ -518,17 +455,6 @@ def collect(username: str) -> dict[str, Any]:
             timeline = tweet_rows(timeline_body, user_id)
         search_status, search_body = search_recent(username)
         search_ids = {str(row["id"]) for row in tweet_rows(search_body, user_id)}
-
-    # Apify para Views, Likes, RTs e Replies (exclusivo agora)
-    apify_map = collect_via_apify(username)
-    for t in timeline:
-        tid = str(t.get("id") or "")
-        if tid in apify_map:
-            pm = t.setdefault("public_metrics", {})
-            pm["view_count"] = apify_map[tid].get("view_count")
-            pm["like_count"] = apify_map[tid].get("like_count")
-            pm["retweet_count"] = apify_map[tid].get("retweet_count")
-            pm["reply_count"] = apify_map[tid].get("reply_count")
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
     return {
@@ -588,18 +514,10 @@ def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> 
             },
         )
     )
-    days: set[date] = set()
-    for raw in signals["timeline"]:
-        day = upsert_tweet(db, account, raw)
-        if day:
-            days.add(day)
     metrics = None
     if signals["data"] and isinstance(signals["data"].get("public_metrics"), dict):
         metrics = signals["data"]["public_metrics"]
-    if days:
-        recompute_days(db, account, days, metrics)
-    else:
-        save_snapshot_only(db, account, metrics)
+    save_snapshot_only(db, account, metrics)
     db.add(
         SyncRun(
             account_id=account.id,
@@ -627,7 +545,7 @@ def check_handle(db: Session, handle: str, folder_id: int | None) -> dict[str, A
     if folder_id is not None and not accounts:
         raise HTTPException(404, "Essa conta não está na pasta informada.")
     try:
-        signals = collect(handle)
+        signals = collect_health(handle)
     except TokenMissing:
         raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.") from None
     if signals["profile_status"] == 401:
@@ -637,17 +555,13 @@ def check_handle(db: Session, handle: str, folder_id: int | None) -> dict[str, A
     if accounts:
         for account in accounts:
             previous_status = account.last_health_status
-            prior_imps = {
-                row.tweet_id: row.impression_count
-                for row in db.scalars(select(TweetSample).where(TweetSample.account_id == account.id)).all()
-            }
             status, detail = persist_account(db, account, signals)
             results.append((account, status, detail))
-            priors.append((account, previous_status, prior_imps))
+            priors.append((account, previous_status))
         db.commit()
-        for account, previous_status, prior_imps in priors:
+        for account, previous_status in priors:
             try:
-                dispatch_alerts(db, account, signals, previous_status, prior_imps)
+                dispatch_alerts(db, account, previous_status)
             except Exception:
                 log.exception("alerta não enviado para @%s", account.username)
                 db.rollback()
@@ -667,11 +581,6 @@ def check_handle(db: Session, handle: str, folder_id: int | None) -> dict[str, A
     account, status, detail = results[0]
     data = signals["data"] or {}
     metrics = data.get("public_metrics") if isinstance(data.get("public_metrics"), dict) else {}
-    impressions = None
-    timeline_metrics = [row.get("public_metrics") or {} for row in signals["timeline"]]
-    if timeline_metrics and all("impression_count" in item for item in timeline_metrics):
-        impressions = sum(int(item.get("impression_count") or 0) for item in timeline_metrics)
-    engagement = sum(engagement_of(item) for item in timeline_metrics)
     log.info("check @%s -> %s", handle, status.value)
     return {
         "handle": handle,
@@ -691,16 +600,6 @@ def check_handle(db: Session, handle: str, folder_id: int | None) -> dict[str, A
             "tweet_count": metric_value(metrics, "tweet_count"),
             "profile_image_url": data.get("profile_image_url"),
         },
-        "metrics": {
-            "likes": sum(int((row.get("public_metrics") or {}).get("like_count") or 0) for row in signals["timeline"]),
-            "retweets": sum(int((row.get("public_metrics") or {}).get("retweet_count") or 0) for row in signals["timeline"]),
-            "replies": sum(int((row.get("public_metrics") or {}).get("reply_count") or 0) for row in signals["timeline"]),
-            "impressions": impressions,
-            "views": None,
-            "engagement_count": engagement,
-            "engagement_rate": rate_of(engagement, impressions),
-            "posts_sampled": len(signals["timeline"]),
-        },
     }
 
 
@@ -717,12 +616,8 @@ def account_payload(db: Session, account: XAccount, start: date, end: date) -> d
         for row in db.scalars(select(TweetSample).where(TweetSample.account_id == account.id)).all()
         if start <= as_utc(row.posted_at).astimezone(tz).date() <= end
     ]
-    impressions = None
-    views = None
-    if samples and all(row.impression_count is not None for row in samples):
-        impressions = sum(int(row.impression_count or 0) for row in samples)
-    if samples and all(row.view_count is not None for row in samples):
-        views = sum(int(row.view_count or 0) for row in samples)
+    impressions = sum(int(row.impression_count or row.view_count or 0) for row in samples) if samples else None
+    views = sum(int(row.view_count or 0) for row in samples)
     engagement = sum(int(row.engagement_count or 0) for row in samples)
     status = account.last_health_status.value if account.last_health_status else None
     last_check = db.scalar(
@@ -882,7 +777,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             "search_ban": sum(1 for card in cards if card["status"] == "search_ban"),
             "ghost_ban": sum(1 for card in cards if card["status"] == "ghost_ban"),
             "followers": sum(followers) if followers else None,
-            "views": sum(views_values) if views_values else None,
+            "views": sum(views_values),
             "likes": sum(likes_values) if likes_values else None,
             "retweets": sum(retweets_values) if retweets_values else None,
             "replies": sum(replies_values) if replies_values else None,
@@ -896,6 +791,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             {
                 "username": card["username"],
                 "engagement": card["engagement"],
+                "views": card["views"],
                 "impressions": card["impressions"],
             }
             for card in cards
@@ -973,36 +869,10 @@ def try_send(db: Session, key: str, kind: str, text: str) -> bool:
     return True
 
 
-def dispatch_alerts(
-    db: Session,
-    account: XAccount,
-    signals: dict[str, Any],
-    previous_status: HealthStatus | None,
-    prior_imps: dict[str, int | None],
-) -> None:
-    settings = get_settings(db)
-    goal = int(settings.impression_goal or 500)
+def dispatch_alerts(db: Session, account: XAccount, previous_status: HealthStatus | None) -> None:
     name = account.display_name or account.username
     tz = zone(account.timezone)
     local_now = datetime.now(tz)
-    for raw in signals["timeline"]:
-        metrics = raw.get("public_metrics") if isinstance(raw.get("public_metrics"), dict) else {}
-        current = metric_value(metrics, "impression_count")
-        if current is None or current < goal:
-            continue
-        previous = prior_imps.get(str(raw["id"]))
-        gain = current - int(previous or 0)
-        posted = parse_time(raw.get("created_at")) or now_utc()
-        when = as_utc(posted).astimezone(tz).strftime("%d/%m/%Y %H:%M")
-        likes = int(metrics.get("like_count") or 0)
-        reposts = int(metrics.get("retweet_count") or 0)
-        link = f"https://x.com/{account.username}/status/{raw['id']}"
-        try_send(
-            db,
-            f"viral:{account.id}:{raw['id']}",
-            "viral",
-            viral_message(name, account.username, gain, when, likes, reposts, link),
-        )
     status = account.last_health_status
     if status in {HealthStatus.SEARCH_BAN, HealthStatus.GHOST_BAN} and status != previous_status:
         label = STATUS_LABELS[status.value]
@@ -1012,30 +882,6 @@ def dispatch_alerts(
             "ban",
             f"⚠️ Possível restrição\n👤 Conta: {name} (@{account.username})\nStatus: {label}\nO alcance pode ter sido cortado.",
         )
-    sampled = signals["timeline"]
-    if not sampled:
-        return
-    avg = round(sum(engagement_of(row.get("public_metrics") or {}) for row in sampled) / len(sampled))
-    baseline = db.scalar(
-        select(DayBaseline).where(DayBaseline.account_id == account.id, DayBaseline.metric_date == local_now.date())
-    )
-    if baseline is None:
-        baseline = DayBaseline(account_id=account.id, metric_date=local_now.date())
-        db.add(baseline)
-    if local_now.hour < 18:
-        baseline.day_avg = avg
-        db.commit()
-        return
-    if baseline.day_avg and avg < baseline.day_avg * 0.7 and not baseline.drop_alerted:
-        drop = round((1 - avg / baseline.day_avg) * 100)
-        sent = try_send(
-            db,
-            f"drop:{account.id}:{local_now.date().isoformat()}",
-            "drop",
-            f"⚠️ Queda de engajamento\n👤 Conta: {name} (@{account.username})\n📉 Do dia para a noite: -{drop}%\nPode ser sombra no alcance. Confira o status da conta.",
-        )
-        baseline.drop_alerted = sent or baseline.drop_alerted
-    db.commit()
 
 
 def settings_payload(row: AppSetting) -> dict[str, Any]:

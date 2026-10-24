@@ -1,9 +1,9 @@
-"""XHenry — painel local de contas do X.
+"""XHenry — painel de contas do X.
 
     python -m uvicorn main:app --host 127.0.0.1 --port 8000
 
-X_BEARER_TOKEN vem do ambiente ou de um .env ao lado deste arquivo.
-Não cole o token no chat. Sem token o painel abre, mas /api/check não chama a API.
+O dashboard lê só o banco (tweet_samples / daily_metrics).
+Métricas vêm do robo.py no VPS. /api/check usa a API oficial só para saúde da conta.
 """
 
 from __future__ import annotations

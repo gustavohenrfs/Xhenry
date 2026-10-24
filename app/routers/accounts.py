@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -106,7 +106,7 @@ def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
 
 
 @router.post("/api/accounts", status_code=201)
-def create_account(payload: AccountIn, background_tasks: BackgroundTasks, db: Session = Depends(get_db)) -> dict[str, Any]:
+def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     folder = db.get(Folder, payload.folder_id)
     if folder is None or folder.is_archived:
         raise HTTPException(404, "Pasta não encontrada.")
@@ -125,16 +125,6 @@ def create_account(payload: AccountIn, background_tasks: BackgroundTasks, db: Se
     db.add(account)
     db.commit()
     db.refresh(account)
-
-    # Retorna imediatamente; verificação roda em background para não travar a UI
-    def _background_check():
-        try:
-            check_handle(db, username, folder.id)
-        except Exception:
-            pass
-
-    background_tasks.add_task(_background_check)
-
     return {"id": account.id, "folder_id": folder.id, "username": username, "warning": None, "check": None}
 
 
@@ -187,15 +177,14 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
 
 
 @router.post("/api/refresh-all")
-def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
-    if not token_configured():
-        raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
-    accounts = selected_accounts(db, folder_id)
-    refreshed = 0
-    for account in accounts:
-        check_handle(db, account.username, folder_id)
-        refreshed += 1
-    return {"refreshed": refreshed, "total": len(accounts)}
+def refresh_all(
+    period: str = Query(default="7d"),
+    folder_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    payload = dashboard(db, period, folder_id)
+    payload["refreshed"] = len(payload.get("accounts") or [])
+    return payload
 
 
 @router.get("/api/dashboard")

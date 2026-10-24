@@ -175,8 +175,8 @@ function renderCharts(data) {
     options: chartOptions()
   });
   const names = data.by_account.map((row) => "@" + row.username);
-  const hasImpressions = data.by_account.some((row) => row.impressions !== null);
-  document.getElementById("bar-caption").textContent = hasImpressions ? "Engajamento e views" : "Engajamento — views ainda não vieram da API";
+  const hasViews = data.by_account.some((row) => row.views !== null && row.views !== undefined);
+  document.getElementById("bar-caption").textContent = hasViews ? "Engajamento e views" : "Engajamento — views ainda não vieram da API";
   barChart = new Chart(document.getElementById("bar-chart"), {
     type: "bar",
     data: {
@@ -344,10 +344,7 @@ async function load() {
     const data = await api("/api/dashboard?" + query.toString());
     state.data = data;
     const banner = document.getElementById("banner");
-    if (!data.token_configured) {
-      banner.textContent = "X_BEARER_TOKEN ausente. O visual lê o banco; Verificar só chama a API do X com o token no .env.";
-      banner.classList.remove("hidden");
-    } else banner.classList.add("hidden");
+    banner.classList.add("hidden");
     document.getElementById("range-label").textContent = data.start + " → " + data.end;
     renderKpis(data.kpis);
     renderCharts(data);
@@ -690,9 +687,8 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
   btn.disabled = true;
   btn.textContent = "Atualizando...";
   try {
-    await api("/api/refresh-all", { method: "POST" });
-    toast("Dados atualizados com sucesso.");
     await load();
+    toast("Dashboard relido do banco.");
   } catch (error) { toast(error.message || "Falha ao atualizar."); }
   btn.disabled = false;
   btn.textContent = orig;
