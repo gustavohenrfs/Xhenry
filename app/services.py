@@ -472,8 +472,11 @@ def collect(username: str) -> dict[str, Any]:
                     for t in tw_tweets:
                         tid = str(t.get("id") or t.get("tweet_id") or "")
                         if tid:
+                            v = t.get("viewCount")
+                            if v is None:
+                                log.warning("viewCount nulo para o tweet %s", tid)
                             tw_map[tid] = {
-                                "view_count": t.get("viewCount") or t.get("view_count") or t.get("views"),
+                                "view_count": v,
                                 "like_count": t.get("likeCount") or t.get("like_count") or t.get("likes"),
                                 "retweet_count": t.get("retweetCount") or t.get("retweet_count") or t.get("retweets"),
                                 "reply_count": t.get("replyCount") or t.get("reply_count") or t.get("replies"),
