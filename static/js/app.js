@@ -133,10 +133,21 @@ function chartOptions() {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { labels: { boxWidth: 10 } } },
+    plugins: {
+      legend: { labels: { boxWidth: 10, color: '#b39ab4' } },
+      tooltip: {
+        backgroundColor: 'rgba(16,9,20,.92)',
+        borderColor: 'rgba(255,46,200,.4)',
+        borderWidth: 1,
+        titleColor: '#fff7fc',
+        bodyColor: '#ffd6f2',
+        displayColors: false,
+        backdropFilter: 'blur(12px)'
+      }
+    },
     scales: {
-      x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
-      y: { beginAtZero: true, ticks: { precision: 0 } }
+      x: { grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#b39ab4' } },
+      y: { beginAtZero: true, ticks: { precision: 0, color: '#b39ab4' } }
     }
   };
 }
@@ -823,4 +834,24 @@ if (dateDisplay && dateInput) {
 
 setPeriod("today");
 setAuthMode("login");
+
+// 3D Tilt on holographic cards
+function addTiltEffect() {
+  document.querySelectorAll('.glow, .account-card').forEach(card => {
+    card.addEventListener('mousemove', (e) => {
+      const rect = card.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width - 0.5) * 12;
+      const y = ((e.clientY - rect.top) / rect.height - 0.5) * -12;
+      card.style.transform = `perspective(900px) rotateX(${y}deg) rotateY(${x}deg)`;
+      card.style.transition = 'transform .1s ease-out';
+    });
+    card.addEventListener('mouseleave', () => {
+      card.style.transition = 'transform .4s cubic-bezier(0.23,1,0.32,1)';
+      card.style.transform = 'perspective(900px) rotateX(0) rotateY(0)';
+    });
+  });
+}
+if (document.readyState === 'complete') addTiltEffect();
+else window.addEventListener('load', addTiltEffect);
+
 boot();

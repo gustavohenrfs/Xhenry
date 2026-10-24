@@ -43,11 +43,11 @@ body::before {
   position: fixed;
   inset: 0;
   background: 
-    linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+    linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
   background-size: 48px 48px;
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
   mix-blend-mode: screen;
 }
 
@@ -55,15 +55,15 @@ body::before {
 #bg-orbs {
   position: fixed;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   pointer-events: none;
   overflow: hidden;
 }
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(100px);
-  opacity: .55;
+  filter: blur(120px);
+  opacity: .7;
   animation: orb-float 28s ease-in-out infinite;
 }
 .orb.pink { background: #ff2ec8; width: 420px; height: 420px; top: 8%; left: 12%; animation-delay: 0s; }
@@ -119,4 +119,77 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 @keyframes pulse {
     from { text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f; }
     to { text-shadow: 0 0 20px #ff007f, 0 0 40px #ff007f, 0 0 60px #ff007f; }
+}
+
+/* Holographic Glassmorphism Cards + Laser Border */
+.glow, .account-card, article[class*="glow"], .card {
+  background: linear-gradient(145deg, rgba(20,11,24,.85), rgba(16,9,20,.75));
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,46,200,.25);
+  position: relative;
+  overflow: hidden;
+}
+.glow::before, .account-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: conic-gradient(from 0deg, #ff2ec8, #8c50dc, #d4af37, #ff2ec8);
+  z-index: -1;
+  animation: laser-rotate 4s linear infinite;
+  opacity: .35;
+}
+@keyframes laser-rotate {
+  to { transform: rotate(360deg); }
+}
+
+/* Sidebar Plasma Ring on Avatar */
+[data-user-avatar] {
+  position: relative;
+}
+[data-user-avatar]::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(#ff2ec8, #8c50dc, #ff2ec8);
+  z-index: -1;
+  animation: plasma-ring 3s linear infinite, plasma-pulse 2.5s ease-in-out infinite;
+  opacity: .6;
+}
+@keyframes plasma-ring {
+  to { transform: rotate(360deg); }
+}
+@keyframes plasma-pulse {
+  0%,100% { opacity: .4; }
+  50% { opacity: .85; }
+}
+
+/* Menu Hover Glow + Jump */
+.nav-btn {
+  transition: all .2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.nav-btn:hover {
+  color: #fff7fc;
+  transform: translateX(4px);
+  text-shadow: 0 0 8px #ff2ec8;
+}
+
+/* Pulsing Neon Status Badges */
+.st-healthy::before, .st-search_ban::before, .st-ghost_ban::before,
+.st-none::before, .st-unknown::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor, 0 0 12px currentColor;
+  animation: status-pulse 1.8s infinite ease-in-out;
+}
+@keyframes status-pulse {
+  0%,100% { opacity: .6; transform: translateY(-50%) scale(1); }
+  50% { opacity: 1; transform: translateY(-50%) scale(1.4); }
 }
