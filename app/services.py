@@ -459,7 +459,7 @@ def collect(username: str) -> dict[str, Any]:
     key = twitterapi_key()
     if key and username:
         try:
-            with httpx.Client(timeout=20.0) as client:
+            with httpx.Client(timeout=60.0) as client:
                 resp = client.get(
                     f"https://api.twitterapi.io/twitter/user/last_tweets?userName={username}",
                     headers={"X-API-Key": key},
