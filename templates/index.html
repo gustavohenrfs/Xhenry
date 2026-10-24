@@ -109,7 +109,7 @@
               <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
               <button type="button" data-period="total" class="period rounded-full px-3 py-1.5 text-mute">Total</button>
             </div>
-            <input type="date" id="specific-date" class="cursor-pointer rounded-full border border-neon/30 bg-ink px-4 py-1.5 text-sm text-white font-mono" onclick="if(this.showPicker){this.showPicker()}" />
+            <input type="date" id="specific-date" class="cursor-pointer rounded-full border border-neon/30 bg-ink px-4 py-1.5 text-sm text-white font-mono text-center" onclick="if(this.showPicker){this.showPicker()}" />
           </div>
         </div>
         <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
@@ -1016,6 +1016,7 @@
     // Date display + native picker
     const dateDisplay = document.getElementById("date-display");
     const dateInput = document.getElementById("specific-date");
+    if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
 
     function formatBR(d) {
       return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, "/");
