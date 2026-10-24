@@ -50,6 +50,10 @@ def token_configured() -> bool:
     return bool(bearer_token())
 
 
+def twitterapi_key() -> str:
+    return os.getenv("TWITTERAPI_KEY", "").strip()
+
+
 def ensure_user_auth_columns() -> None:
     # create_all não altera tabela que já existe.
     insp = inspect(engine)
@@ -450,6 +454,39 @@ def collect(username: str) -> dict[str, Any]:
             timeline = tweet_rows(timeline_body, user_id)
         search_status, search_body = search_recent(username)
         search_ids = {str(row["id"]) for row in tweet_rows(search_body, user_id)}
+
+    # TwitterAPI.io para Views, Likes, RTs e Replies (não entregues pela API oficial)
+    key = twitterapi_key()
+    if key and username:
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                resp = client.get(
+                    f"https://api.twitterapi.io/twitter/user/last_tweets?userName={username}",
+                    headers={"X-API-Key": key},
+                )
+                if resp.status_code == 200:
+                    tw_data = resp.json()
+                    tw_tweets = tw_data.get("data", []) if isinstance(tw_data, dict) else []
+                    tw_map = {}
+                    for t in tw_tweets:
+                        tid = str(t.get("id") or t.get("tweet_id") or "")
+                        if tid:
+                            tw_map[tid] = {
+                                "view_count": t.get("viewCount") or t.get("views"),
+                                "like_count": t.get("likeCount") or t.get("likes"),
+                                "retweet_count": t.get("retweetCount") or t.get("retweets"),
+                                "reply_count": t.get("replyCount") or t.get("replies"),
+                            }
+                    for t in timeline:
+                        tid = str(t.get("id") or "")
+                        if tid in tw_map:
+                            pm = t.setdefault("public_metrics", {})
+                            pm["view_count"] = tw_map[tid].get("view_count")
+                            pm["like_count"] = tw_map[tid].get("like_count")
+                            pm["retweet_count"] = tw_map[tid].get("retweet_count")
+                            pm["reply_count"] = tw_map[tid].get("reply_count")
+        except Exception:
+            pass
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
     return {

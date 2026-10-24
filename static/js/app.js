@@ -123,8 +123,10 @@ function kpi(label, value, hot, trend) {
 }
 function renderKpis(kpis) {
   document.getElementById("kpis").replaceChildren(
-    kpi("Impressões", num(kpis.impressions), true, kpis.trend_impressions),
-    kpi("Engajamento", num(kpis.engagement), false, kpis.trend_engagement),
+    kpi("Views", num(kpis.views), true, kpis.trend_views),
+    kpi("Curtidas", num(kpis.likes), false, kpis.trend_likes),
+    kpi("Retweets", num(kpis.retweets), false, kpis.trend_retweets),
+    kpi("Replies", num(kpis.replies), false, kpis.trend_replies),
     kpi("Seguidores", num(kpis.followers), false, kpis.trend_followers),
     kpi("Contas", num(kpis.accounts), false)
   );
@@ -174,14 +176,14 @@ function renderCharts(data) {
   });
   const names = data.by_account.map((row) => "@" + row.username);
   const hasImpressions = data.by_account.some((row) => row.impressions !== null);
-  document.getElementById("bar-caption").textContent = hasImpressions ? "Engajamento e impressões" : "Engajamento — impressões ainda não vieram da API";
+  document.getElementById("bar-caption").textContent = hasImpressions ? "Engajamento e views" : "Engajamento — views ainda não vieram da API";
   barChart = new Chart(document.getElementById("bar-chart"), {
     type: "bar",
     data: {
       labels: names.length ? names : ["—"],
       datasets: [
         { label: "Engajamento", data: names.length ? data.by_account.map((row) => row.engagement) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 },
-        { label: "Impressões", data: names.length ? data.by_account.map((row) => row.impressions) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
+        { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
       ]
     },
     options: chartOptions()

@@ -179,7 +179,7 @@
           <div class="text-center mb-6">
             <p class="text-lg tracking-wide text-mute">Bem vindo <span id="welcome-name" class="metallic-pink glow-slow"></span></p>
           </div>
-          <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
+          <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-6"></div>
           <div class="grid gap-4 xl:grid-cols-5">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
               <h2 class="font-display text-xl text-white">Potencial de Crescimento</h2>
@@ -458,8 +458,10 @@
     }
     function renderKpis(kpis) {
       document.getElementById("kpis").replaceChildren(
-        kpi("Impressões", num(kpis.impressions), true, kpis.trend_impressions),
-        kpi("Engajamento", num(kpis.engagement), false, kpis.trend_engagement),
+        kpi("Views", num(kpis.views), true, kpis.trend_views),
+        kpi("Curtidas", num(kpis.likes), false, kpis.trend_likes),
+        kpi("Retweets", num(kpis.retweets), false, kpis.trend_retweets),
+        kpi("Replies", num(kpis.replies), false, kpis.trend_replies),
         kpi("Seguidores", num(kpis.followers), false, kpis.trend_followers),
         kpi("Contas", num(kpis.accounts), false)
       );
@@ -498,14 +500,14 @@
       });
       const names = data.by_account.map((row) => "@" + row.username);
       const hasImpressions = data.by_account.some((row) => row.impressions !== null);
-      document.getElementById("bar-caption").textContent = hasImpressions ? "Engajamento e impressões" : "Engajamento — impressões ainda não vieram da API";
+      document.getElementById("bar-caption").textContent = hasImpressions ? "Engajamento e views" : "Engajamento — views ainda não vieram da API";
       barChart = new Chart(document.getElementById("bar-chart"), {
         type: "bar",
         data: {
           labels: names.length ? names : ["—"],
           datasets: [
             { label: "Engajamento", data: names.length ? data.by_account.map((row) => row.engagement) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 },
-            { label: "Impressões", data: names.length ? data.by_account.map((row) => row.impressions) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
+            { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
           ]
         },
         options: chartOptions()
