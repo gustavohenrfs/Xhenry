@@ -43,6 +43,7 @@ from sqlalchemy import (
     event,
     func,
     select,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -94,7 +95,14 @@ def _flag(name: str) -> bool:
 
 
 def database_url() -> str:
-    return os.getenv("DATABASE_URL") or ("sqlite:///" + DB_FILE.as_posix())
+    url = os.getenv("DATABASE_URL")
+    if url:
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return url
+    return "sqlite:///" + DB_FILE.as_posix()
 
 
 def bearer_token() -> str:
@@ -216,6 +224,7 @@ class User(IntPK, TimestampMixin, Base):
     senha_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nome_exibicao: Mapped[str | None] = mapped_column(String(120), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     folders: Mapped[list[Folder]] = relationship(
         back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
@@ -258,6 +267,7 @@ class XAccount(IntPK, TimestampMixin, Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     is_protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_health_status: Mapped[HealthStatus | None] = mapped_column(_enum(HealthStatus, "health_status"), nullable=True)
@@ -542,9 +552,9 @@ def period_window(period: str, today: date | None = None) -> tuple[date, date]:
     if period in {"yesterday", "ontem"}:
         day = today - timedelta(days=1)
         return day, day
-    span = {"7d": 7, "30d": 30, "1y": 365, "365d": 365}.get(period)
+    span = {"7d": 7, "30d": 30, "3m": 90, "1y": 365, "365d": 365, "total": 3650}.get(period)
     if span is None:
-        raise HTTPException(400, "Período inválido. Use today, yesterday, 7d, 30d ou 1y.")
+        raise HTTPException(400, "Período inválido. Use today, yesterday, 7d, 30d, 3m, 1y ou total.")
     return today - timedelta(days=span - 1), today
 
 
@@ -1395,6 +1405,25 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=204)
 
 
+class AccountUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=80)
+    is_archived: bool | None = None
+
+
+@app.patch("/api/accounts/{account_id}")
+def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    account = db.get(XAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Conta não encontrada.")
+    if payload.display_name is not None:
+        account.display_name = payload.display_name.strip() or None
+    if payload.is_archived is not None:
+        account.is_archived = payload.is_archived
+    db.commit()
+    db.refresh(account)
+    return {"id": account.id, "display_name": account.display_name, "is_archived": account.is_archived}
+
+
 @app.get("/api/check/{handle}")
 def check_account(
     handle: str,
@@ -1419,6 +1448,21 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
         seen.add(account.username)
         results.append(check_handle(db, account.username, folder_id))
     return {"checked": len(results), "results": results}
+
+
+@app.post("/api/refresh-all")
+def refresh_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
+    if not token_configured():
+        raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
+    accounts = selected_accounts(db, folder_id)
+    refreshed = 0
+    for account in accounts:
+        try:
+            check_handle(db, account.username, folder_id)
+            refreshed += 1
+        except Exception:
+            pass
+    return {"refreshed": refreshed, "total": len(accounts)}
 
 
 @app.get("/api/dashboard")
@@ -1706,6 +1750,27 @@ async def review_post(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
     return {"verdict": verdict}
+
+
+@app.get("/fix-db")
+def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
+    """Rota temporária para adicionar colunas novas.
+    Acesse via navegador: https://seu-app.onrender.com/fix-db
+    Depois de usar, pode remover esta rota.
+    """
+    try:
+        db.execute(text("""
+            ALTER TABLE x_accounts 
+            ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
+        """))
+        db.execute(text("""
+            ALTER TABLE users 
+            ADD COLUMN IF NOT EXISTS logo_url VARCHAR(512);
+        """))
+        db.commit()
+        return {"status": "ok", "message": "Colunas atualizadas com sucesso!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 if __name__ == "__main__":

@@ -41,8 +41,8 @@
     .glow { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
     .glow:hover {
       transform: translateY(-5px);
-      border-color: rgba(255, 46, 200, .72);
-      box-shadow: 0 0 0 1px rgba(255, 46, 200, .28), 0 16px 42px rgba(255, 46, 200, .16);
+      border-color: rgba(255, 46, 200, .85);
+      box-shadow: 0 0 0 1px rgba(255, 46, 200, .6), 0 0 18px rgba(255, 46, 200, .55), 0 20px 50px rgba(255, 46, 200, .25);
     }
     .status-reveal { opacity: 0; transform: translateY(6px); transition: opacity .18s ease, transform .18s ease; }
     .account-card:hover .status-reveal,
@@ -77,6 +77,7 @@
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Dashboard</button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
+        <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Arquivadas</button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
       </nav>
       <div id="user-foot" class="mt-auto flex items-center gap-3 px-2">
@@ -97,12 +98,19 @@
             <p data-user-name class="max-w-24 truncate text-sm text-white">—</p>
             <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
           </div>
-          <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
-            <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
-            <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
-            <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
-            <button type="button" data-period="30d" class="period rounded-full px-3 py-1.5 text-mute">30 dias</button>
-            <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
+          <div id="dashboard-controls" class="flex items-center gap-3">
+            <button id="refresh-all" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
+            <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
+              <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
+              <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
+              <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
+              <button type="button" data-period="30d" class="period rounded-full px-3 py-1.5 text-mute">30 dias</button>
+              <button type="button" data-period="3m" class="period rounded-full px-3 py-1.5 text-mute">3 meses</button>
+              <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
+              <button type="button" data-period="total" class="period rounded-full px-3 py-1.5 text-mute">Total</button>
+            </div>
+            <div id="date-display" class="cursor-pointer rounded-full border border-neon/30 bg-ink px-4 py-1.5 text-sm text-white font-mono select-none" title="Clique para escolher data">24/10/2026</div>
+            <input type="date" id="specific-date" class="hidden" />
           </div>
         </div>
         <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
@@ -113,6 +121,18 @@
         </div>
         <p id="banner" class="mt-3 hidden rounded-2xl border border-neon/40 bg-neon/10 px-3 py-2 text-sm text-neon"></p>
       </header>
+
+      <!-- Modal de Confirmação Customizado -->
+      <div id="confirm-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/80">
+        <div class="w-full max-w-md rounded-3xl border border-neon/40 bg-card p-6">
+          <h3 id="confirm-title" class="font-display text-xl text-white"></h3>
+          <p id="confirm-message" class="mt-2 text-sm text-mute"></p>
+          <div class="mt-6 flex gap-3">
+            <button id="confirm-cancel" class="flex-1 rounded-2xl border border-neon/40 py-3 text-sm">Cancelar</button>
+            <button id="confirm-ok" class="flex-1 rounded-2xl bg-neon py-3 text-sm font-medium text-ink">Confirmar</button>
+          </div>
+        </div>
+      </div>
       <div class="px-4 py-6 md:px-8">
         <section id="pane-dashboard" class="pane on space-y-6">
           <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
@@ -147,7 +167,7 @@
             <input id="account-label" maxlength="80" placeholder="Nome de exibição, ex: Conta 01" class="min-w-48 flex-1 rounded-2xl border border-neon/25 bg-card px-3 py-3 text-sm outline-none focus:border-neon">
             <button class="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-ink" type="submit">Adicionar conta</button>
           </form>
-          <div id="ops-accounts" class="space-y-2"></div>
+          <div id="ops-accounts" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3"></div>
         </section>
         <section id="pane-post" class="pane">
           <form id="post-form" class="glow mx-auto max-w-2xl space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
@@ -179,11 +199,17 @@
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-token">Token do bot</label>
-            <input id="tg-token" type="password" autocomplete="off" placeholder="123456:ABC..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <div class="relative">
+              <input id="tg-token" type="password" autocomplete="off" placeholder="123456:ABC..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 pr-10 text-sm outline-none focus:border-neon">
+              <button type="button" data-toggle="tg-token" class="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-white">👁️</button>
+            </div>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-chat">Chat ID</label>
             <input id="tg-chat" placeholder="-1001234567890" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="xai-key">Chave da xAI (análise do post)</label>
-            <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <div class="relative">
+              <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 pr-10 text-sm outline-none focus:border-neon">
+              <button type="button" data-toggle="xai-key" class="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-white">👁️</button>
+            </div>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de impressões</label>
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
@@ -201,8 +227,36 @@
 💬 Engajamento: [Curtidas+RTs]
 🔗 Link do Post: [Link]</pre>
           </article>
+
+          <!-- Change Password Form -->
+          <form id="password-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
+            <h2 class="font-display text-2xl text-white">Trocar Senha</h2>
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
+            <input id="new-password" type="password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
+            <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Atualizar senha</button>
+          </form>
+
+          <!-- Delete Account -->
+          <div class="glow rounded-3xl border border-red-500/40 bg-card p-6">
+            <h2 class="font-display text-2xl text-white">Excluir Conta</h2>
+            <p class="mt-2 text-sm text-mute">Esta ação é irreversível. Todos os seus dados serão apagados permanentemente.</p>
+            <button id="delete-account-btn" type="button" class="mt-4 rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir Minha Conta</button>
+          </div>
           </div>
         </section>
+
+        <!-- Delete Confirm Modal -->
+        <div id="delete-modal" class="hidden fixed inset-0 z-[110] flex items-center justify-center bg-black/90">
+          <div class="w-full max-w-md rounded-3xl border border-red-500/40 bg-card p-6">
+            <h3 class="font-display text-xl text-white">Excluir conta permanentemente?</h3>
+            <p class="mt-2 text-sm text-mute">Digite <strong>CONFIRM</strong> para confirmar a exclusão da sua conta e todos os dados.</p>
+            <input id="delete-confirm-input" type="text" class="mt-4 w-full rounded-2xl border border-red-500/40 bg-ink px-3 py-3 text-sm outline-none focus:border-red-500" placeholder="CONFIRM">
+            <div class="mt-6 flex gap-3">
+              <button id="delete-cancel" class="flex-1 rounded-2xl border border-neon/40 py-3 text-sm">Cancelar</button>
+              <button id="delete-confirm" class="flex-1 rounded-2xl bg-red-600 py-3 text-sm font-medium text-white hover:bg-red-700" disabled>Excluir</button>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -218,6 +272,7 @@
       <input id="auth-email" type="email" required maxlength="320" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="voce@email.com">
       <label class="mt-4 block text-xs uppercase tracking-[0.14em] text-mute" for="auth-password">Senha</label>
       <input id="auth-password" type="password" required minlength="8" maxlength="128" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
+      <button type="button" id="forgot-link" class="mt-1 text-xs text-neon hover:underline">Esqueceu a senha?</button>
       <p id="auth-error" class="mt-3 hidden text-sm text-neon"></p>
       <button class="mt-5 w-full rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Entrar</button>
       <button id="auth-switch" class="mt-3 w-full text-xs text-mute" type="button">Criar conta</button>
@@ -225,7 +280,7 @@
   </div>
   <script>
     const fmt = new Intl.NumberFormat("pt-BR");
-    const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações" };
+    const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações", archived: "Arquivadas" };
     const TOKEN_KEY = "access_token";
     const state = { tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login" };
     let lineChart = null;
@@ -265,9 +320,15 @@
       document.querySelectorAll("[data-user-avatar]").forEach((el) => {
         el.replaceChildren();
         const url = user && user.avatar_url;
-        if (url && (String(url).startsWith("https://") || String(url).startsWith("/"))) {
+        if (url && (String(url).startsWith("https://") || String(url).startsWith("data:") || String(url).startsWith("/"))) {
           const img = document.createElement("img");
-          img.src = String(url).startsWith("/") ? url + "?v=" + Date.now() : url;
+          if (String(url).startsWith("data:")) {
+            img.src = url;
+          } else if (String(url).startsWith("/")) {
+            img.src = url + "?v=" + Date.now();
+          } else {
+            img.src = url;
+          }
           img.alt = "";
           img.className = "h-full w-full rounded-full object-cover";
           el.append(img);
@@ -311,26 +372,34 @@
       document.querySelectorAll(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
       document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("on", pane.id === "pane-" + tab));
       document.getElementById("heading").textContent = titles[tab];
-      document.getElementById("period-wrap").classList.toggle("invisible", tab !== "dashboard");
+      const controls = document.getElementById("dashboard-controls");
+      if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
       if (tab === "settings") loadSettings();
+      if (tab === "archived") loadArchived();
     }
-    function kpi(label, value, hot) {
+    function kpi(label, value, hot, trend) {
       const card = document.createElement("article");
-      card.className = "glow rounded-3xl border bg-card px-4 py-4 " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
+      card.className = "glow rounded-3xl border bg-card px-4 py-4 relative " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
       const k = document.createElement("p");
       k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
       k.textContent = label;
       const v = document.createElement("p");
-      v.className = "mt-2 font-display text-3xl text-white";
+      v.className = "mt-2 font-mono text-3xl text-white tracking-tight";
       v.textContent = value;
+      if (trend) {
+        const t = document.createElement("span");
+        t.className = "absolute top-3 right-4 text-lg";
+        t.textContent = trend === "up" ? "📈" : "📉";
+        card.append(t);
+      }
       card.append(k, v);
       return card;
     }
     function renderKpis(kpis) {
       document.getElementById("kpis").replaceChildren(
-        kpi("Impressões", num(kpis.impressions), true),
-        kpi("Engajamento", num(kpis.engagement), false),
-        kpi("Seguidores", num(kpis.followers), false),
+        kpi("Impressões", num(kpis.impressions), true, kpis.trend_impressions),
+        kpi("Engajamento", num(kpis.engagement), false, kpis.trend_engagement),
+        kpi("Seguidores", num(kpis.followers), false, kpis.trend_followers),
         kpi("Contas", num(kpis.accounts), false)
       );
     }
@@ -383,16 +452,17 @@
     }
     function renderAccounts(accounts) {
       const host = document.getElementById("accounts");
-      if (!accounts.length) {
+      const visible = accounts.filter((a) => !a.is_archived);
+      if (!visible.length) {
         const empty = document.createElement("p");
         empty.className = "text-sm text-mute";
         empty.textContent = "Nenhuma conta ainda. Abra Operações e crie uma pasta.";
         host.replaceChildren(empty);
         return;
       }
-      host.replaceChildren(...accounts.map((account) => {
+      host.replaceChildren(...visible.map((account) => {
         const card = document.createElement("article");
-        card.className = "account-card glow relative cursor-pointer rounded-3xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
+        card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
         card.addEventListener("click", (event) => {
           if (event.target.closest("button")) return;
           state.openId = state.openId === account.id ? null : account.id;
@@ -418,7 +488,7 @@
           grid.append(wrap);
         });
         const reveal = document.createElement("div");
-        reveal.className = "status-reveal mt-4 flex items-center justify-between gap-2";
+        reveal.className = "status-reveal mt-4 flex items-center gap-2";
         const badge = document.createElement("span");
         badge.className = "rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] st-" + (account.status || "none");
         badge.textContent = account.status_label;
@@ -479,19 +549,56 @@
     function renderOpsAccounts(accounts) {
       const host = document.getElementById("ops-accounts");
       if (!state.folderId) { host.replaceChildren(); return; }
-      const rows = accounts.filter((account) => account.folder_id === state.folderId);
+      const rows = accounts.filter((account) => account.folder_id === state.folderId && !account.is_archived);
+      if (!rows.length) {
+        const empty = document.createElement("p");
+        empty.className = "text-sm text-mute";
+        empty.textContent = "Nenhuma conta ativa nesta pasta.";
+        host.replaceChildren(empty);
+        return;
+      }
       host.replaceChildren(...rows.map((account) => {
-        const row = document.createElement("div");
-        row.className = "flex items-center justify-between rounded-2xl border border-neon/15 bg-card px-4 py-3";
-        const label = document.createElement("p");
-        label.textContent = (account.display_name ? account.display_name + " · " : "") + "@" + account.username;
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "text-xs text-mute";
-        remove.textContent = "Remover";
-        remove.addEventListener("click", () => removeAccount(account));
-        row.append(label, remove);
-        return row;
+        const card = document.createElement("article");
+        card.className = "glow rounded-2xl border border-neon/20 bg-card p-4";
+        const name = document.createElement("p");
+        name.className = "font-medium text-white";
+        name.textContent = account.display_name || "@" + account.username;
+        const handle = document.createElement("p");
+        handle.className = "text-sm text-mute";
+        handle.textContent = "@" + account.username + " · " + account.folder_name;
+        const grid = document.createElement("dl");
+        grid.className = "mt-3 grid grid-cols-3 gap-2 text-sm";
+        [["Impressões", num(account.impressions)], ["Engajamento", num(account.engagement)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
+          const wrap = document.createElement("div");
+          const dt = document.createElement("dt");
+          dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+          dt.textContent = label;
+          const dd = document.createElement("dd");
+          dd.className = "mt-1 text-white";
+          dd.textContent = value;
+          wrap.append(dt, dd);
+          grid.append(wrap);
+        });
+        const actions = document.createElement("div");
+        actions.className = "mt-4 flex flex-wrap gap-2";
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        editBtn.textContent = "Editar";
+        editBtn.addEventListener("click", () => editAccount(account));
+        const archiveBtn = document.createElement("button");
+        archiveBtn.type = "button";
+        archiveBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+        archiveBtn.textContent = "Arquivar";
+        archiveBtn.addEventListener("click", () => toggleArchive(account));
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs text-mute";
+        deleteBtn.textContent = "Excluir";
+        deleteBtn.addEventListener("click", () => removeAccount(account));
+        actions.append(editBtn, archiveBtn, deleteBtn);
+        card.append(name, handle, grid, actions);
+        return card;
       }));
     }
     async function load() {
@@ -521,7 +628,7 @@
       } catch (error) { toast(error.message || "Falha na verificação."); }
     }
     async function editFolder(folder) {
-      const name = prompt("Novo nome da pasta", folder.name);
+      const name = await showPrompt("Novo nome da pasta", folder.name);
       if (!name || !name.trim() || name.trim() === folder.name) return;
       try {
         await api("/api/folders/" + folder.id, {
@@ -533,7 +640,8 @@
       } catch (error) { toast(error.message || "Não editou a pasta."); }
     }
     async function deleteFolder(folder) {
-      if (!confirm("Excluir a pasta " + folder.name + "?")) return;
+      const ok = await showConfirm("Excluir pasta", "Tem certeza que deseja excluir a pasta \"" + folder.name + "\"?");
+      if (!ok) return;
       try {
         await api("/api/folders/" + folder.id, { method: "DELETE" });
         if (state.folderId === folder.id) state.folderId = null;
@@ -541,9 +649,35 @@
       } catch (error) { toast(error.message || "Não excluiu a pasta."); }
     }
     async function removeAccount(account) {
-      if (!confirm("Remover @" + account.username + "?")) return;
+      const ok = await showConfirm("Remover conta", "Tem certeza que deseja remover @" + account.username + "?");
+      if (!ok) return;
       try { await api("/api/accounts/" + account.id, { method: "DELETE" }); await load(); }
       catch (error) { toast(error.message || "Não removeu."); }
+    }
+
+    async function editAccount(account) {
+      const newName = await showPrompt("Novo nome de exibição para @" + account.username, account.display_name || "");
+      if (!newName || newName.trim() === "") return;
+      try {
+        await api("/api/accounts/" + account.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: newName.trim() })
+        });
+        await load();
+      } catch (error) { toast(error.message || "Não editou."); }
+    }
+
+    async function toggleArchive(account) {
+      try {
+        await api("/api/accounts/" + account.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_archived: !account.is_archived })
+        });
+        toast(account.is_archived ? "Conta desarquivada." : "Conta arquivada.");
+        await load();
+      } catch (error) { toast(error.message || "Não foi possível arquivar/desarquivar."); }
     }
     document.getElementById("nav").addEventListener("click", (event) => {
       const button = event.target.closest("[data-tab]");
@@ -603,10 +737,34 @@
       try {
         const result = await api("/api/posts/review", { method: "POST", body });
         verdict.textContent = result.verdict;
+        // Auto-reset após 1 minuto
+        setTimeout(() => {
+          document.getElementById("post-caption").value = "";
+          document.getElementById("post-media").value = "";
+          verdict.classList.add("hidden");
+        }, 60000);
       } catch (error) {
         verdict.textContent = error.message || "Não foi possível analisar o post.";
       }
     });
+
+    // Botão Limpar manual
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "rounded-2xl border border-neon/40 px-4 py-2 text-sm ml-2";
+    clearBtn.textContent = "Limpar";
+    clearBtn.onclick = () => {
+      document.getElementById("post-caption").value = "";
+      document.getElementById("post-media").value = "";
+      document.getElementById("verdict").classList.add("hidden");
+    };
+    document.getElementById("post-form").appendChild(clearBtn);
+
+    // Nota sobre fotos
+    const note = document.createElement("p");
+    note.className = "text-[10px] text-mute mt-1";
+    note.textContent = "(o arquivo só aceita fotos por enquanto)";
+    document.getElementById("post-form").appendChild(note);
     async function loadSettings() {
       try {
         const settings = await api("/api/settings");
@@ -618,6 +776,35 @@
         document.getElementById("profile-name").value = me.nome_exibicao || "";
         paintUser(me);
       } catch (error) { toast(error.message || "Não leu as configurações."); }
+    }
+
+    async function loadArchived() {
+      const host = document.getElementById("archived-accounts");
+      if (!host) return;
+      try {
+        const data = await api("/api/dashboard?period=total");
+        const archived = (data.accounts || []).filter(a => a.is_archived);
+        if (!archived.length) {
+          host.innerHTML = '<p class="text-sm text-mute">Nenhuma conta arquivada.</p>';
+          return;
+        }
+        host.innerHTML = "";
+        archived.forEach(account => {
+          const div = document.createElement("div");
+          div.className = "flex items-center justify-between rounded-2xl border border-neon/15 bg-card px-4 py-3";
+          div.innerHTML = `
+            <div>
+              <p class="font-medium">${account.display_name || "@" + account.username}</p>
+              <p class="text-xs text-mute">@${account.username}</p>
+            </div>
+            <button class="rounded-full border border-neon/40 px-3 py-1 text-xs">Desarquivar</button>
+          `;
+          div.querySelector("button").onclick = () => toggleArchive(account);
+          host.appendChild(div);
+        });
+      } catch (e) {
+        host.innerHTML = '<p class="text-sm text-mute">Erro ao carregar.</p>';
+      }
     }
     document.getElementById("profile-form").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -655,6 +842,76 @@
         toast("Notificação de teste enviada.");
       } catch (error) { toast(error.message || "O teste falhou."); }
     });
+
+    // Change Password
+    document.getElementById("password-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const nova = document.getElementById("new-password").value.trim();
+      if (!nova || nova.length < 8) {
+        toast("Senha deve ter pelo menos 8 caracteres.");
+        return;
+      }
+      try {
+        await api("/api/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nova_senha: nova })
+        });
+        document.getElementById("new-password").value = "";
+        toast("Senha atualizada com sucesso.");
+      } catch (error) { toast(error.message || "Falha ao trocar senha."); }
+    });
+
+    // Delete Account with CONFIRM modal
+    const deleteBtn = document.getElementById("delete-account-btn");
+    const deleteModal = document.getElementById("delete-modal");
+    const deleteInput = document.getElementById("delete-confirm-input");
+    const deleteConfirmBtn = document.getElementById("delete-confirm");
+    const deleteCancelBtn = document.getElementById("delete-cancel");
+
+    deleteBtn.addEventListener("click", () => {
+      deleteInput.value = "";
+      deleteConfirmBtn.disabled = true;
+      deleteModal.classList.remove("hidden");
+      deleteInput.focus();
+    });
+
+    deleteCancelBtn.addEventListener("click", () => {
+      deleteModal.classList.add("hidden");
+    });
+
+    deleteInput.addEventListener("input", () => {
+      deleteConfirmBtn.disabled = deleteInput.value.trim().toUpperCase() !== "CONFIRM";
+    });
+
+    deleteConfirmBtn.addEventListener("click", async () => {
+      if (deleteInput.value.trim().toUpperCase() !== "CONFIRM") return;
+      deleteModal.classList.add("hidden");
+      try {
+        await api("/api/me", { method: "DELETE" });
+        toast("Conta excluída. Saindo...");
+        setTimeout(() => {
+          localStorage.removeItem(TOKEN_KEY);
+          location.reload();
+        }, 1200);
+      } catch (error) {
+        toast(error.message || "Falha ao excluir conta.");
+      }
+    });
+
+    document.getElementById("refresh-all").addEventListener("click", async () => {
+      const btn = document.getElementById("refresh-all");
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Atualizando...";
+      try {
+        await api("/api/refresh-all", { method: "POST" });
+        toast("Dados atualizados com sucesso.");
+        await load();
+      } catch (error) { toast(error.message || "Falha ao atualizar."); }
+      btn.disabled = false;
+      btn.textContent = orig;
+    });
     document.getElementById("auth-switch").addEventListener("click", () => {
       setAuthMode(state.authMode === "login" ? "register" : "login");
     });
@@ -690,6 +947,61 @@
     document.addEventListener("click", (event) => {
       if (event.target.closest("[data-logout]")) logout();
     });
+
+    // Modal de confirmação customizado
+    let confirmResolve = null;
+    let promptResolve = null;
+    function showConfirm(title, message) {
+      return new Promise((resolve) => {
+        confirmResolve = resolve;
+        document.getElementById("confirm-title").textContent = title;
+        document.getElementById("confirm-message").textContent = message;
+        document.getElementById("confirm-modal").classList.remove("hidden");
+      });
+    }
+
+    function showPrompt(title, defaultValue = "") {
+      return new Promise((resolve) => {
+        promptResolve = resolve;
+        const titleEl = document.getElementById("confirm-title");
+        const messageEl = document.getElementById("confirm-message");
+        titleEl.textContent = title;
+        messageEl.innerHTML = `<input id="prompt-input" type="text" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" value="${defaultValue.replace(/"/g, '&quot;')}">`;
+        document.getElementById("confirm-modal").classList.remove("hidden");
+      });
+    }
+
+    document.getElementById("confirm-cancel").addEventListener("click", () => {
+      document.getElementById("confirm-modal").classList.add("hidden");
+      if (confirmResolve) confirmResolve(false);
+      if (promptResolve) promptResolve(null);
+    });
+
+    document.getElementById("confirm-ok").addEventListener("click", () => {
+      document.getElementById("confirm-modal").classList.add("hidden");
+      if (confirmResolve) confirmResolve(true);
+      if (promptResolve) {
+        const input = document.getElementById("prompt-input");
+        promptResolve(input ? input.value : null);
+      }
+    });
+
+    // Toggle senha (olho) para campos de token e xai-key
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-toggle]");
+      if (!btn) return;
+      const id = btn.dataset.toggle;
+      const input = document.getElementById(id);
+      if (!input) return;
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈";
+      } else {
+        input.type = "password";
+        btn.textContent = "👁️";
+      }
+    });
+
     async function boot() {
       if (!token()) {
         showAuth(true);
@@ -705,6 +1017,41 @@
         showAuth(true);
       }
     }
+    // Date display + native picker
+    const dateDisplay = document.getElementById("date-display");
+    const dateInput = document.getElementById("specific-date");
+
+    function formatBR(d) {
+      return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, "/");
+    }
+
+    function updateDateDisplay() {
+      if (!dateDisplay || !dateInput) return;
+      const val = dateInput.value;
+      if (val) {
+        const [y, m, d] = val.split("-").map(Number);
+        const dt = new Date(y, m - 1, d);
+        dateDisplay.textContent = formatBR(dt);
+      } else {
+        const today = new Date();
+        dateDisplay.textContent = formatBR(today);
+        dateInput.value = today.toISOString().slice(0, 10);
+      }
+    }
+
+    if (dateDisplay && dateInput) {
+      dateDisplay.addEventListener("click", () => {
+        if (dateInput.showPicker) dateInput.showPicker();
+        else dateInput.click();
+      });
+      dateInput.addEventListener("change", () => {
+        updateDateDisplay();
+        // optional: trigger load with new date if needed
+        if (state.tab === "dashboard") load();
+      });
+      updateDateDisplay();
+    }
+
     setPeriod("today");
     setAuthMode("login");
     boot();

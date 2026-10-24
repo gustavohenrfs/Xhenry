@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import time
+import base64
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
@@ -105,6 +106,7 @@ def public_user(user: Any) -> dict[str, Any]:
         "email": user.email,
         "nome_exibicao": user.nome_exibicao or user.name,
         "avatar_url": user.avatar_url,
+        "logo_url": user.logo_url,
     }
 
 
@@ -194,13 +196,62 @@ async def update_me(
         kind = (avatar.content_type or "").lower()
         if kind not in {"image/jpeg", "image/jpg", "image/png"}:
             raise HTTPException(400, "Use JPG ou PNG.")
-        suffix = "png" if kind == "image/png" else "jpg"
-        folder = ROOT / "data" / "avatars"
-        folder.mkdir(parents=True, exist_ok=True)
-        for old in folder.glob(f"{row.id}.*"):
-            old.unlink(missing_ok=True)
-        (folder / f"{row.id}.{suffix}").write_bytes(raw)
-        row.avatar_url = f"/avatars/{row.id}.{suffix}"
+        mime = "image/png" if kind == "image/png" else "image/jpeg"
+        b64 = base64.b64encode(raw).decode("ascii")
+        row.avatar_url = f"data:{mime};base64,{b64}"
     db.commit()
     db.refresh(row)
     return public_user(row)
+
+
+class ForgotIn(BaseModel):
+    email: str
+
+
+@router.post("/api/forgot-password")
+def forgot_password(payload: ForgotIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from main import User
+    email = normalize_email(payload.email)
+    user = db.scalar(select(User).where(User.email == email))
+    if user:
+        # Reset to default temp password
+        user.senha_hash = hash_password("xhenry123")
+        db.commit()
+    return {"ok": True, "message": "Se o email existir, a senha foi redefinida para xhenry123. Use-a para entrar e troque depois."}
+
+
+class ChangePasswordIn(BaseModel):
+    nova_senha: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/api/change-password")
+def change_password(payload: ChangePasswordIn, user=Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    from main import User
+    row = db.get(User, user.id)
+    if row is None:
+        raise HTTPException(401, "Usuário não encontrado.")
+    row.senha_hash = hash_password(payload.nova_senha)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/api/me", status_code=204)
+def delete_me(user=Depends(current_user), db: Session = Depends(get_db)):
+    from main import User
+    row = db.get(User, user.id)
+    if row:
+        db.delete(row)
+        db.commit()
+    return None
+
+
+# ROTA TEMPORÁRIA PARA APAGAR CONTA POR EMAIL (só usar uma vez)
+@router.get("/api/delete-by-email")
+def delete_by_email(email: str, db: Session = Depends(get_db)):
+    from main import User
+    user = db.scalar(select(User).where(User.email == email.lower()))
+    if user:
+        db.delete(user)
+        db.commit()
+        return {"deleted": True}
+    return {"deleted": False}
