@@ -598,17 +598,12 @@
         editBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
         editBtn.textContent = "Editar";
         editBtn.addEventListener("click", () => editAccount(account));
-        const archiveBtn = document.createElement("button");
-        archiveBtn.type = "button";
-        archiveBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
-        archiveBtn.textContent = "Arquivar";
-        archiveBtn.addEventListener("click", () => toggleArchive(account));
         const deleteBtn = document.createElement("button");
         deleteBtn.type = "button";
         deleteBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs text-mute";
         deleteBtn.textContent = "Excluir";
         deleteBtn.addEventListener("click", () => removeAccount(account));
-        actions.append(editBtn, archiveBtn, deleteBtn);
+        actions.append(editBtn, deleteBtn);
         card.append(name, handle, grid, actions);
         return card;
       }));
@@ -680,17 +675,7 @@
       } catch (error) { toast(error.message || "Não editou."); }
     }
 
-    async function toggleArchive(account) {
-      try {
-        await api("/api/accounts/" + account.id, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ is_archived: !account.is_archived })
-        });
-        toast(account.is_archived ? "Conta desarquivada." : "Conta arquivada.");
-        await load();
-      } catch (error) { toast(error.message || "Não foi possível arquivar/desarquivar."); }
-    }
+
     document.getElementById("nav").addEventListener("click", (event) => {
       const button = event.target.closest("[data-tab]");
       if (button) setTab(button.dataset.tab);
