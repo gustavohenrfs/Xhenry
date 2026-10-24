@@ -107,7 +107,8 @@ def as_utc(value: datetime) -> datetime:
 
 def period_window(period: str, today: date | None = None) -> tuple[date, date]:
     period = period.strip().lower()
-    today = today or datetime.now(zone(DEFAULT_TZ)).date()
+    br_tz = ZoneInfo("America/Sao_Paulo")
+    today = today or datetime.now(br_tz).date()
     if period in {"today", "hoje"}:
         return today, today
     if period in {"yesterday", "ontem"}:
@@ -289,8 +290,8 @@ def upsert_tweet(db: Session, account: XAccount, raw: dict) -> date | None:
         row = TweetSample(
             account_id=account.id,
             tweet_id=str(raw["id"]),
-            posted_at=posted,
-            timezone_used=account.timezone,
+            posted_at=local,
+            timezone_used="America/Sao_Paulo",
             hour_local=local.hour,
             weekday=local.weekday(),
         )
