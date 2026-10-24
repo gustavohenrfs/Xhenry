@@ -197,7 +197,8 @@ function renderAccounts(accounts) {
     host.replaceChildren(empty);
     return;
   }
-  host.replaceChildren(...visible.map((account) => {
+  const fragment = document.createDocumentFragment();
+  visible.forEach((account) => {
     const card = document.createElement("article");
     card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
     card.addEventListener("click", (event) => {
@@ -239,8 +240,9 @@ function renderAccounts(accounts) {
     note.className = "status-reveal mt-2 text-[11px] text-mute";
     note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
     card.append(name, handle, grid, reveal, note);
-    return card;
-  }));
+    fragment.append(card);
+  });
+  host.replaceChildren(fragment);
 }
 function renderFolders(folders) {
   const host = document.getElementById("folder-cards");
