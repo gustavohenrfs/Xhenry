@@ -12,6 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+  <link rel="stylesheet" href="/static/css/styles.css">
   <script>
     tailwind.config = {
       theme: {
@@ -66,6 +67,41 @@
       backdrop-filter: blur(10px);
     }
     .auth-modal.off { display: none !important; }
+
+    /* Efeito Neon no Nome */
+    #welcome-name {
+        color: #ff007f !important;
+        text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f, 0 0 40px #ff007f !important;
+        animation: pulse-neon 2s infinite alternate;
+    }
+    @keyframes pulse-neon {
+        from { text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f; }
+        to { text-shadow: 0 0 20px #ff007f, 0 0 40px #ff007f, 0 0 60px #ff007f; }
+    }
+    /* Esferas de Fundo */
+    #bg-orbs {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        overflow: hidden;
+    }
+    .orb {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(100px);
+        opacity: .55;
+        animation: orb-float 28s ease-in-out infinite;
+    }
+    .orb.pink { background: #ff2ec8; width: 420px; height: 420px; top: 8%; left: 12%; animation-delay: 0s; }
+    .orb.purple { background: #8c50dc; width: 380px; height: 380px; bottom: 12%; right: 18%; animation-delay: -9s; }
+    .orb.gold { background: #d4af37; width: 320px; height: 320px; top: 55%; left: 65%; animation-delay: -18s; }
+    @keyframes orb-float {
+        0%,100% { transform: translate(0,0) scale(1); }
+        25% { transform: translate(35px, -28px) scale(1.04); }
+        50% { transform: translate(-22px, 32px) scale(0.96); }
+        75% { transform: translate(18px, -15px) scale(1.02); }
+    }
   </style>
 </head>
 <body class="bg-ink text-blush">
@@ -141,7 +177,7 @@
       <div class="px-4 py-6 md:px-8">
         <section id="pane-dashboard" class="pane on space-y-6">
           <div class="text-center mb-6">
-            <p class="text-lg tracking-wide text-mute">Bem vindo, <span id="greeting-name" class="font-display text-[22px] neon-text"></span></p>
+            <p class="text-lg tracking-wide text-mute">Bem vindo, <span id="welcome-name" class="metallic-pink glow-slow"></span></p>
           </div>
           <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
           <div class="grid gap-4 xl:grid-cols-5">
@@ -337,7 +373,7 @@
     function paintUser(user) {
       const name = user ? (user.nome_exibicao || user.email || "—") : "—";
       document.querySelectorAll("[data-user-name]").forEach((el) => { el.textContent = name; });
-      const greet = document.getElementById("greeting-name");
+      const greet = document.getElementById("welcome-name");
       if (greet && user) {
         const handle = user.username || (user.email ? user.email.split("@")[0] : "nome");
         greet.textContent = "@" + handle;
