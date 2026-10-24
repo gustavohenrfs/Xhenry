@@ -68,4 +68,29 @@ def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
         return {"status": "error", "message": str(e)}
 
 
+from app.models import DailyMetric
+from sqlalchemy import select, desc
+
+
+@router.get("/debug-metrics")
+def debug_metrics(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Rota temporária para debug de fuso horário.
+    Retorna os últimos 5 registros de daily_metrics.
+    Acesse via navegador: /debug-metrics
+    """
+    rows = db.scalars(
+        select(DailyMetric)
+        .order_by(desc(DailyMetric.metric_date))
+        .limit(5)
+    ).all()
+    return [
+        {
+            "metric_date": str(r.metric_date),
+            "impressions": r.impressions,
+            "likes": r.likes,
+        }
+        for r in rows
+    ]
+
+
 
