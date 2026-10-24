@@ -350,6 +350,7 @@ async function load() {
     renderAccounts(data.accounts);
     renderFolders(data.folders);
     renderOpsAccounts(data.accounts);
+    addTiltEffect();
   } catch (error) { toast(error.message || "Falha ao carregar."); }
 }
 async function verify(account) {
@@ -851,7 +852,7 @@ function addTiltEffect() {
     });
   });
 }
-if (document.readyState === 'complete') addTiltEffect();
-else window.addEventListener('load', addTiltEffect);
+
+document.addEventListener("DOMContentLoaded", () => { setTimeout(addTiltEffect, 500); });
 
 boot();

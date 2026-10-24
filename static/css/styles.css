@@ -55,14 +55,14 @@ body::before {
 #bg-orbs {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   overflow: hidden;
 }
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(120px);
+  filter: blur(100px);
   opacity: .7;
   animation: orb-float 28s ease-in-out infinite;
 }
@@ -122,21 +122,25 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 
 /* Holographic Glassmorphism Cards + Laser Border */
-.glow, .account-card, article[class*="glow"], .card {
-  background: linear-gradient(145deg, rgba(20,11,24,.85), rgba(16,9,20,.75));
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,46,200,.25);
-  position: relative;
-  overflow: hidden;
+.glow, .account-card {
+    position: relative;
+    background: linear-gradient(145deg, rgba(20,11,24,.85), rgba(16,9,20,.75));
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,46,200,.25);
 }
 .glow::before, .account-card::before {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  background: conic-gradient(from 0deg, #ff2ec8, #8c50dc, #d4af37, #ff2ec8);
-  z-index: -1;
-  animation: laser-rotate 4s linear infinite;
-  opacity: .35;
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(from 0deg, #ff2ec8, #8c50dc, #d4af37, #ff2ec8);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    z-index: -1;
+    animation: laser-rotate 4s linear infinite;
+    opacity: .6;
 }
 @keyframes laser-rotate {
   to { transform: rotate(360deg); }
