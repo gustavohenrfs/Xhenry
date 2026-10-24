@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import httpx
+from apify_client import ApifyClient
 from fastapi import HTTPException
 from sqlalchemy import inspect, select, text
 from sqlalchemy.orm import Session
@@ -48,10 +49,6 @@ def bearer_token() -> str:
 
 def token_configured() -> bool:
     return bool(bearer_token())
-
-
-def twitterapi_key() -> str:
-    return os.getenv("TWITTERAPI_KEY", "").strip()
 
 
 def ensure_user_auth_columns() -> None:
@@ -437,6 +434,67 @@ def save_snapshot_only(db: Session, account: XAccount, metrics: dict | None) -> 
     rebuild_folder_day(db, account.folder_id, day)
 
 
+def collect_via_apify(username: str) -> dict[str, dict]:
+    """Busca métricas (views, likes, RTs, replies) via Apify, substituindo TwitterAPI.io."""
+    token = os.getenv("APIFY_TOKEN", "").strip()
+    if not token or not username:
+        return {}
+    try:
+        client = ApifyClient(token)
+        run_input = {
+            "profiles": [username],
+            "max_items": 50,
+        }
+        run = client.actor("eiv/twitter-scraper").call(run_input=run_input)
+        dataset_id = run.get("defaultDatasetId")
+        if not dataset_id:
+            return {}
+        items = client.dataset(dataset_id).list_items().items or []
+        result = {}
+        for t in items:
+            if not isinstance(t, dict):
+                continue
+            tid = str(t.get("id") or t.get("tweet_id") or "")
+            if not tid:
+                continue
+            v = t.get("viewCount")
+            if isinstance(v, str):
+                try:
+                    v = int(v)
+                except ValueError:
+                    v = None
+            l = t.get("likeCount") or t.get("like_count") or t.get("likes")
+            if isinstance(l, str):
+                try:
+                    l = int(l)
+                except ValueError:
+                    l = None
+            r = t.get("retweetCount") or t.get("retweet_count") or t.get("retweets")
+            if isinstance(r, str):
+                try:
+                    r = int(r)
+                except ValueError:
+                    r = None
+            p = t.get("replyCount") or t.get("reply_count") or t.get("replies")
+            if isinstance(p, str):
+                try:
+                    p = int(p)
+                except ValueError:
+                    p = None
+            if v is None:
+                log.warning("viewCount nulo para o tweet %s", tid)
+            result[tid] = {
+                "view_count": v,
+                "like_count": l,
+                "retweet_count": r,
+                "reply_count": p,
+            }
+        return result
+    except Exception as exc:
+        log.warning("Apify error for @%s: %s", username, exc)
+        return {}
+
+
 def collect(username: str) -> dict[str, Any]:
     profile_status, profile_body = lookup_user(username)
     data = profile_body.get("data") if isinstance(profile_body.get("data"), dict) else None
@@ -455,69 +513,16 @@ def collect(username: str) -> dict[str, Any]:
         search_status, search_body = search_recent(username)
         search_ids = {str(row["id"]) for row in tweet_rows(search_body, user_id)}
 
-    # TwitterAPI.io para Views, Likes, RTs e Replies (não entregues pela API oficial)
-    key = twitterapi_key()
-    if key and username:
-        try:
-            with httpx.Client(timeout=60.0) as client:
-                resp = client.get(
-                    f"https://api.twitterapi.io/twitter/user/last_tweets?userName={username}",
-                    headers={"X-API-Key": key},
-                )
-                if resp.status_code == 200:
-                    tw_data = resp.json()
-                    log.info("TwitterAPI.io response for @%s: %s", username, str(tw_data)[:500])
-                    tw_tweets = tw_data.get("data", []) if isinstance(tw_data, dict) else []
-                    tw_map = {}
-                    for t in tw_tweets:
-                        tid = str(t.get("id") or t.get("tweet_id") or "") if isinstance(t, dict) else ""
-                        if tid:
-                            if isinstance(t, dict):
-                                v = t.get("viewCount")
-                                if isinstance(v, str):
-                                    try:
-                                        v = int(v)
-                                    except ValueError:
-                                        v = None
-                                l = t.get("likeCount") or t.get("like_count") or t.get("likes")
-                                if isinstance(l, str):
-                                    try:
-                                        l = int(l)
-                                    except ValueError:
-                                        l = None
-                                r = t.get("retweetCount") or t.get("retweet_count") or t.get("retweets")
-                                if isinstance(r, str):
-                                    try:
-                                        r = int(r)
-                                    except ValueError:
-                                        r = None
-                                p = t.get("replyCount") or t.get("reply_count") or t.get("replies")
-                                if isinstance(p, str):
-                                    try:
-                                        p = int(p)
-                                    except ValueError:
-                                        p = None
-                            else:
-                                v = l = r = p = None
-                            if v is None:
-                                log.warning("viewCount nulo para o tweet %s", tid)
-                            tw_map[tid] = {
-                                "view_count": v,
-                                "like_count": l,
-                                "retweet_count": r,
-                                "reply_count": p,
-                            }
-                    for t in timeline:
-                        tid = str(t.get("id") or "")
-                        if tid in tw_map:
-                            pm = t.setdefault("public_metrics", {})
-                            pm["view_count"] = tw_map[tid].get("view_count")
-                            pm["like_count"] = tw_map[tid].get("like_count")
-                            pm["retweet_count"] = tw_map[tid].get("retweet_count")
-                            pm["reply_count"] = tw_map[tid].get("reply_count")
-        except Exception as exc:
-            log.warning("TwitterAPI.io error for @%s: %s", username, exc)
-            pass
+    # Apify para Views, Likes, RTs e Replies (exclusivo agora)
+    apify_map = collect_via_apify(username)
+    for t in timeline:
+        tid = str(t.get("id") or "")
+        if tid in apify_map:
+            pm = t.setdefault("public_metrics", {})
+            pm["view_count"] = apify_map[tid].get("view_count")
+            pm["like_count"] = apify_map[tid].get("like_count")
+            pm["retweet_count"] = apify_map[tid].get("retweet_count")
+            pm["reply_count"] = apify_map[tid].get("reply_count")
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
     return {
