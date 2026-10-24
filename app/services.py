@@ -276,8 +276,13 @@ def derive_status(
 
 def upsert_tweet(db: Session, account: XAccount, raw: dict) -> date | None:
     posted = parse_time(raw.get("created_at")) or now_utc()
-    tz = zone(account.timezone)
-    local = posted.astimezone(tz)
+    br_tz = ZoneInfo("America/Sao_Paulo")
+    local = posted.astimezone(br_tz)
+    local_date = local.date()
+    # Filtra tweets muito antigos (lixo de 2013 etc.)
+    br_today = datetime.now(br_tz).date()
+    if (br_today - local_date).days > 7:
+        return None
     metrics = raw.get("public_metrics") if isinstance(raw.get("public_metrics"), dict) else {}
     impressions = metric_value(metrics, "impression_count")
     views = metric_value(metrics, "view_count")
@@ -308,7 +313,7 @@ def upsert_tweet(db: Session, account: XAccount, raw: dict) -> date | None:
     row.engagement_rate = rate_of(engagement, impressions)
     row.lang = raw.get("lang")
     row.collected_at = now_utc()
-    return local.date()
+    return local_date
 
 
 def recompute_days(db: Session, account: XAccount, days: set[date], profile_metrics: dict | None) -> None:
