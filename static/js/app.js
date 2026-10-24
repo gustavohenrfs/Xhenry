@@ -40,8 +40,8 @@ function paintUser(user) {
   document.querySelectorAll("[data-user-name]").forEach((el) => { el.textContent = name; });
   const greet = document.getElementById("welcome-name");
   if (greet && user) {
-    const handle = user.email ? user.email.split("@")[0] : (user.username || "nome");
-    greet.textContent = "@" + handle;
+    const handle = user.nome_exibicao || (user.email ? user.email.split("@")[0] : "nome");
+    greet.textContent = handle;
   }
   document.querySelectorAll("[data-user-avatar]").forEach((el) => {
     el.replaceChildren();
