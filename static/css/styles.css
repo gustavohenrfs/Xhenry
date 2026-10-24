@@ -1,5 +1,11 @@
 html, body { background: #07050a; color: #fff7fc; min-height: 100%; }
-body { font-family: Outfit, sans-serif; }
+body {
+  font-family: Outfit, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(255,0,127,0.15), transparent 40%),
+    radial-gradient(circle at bottom right, rgba(128,0,255,0.15), transparent 40%),
+    #0a0a0a;
+}
 
 /* Space Grotesk for titles, numbers, metrics, sidebar */
 .font-display, h1, h2, .nav-btn, .kpi-value, [id^="greeting"], .font-mono {
@@ -104,3 +110,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   backdrop-filter: blur(10px);
 }
 .auth-modal.off { display: none !important; }
+
+.neon-text {
+    color: #ff007f; /* Rosa metálico */
+    text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f, 0 0 40px #ff007f;
+    animation: pulse 2s infinite alternate;
+}
+@keyframes pulse {
+    from { text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f; }
+    to { text-shadow: 0 0 20px #ff007f, 0 0 40px #ff007f, 0 0 60px #ff007f; }
+}
