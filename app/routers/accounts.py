@@ -41,7 +41,6 @@ class AccountIn(BaseModel):
 
 class AccountUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=80)
-    is_archived: bool | None = None
 
 
 @router.get("/api/folders")
@@ -155,11 +154,9 @@ def update_account(account_id: int, payload: AccountUpdate, db: Session = Depend
         raise HTTPException(404, "Conta não encontrada.")
     if payload.display_name is not None:
         account.display_name = payload.display_name.strip() or None
-    if payload.is_archived is not None:
-        account.is_archived = payload.is_archived
     db.commit()
     db.refresh(account)
-    return {"id": account.id, "display_name": account.display_name, "is_archived": account.is_archived}
+    return {"id": account.id, "display_name": account.display_name}
 
 
 @router.get("/api/check/{handle}")
