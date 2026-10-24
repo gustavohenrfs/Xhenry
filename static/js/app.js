@@ -215,8 +215,8 @@ function renderAccounts(accounts) {
     handle.className = "text-sm text-mute";
     handle.textContent = "@" + account.username + " · " + account.folder_name;
     const grid = document.createElement("dl");
-    grid.className = "mt-4 grid grid-cols-3 gap-2 text-sm";
-    [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)]].forEach(([label, value]) => {
+    grid.className = "mt-4 grid grid-cols-2 gap-x-2 gap-y-3 text-sm sm:grid-cols-4";
+    [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
       dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
@@ -308,8 +308,8 @@ function renderOpsAccounts(accounts) {
     handle.className = "text-sm text-mute";
     handle.textContent = "@" + account.username + " · " + account.folder_name;
     const grid = document.createElement("dl");
-    grid.className = "mt-3 grid grid-cols-3 gap-2 text-sm";
-    [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)]].forEach(([label, value]) => {
+    grid.className = "mt-3 grid grid-cols-2 gap-x-2 gap-y-3 text-sm sm:grid-cols-4";
+    [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
       dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
@@ -337,6 +337,18 @@ function renderOpsAccounts(accounts) {
     return card;
   }));
 }
+function renderLastCollect(iso) {
+  const el = document.getElementById("last-collect");
+  if (!el) return;
+  el.classList.remove("text-amber-300");
+  if (!iso) { el.textContent = "Última coleta: nenhuma ainda"; return; }
+  const when = new Date(iso);
+  const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
+  const stamp = when.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const ago = mins < 1 ? "agora" : mins < 60 ? "há " + mins + " min" : mins < 1440 ? "há " + Math.floor(mins / 60) + " h" : "há " + Math.floor(mins / 1440) + " d";
+  el.textContent = "Última coleta: " + stamp + " (" + ago + ")";
+  if (mins > 90) el.classList.add("text-amber-300");
+}
 async function load() {
   const query = new URLSearchParams({ period: state.period });
   if (state.folderId) query.set("folder_id", String(state.folderId));
@@ -346,6 +358,7 @@ async function load() {
     const banner = document.getElementById("banner");
     banner.classList.add("hidden");
     document.getElementById("range-label").textContent = data.start + " → " + data.end;
+    renderLastCollect(data.last_collected_at);
     renderKpis(data.kpis);
     renderCharts(data);
     renderAccounts(data.accounts);

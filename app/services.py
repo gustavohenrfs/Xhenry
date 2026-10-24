@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import inspect, select, text
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.config import LOCAL_EMAIL, STATUS_LABELS, WEEKDAYS, X_API
@@ -722,6 +722,15 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         raise HTTPException(404, "Pasta não encontrada.")
     accounts = selected_accounts(db, folder_id)
     cards = [account_payload(db, account, start, end) for account in accounts]
+    ids = [account.id for account in accounts]
+    last_collected = None
+    if ids:
+        stamps = [
+            db.scalar(select(func.max(TweetSample.collected_at)).where(TweetSample.account_id.in_(ids))),
+            db.scalar(select(func.max(DailyMetric.collected_at)).where(DailyMetric.account_id.in_(ids))),
+        ]
+        stamps = [as_utc(item) for item in stamps if item is not None]
+        last_collected = max(stamps).isoformat() if stamps else None
     by_day: dict[date, dict[str, Any]] = {}
     day = start
     while day <= end:
@@ -768,6 +777,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     impression_values = [card["impressions"] for card in cards if card["impressions"] is not None]
     return {
         "period": period,
+        "last_collected_at": last_collected,
         "start": start.isoformat(),
         "end": end.isoformat(),
         "token_configured": token_configured(),
