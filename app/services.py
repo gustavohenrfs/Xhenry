@@ -470,16 +470,42 @@ def collect(username: str) -> dict[str, Any]:
                     tw_tweets = tw_data.get("data", []) if isinstance(tw_data, dict) else []
                     tw_map = {}
                     for t in tw_tweets:
-                        tid = str(t.get("id") or t.get("tweet_id") or "")
+                        tid = str(t.get("id") or t.get("tweet_id") or "") if isinstance(t, dict) else ""
                         if tid:
-                            v = t.get("viewCount")
+                            if isinstance(t, dict):
+                                v = t.get("viewCount")
+                                if isinstance(v, str):
+                                    try:
+                                        v = int(v)
+                                    except ValueError:
+                                        v = None
+                                l = t.get("likeCount") or t.get("like_count") or t.get("likes")
+                                if isinstance(l, str):
+                                    try:
+                                        l = int(l)
+                                    except ValueError:
+                                        l = None
+                                r = t.get("retweetCount") or t.get("retweet_count") or t.get("retweets")
+                                if isinstance(r, str):
+                                    try:
+                                        r = int(r)
+                                    except ValueError:
+                                        r = None
+                                p = t.get("replyCount") or t.get("reply_count") or t.get("replies")
+                                if isinstance(p, str):
+                                    try:
+                                        p = int(p)
+                                    except ValueError:
+                                        p = None
+                            else:
+                                v = l = r = p = None
                             if v is None:
                                 log.warning("viewCount nulo para o tweet %s", tid)
                             tw_map[tid] = {
                                 "view_count": v,
-                                "like_count": t.get("likeCount") or t.get("like_count") or t.get("likes"),
-                                "retweet_count": t.get("retweetCount") or t.get("retweet_count") or t.get("retweets"),
-                                "reply_count": t.get("replyCount") or t.get("reply_count") or t.get("replies"),
+                                "like_count": l,
+                                "retweet_count": r,
+                                "reply_count": p,
                             }
                     for t in timeline:
                         tid = str(t.get("id") or "")
