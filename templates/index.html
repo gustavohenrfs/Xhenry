@@ -443,7 +443,7 @@
     }
     function kpi(label, value, hot, trend) {
       const card = document.createElement("article");
-      card.className = "glow rounded-3xl border bg-card px-4 py-4 relative " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
+      card.className = "glow flex flex-col items-center justify-center rounded-3xl border bg-card px-4 py-4 relative text-center " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
       const k = document.createElement("p");
       k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
       k.textContent = label;
@@ -523,7 +523,7 @@
       }
       host.replaceChildren(...visible.map((account) => {
         const card = document.createElement("article");
-        card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
+        card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4 text-center" + (state.openId === account.id ? " is-open" : "");
         card.addEventListener("click", (event) => {
           if (event.target.closest("button")) return;
           state.openId = state.openId === account.id ? null : account.id;
@@ -536,7 +536,7 @@
         handle.className = "text-sm text-mute";
         handle.textContent = "@" + account.username + " · " + account.folder_name;
         const grid = document.createElement("dl");
-        grid.className = "mt-4 grid grid-cols-2 gap-x-2 gap-y-3 text-sm sm:grid-cols-4";
+        grid.className = "mt-4 grid grid-cols-2 items-center justify-center gap-x-2 gap-y-3 text-center text-sm sm:grid-cols-4";
         [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
           const wrap = document.createElement("div");
           const dt = document.createElement("dt");
