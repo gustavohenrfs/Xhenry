@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import INDEX, ROOT
 from app.database import get_db
+from app.routers.auth import current_user
 from app.services import token_configured
 
 router = APIRouter()
@@ -50,7 +51,7 @@ from app.models import DailyMetric
 from sqlalchemy import select, desc
 
 
-@router.get("/debug-metrics")
+@router.get("/debug-metrics", dependencies=[Depends(current_user)])
 def debug_metrics(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     """Rota temporária para debug de fuso horário.
     Retorna os últimos 5 registros de daily_metrics.

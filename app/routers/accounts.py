@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import DEFAULT_TZ, Folder, FolderKind, XAccount
+from app.routers.auth import current_user
 from app.services import (
     build_suggestions,
     check_handle,
@@ -59,7 +60,7 @@ def list_folders(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     ]
 
 
-@router.post("/api/folders", status_code=201)
+@router.post("/api/folders", status_code=201, dependencies=[Depends(current_user)])
 def create_folder(payload: FolderIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     if not payload.color.startswith("#") or len(payload.color) != 7:
         raise HTTPException(400, "Cor inválida. Use #RRGGBB.")
@@ -81,7 +82,7 @@ def create_folder(payload: FolderIn, db: Session = Depends(get_db)) -> dict[str,
     return {"id": folder.id, "name": folder.name, "kind": folder.kind.value, "color": folder.color}
 
 
-@router.patch("/api/folders/{folder_id}")
+@router.patch("/api/folders/{folder_id}", dependencies=[Depends(current_user)])
 def update_folder(folder_id: int, payload: FolderIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     folder = db.get(Folder, folder_id)
     if folder is None:
@@ -95,7 +96,7 @@ def update_folder(folder_id: int, payload: FolderIn, db: Session = Depends(get_d
     return {"id": folder.id, "name": folder.name}
 
 
-@router.delete("/api/folders/{folder_id}", status_code=204)
+@router.delete("/api/folders/{folder_id}", status_code=204, dependencies=[Depends(current_user)])
 def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
     folder = db.get(Folder, folder_id)
     if folder is None:
@@ -105,7 +106,7 @@ def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/api/accounts", status_code=201)
+@router.post("/api/accounts", status_code=201, dependencies=[Depends(current_user)])
 def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     folder = db.get(Folder, payload.folder_id)
     if folder is None or folder.is_archived:
@@ -128,7 +129,7 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
     return {"id": account.id, "folder_id": folder.id, "username": username, "warning": None, "check": None}
 
 
-@router.delete("/api/accounts/{account_id}", status_code=204)
+@router.delete("/api/accounts/{account_id}", status_code=204, dependencies=[Depends(current_user)])
 def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     account = db.get(XAccount, account_id)
     if account is None:
@@ -138,7 +139,7 @@ def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
     return Response(status_code=204)
 
 
-@router.patch("/api/accounts/{account_id}")
+@router.patch("/api/accounts/{account_id}", dependencies=[Depends(current_user)])
 def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
     account = db.get(XAccount, account_id)
     if account is None:
@@ -150,7 +151,7 @@ def update_account(account_id: int, payload: AccountUpdate, db: Session = Depend
     return {"id": account.id, "display_name": account.display_name}
 
 
-@router.get("/api/check/{handle}")
+@router.get("/api/check/{handle}", dependencies=[Depends(current_user)])
 def check_account(
     handle: str,
     folder_id: int | None = Query(default=None),
@@ -159,7 +160,7 @@ def check_account(
     return check_handle(db, normalize_username(handle), folder_id)
 
 
-@router.post("/api/check-all")
+@router.post("/api/check-all", dependencies=[Depends(current_user)])
 def check_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not token_configured():
         raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")

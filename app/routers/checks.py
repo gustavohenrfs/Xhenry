@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import ROOT
 from app.database import get_db
 from app.models import DEFAULT_TZ
+from app.routers.auth import current_user
 from app.services import (
     ask_grok,
     get_settings,
@@ -35,12 +36,12 @@ class SettingsIn(BaseModel):
     xai_api_key: str | None = None
 
 
-@router.get("/api/settings")
+@router.get("/api/settings", dependencies=[Depends(current_user)])
 def read_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
     return settings_payload(get_settings(db))
 
 
-@router.put("/api/settings")
+@router.put("/api/settings", dependencies=[Depends(current_user)])
 def write_settings(payload: SettingsIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     row = get_settings(db)
     if payload.telegram_token:
@@ -55,7 +56,7 @@ def write_settings(payload: SettingsIn, db: Session = Depends(get_db)) -> dict[s
     return settings_payload(row)
 
 
-@router.post("/api/telegram/test")
+@router.post("/api/telegram/test", dependencies=[Depends(current_user)])
 def test_telegram(db: Session = Depends(get_db)) -> dict[str, bool]:
     row = get_settings(db)
     when = datetime.now(zone(DEFAULT_TZ)).strftime("%d/%m/%Y %H:%M")
@@ -66,7 +67,7 @@ def test_telegram(db: Session = Depends(get_db)) -> dict[str, bool]:
     return {"ok": True}
 
 
-@router.post("/api/posts/review")
+@router.post("/api/posts/review", dependencies=[Depends(current_user)])
 async def review_post(
     caption: str = Form(...),
     media: UploadFile | None = File(default=None),
