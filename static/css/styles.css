@@ -121,13 +121,40 @@ header,
 }
 
 #kpis > *,
-#accounts > * {
+#accounts > *,
+#folder-cards > *,
+#ops-accounts > * {
   text-align: center;
 }
 
+#nav {
+  display: flex;
+  flex-direction: column;
+}
+
+#nav [data-tab="settings"] {
+  margin-top: auto;
+}
+
+#user-foot {
+  border-top: 1px solid rgba(103, 220, 255, 0.12);
+  padding-top: 1rem;
+}
+
 #kpis > * > *,
-#accounts > * > * {
+#accounts > * > *,
+#folder-cards > * > *,
+#ops-accounts > * > * {
   transform: translateZ(0);
+}
+
+.kpi-card,
+.account-card,
+#folder-cards > *,
+#ops-accounts > * {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 aside {
@@ -212,8 +239,24 @@ header {
   border-color: transparent !important;
   transform: perspective(900px) translateY(-6px) rotateX(1deg);
   box-shadow: 0 0 0 1px rgba(103,220,255,.24), 0 0 28px rgba(103,220,255,.18), 0 25px 65px rgba(0,0,0,.34);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+  filter: none !important;
+}
+
+.glow:hover > *,
+.account-card:hover > *,
+#kpis > *:hover > *,
+#folder-cards > *:hover > *,
+#ops-accounts > *:hover > *,
+#pane-dashboard article:hover > *,
+#pane-ops form:hover > *,
+#pane-post form:hover > *,
+#pane-settings form:hover > *,
+#pane-settings article:hover > * {
+  filter: none !important;
+  opacity: 1;
+  text-shadow: none;
 }
 
 .glow:hover::before,
@@ -270,15 +313,18 @@ h3,
   display: inline-block;
   color: var(--cyan) !important;
   background: linear-gradient(100deg, #fff 8%, var(--cyan) 42%, var(--violet) 72%, #fff 94%);
-  background-size: 220% auto;
+  background-size: 100% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 10px rgba(103,220,255,.55));
-  animation: name-shimmer 4s linear infinite, name-pulse 2.7s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(103,220,255,.32));
+  transition: filter 220ms ease, letter-spacing 220ms ease;
 }
 
-@keyframes name-shimmer { to { background-position: -220% center; } }
-@keyframes name-pulse { 50% { filter: drop-shadow(0 0 18px rgba(103,220,255,.9)); } }
+#welcome-name:hover,
+#welcome-name:focus-visible {
+  filter: drop-shadow(0 0 9px rgba(103,220,255,.7)) drop-shadow(0 0 18px rgba(155,140,255,.32));
+  letter-spacing: .025em;
+}
 
 input,
 textarea,
