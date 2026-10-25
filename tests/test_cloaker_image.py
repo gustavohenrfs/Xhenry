@@ -103,6 +103,29 @@ def test_rejects_animated_gif_and_fake_extension():
         build_variants(b"isto nao e imagem", "image/png", "texto.png", copies=1)
 
 
+def test_rejects_too_many_pixels():
+    big = io.BytesIO()
+    Image.new("L", (7000, 7000)).save(big, "PNG")  # 49 MP, arquivo pequeno
+    with pytest.raises(CloakerError, match="megapixels"):
+        build_variants(big.getvalue(), "image/png", "grande.png", copies=1)
+
+
+def test_decompression_bomb_is_400_not_500(monkeypatch):
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)  # 64x48 passa de 2x o limite
+    with pytest.raises(CloakerError):
+        build_variants(image_bytes("PNG"), "image/png", "bomba.png", copies=1)
+
+
+def test_grayscale_png_transparency_kept():
+    buf = io.BytesIO()
+    gray = Image.new("L", (32, 32), 200)
+    gray.paste(0, (8, 8, 24, 24))  # quadrado central com a cor-chave transparente
+    gray.save(buf, "PNG", transparency=0)
+    img = _open(build_variants(buf.getvalue(), "image/png", "cinza.png", copies=1, seed=8)[0])
+    assert img.mode in {"LA", "RGBA"}
+    assert img.getchannel("A").getextrema()[0] == 0
+
+
 def test_copies_bounds():
     raw = image_bytes()
     for copies in (0, 21):

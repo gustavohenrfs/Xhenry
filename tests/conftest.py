@@ -38,7 +38,7 @@ def duration_of(path: Path) -> float:
 def make_video(tmp_path):
     """Gera um mp4 de 1 s. Tamanho ímpar por padrão, para exercitar o libx264."""
 
-    def _make(audio: bool = True, size: str = "65x47") -> bytes:
+    def _make(audio: bool = True, size: str = "65x47", rotation: int = 0) -> bytes:
         out = tmp_path / f"src_{size}_{int(audio)}.mp4"
         cmd = [FFMPEG, "-y", "-loglevel", "error",
                "-f", "lavfi", "-i", f"testsrc=size={size}:rate=10:duration=1"]
@@ -50,6 +50,12 @@ def make_video(tmp_path):
             cmd += ["-c:a", "aac", "-shortest"]
         cmd.append(str(out))
         subprocess.run(cmd, check=True)
+        if rotation:
+            # Mesma marcação de rotação (displaymatrix) que celulares gravam em vídeos em pé.
+            rotated = tmp_path / f"rot_{rotation}.mp4"
+            subprocess.run([FFMPEG, "-y", "-loglevel", "error", "-display_rotation", str(rotation),
+                            "-i", str(out), "-c", "copy", str(rotated)], check=True)
+            out = rotated
         return out.read_bytes()
 
     return _make

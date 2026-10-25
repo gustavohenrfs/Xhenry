@@ -505,7 +505,7 @@ note.textContent = "(o arquivo só aceita fotos por enquanto)";
 document.getElementById("post-form").appendChild(note);
 
 // Cloaker: gera N variantes da mídia no servidor e entrega um .zip
-const cloaker = { intensity: "leve", zipUrl: "", previewUrl: "" };
+const cloaker = { intensity: "leve", zipUrl: "", previewUrl: "", originalRow: null, inFlight: false };
 const CLOAKER_NOTES = {
   leve: "Recorte de 1–2 px e ajuste de tom de até 2%.",
   media: "Recorte de 2–4 px e ajuste de tom de até 4%. Mais diferença, ainda invisível."
@@ -531,8 +531,9 @@ function syncCloakerControls() {
   const copies = Number(cloakerCopies.value);
   document.getElementById("cloaker-copies-out").textContent = copies;
   document.getElementById("cloaker-copies-note").classList.toggle("hidden", !isVideo(file));
-  cloakerSubmit.textContent = "Gerar " + versionsLabel(copies);
-  cloakerSubmit.disabled = !file;
+  cloakerSubmit.textContent = cloaker.inFlight ? "Gerando…" : "Gerar " + versionsLabel(copies);
+  cloakerSubmit.disabled = !file || cloaker.inFlight;
+  cloakerMedia.disabled = cloaker.inFlight;
   document.querySelectorAll("[data-intensity]").forEach((button) => {
     const on = button.dataset.intensity === cloaker.intensity;
     button.classList.toggle("bg-neon", on);
@@ -581,7 +582,9 @@ function cloakerRow(name, sha256, detail, muted) {
 function resetCloakerResults() {
   if (cloaker.zipUrl) URL.revokeObjectURL(cloaker.zipUrl);
   cloaker.zipUrl = "";
-  document.getElementById("cloaker-list").replaceChildren();
+  const list = document.getElementById("cloaker-list");
+  if (cloaker.originalRow) list.replaceChildren(cloaker.originalRow);
+  else list.replaceChildren();
   const download = document.getElementById("cloaker-download");
   download.classList.add("hidden");
   download.classList.remove("block");
@@ -596,6 +599,7 @@ async function sha256Hex(file) {
 
 async function onCloakerFile() {
   const file = cloakerFile();
+  cloaker.originalRow = null;
   resetCloakerResults();
   if (cloaker.previewUrl) URL.revokeObjectURL(cloaker.previewUrl);
   cloaker.previewUrl = "";
@@ -617,7 +621,8 @@ async function onCloakerFile() {
   preview.append(media);
   const original = await sha256Hex(file).catch(() => "");
   if (original && cloakerFile() === file) {
-    document.getElementById("cloaker-list").replaceChildren(cloakerRow("Original", original, sizeLabel(file.size), true));
+    cloaker.originalRow = cloakerRow("Original", original, sizeLabel(file.size), true);
+    document.getElementById("cloaker-list").prepend(cloaker.originalRow);
   }
 }
 
@@ -638,7 +643,7 @@ document.getElementById("cloaker-intensity").addEventListener("click", (event) =
 }));
 cloakerDrop.addEventListener("drop", (event) => {
   event.preventDefault();
-  if (!event.dataTransfer.files.length) return;
+  if (cloaker.inFlight || !event.dataTransfer.files.length) return;
   cloakerMedia.files = event.dataTransfer.files;
   onCloakerFile();
 });
@@ -646,23 +651,21 @@ cloakerDrop.addEventListener("drop", (event) => {
 cloakerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = cloakerFile();
-  if (!file) return;
+  if (!file || cloaker.inFlight) return;
   const copies = Number(cloakerCopies.value);
   const body = new FormData();
   body.set("media", file);
   body.set("copies", String(copies));
   body.set("intensity", cloaker.intensity);
   body.set("fresh_meta", String(document.getElementById("cloaker-fresh").checked));
-  cloakerSubmit.disabled = true;
-  cloakerSubmit.textContent = "Gerando…";
+  cloaker.inFlight = true;
+  syncCloakerControls();
   try {
     const response = await apiResponse("/api/cloaker", { method: "POST", body });
     const items = JSON.parse(atob(response.headers.get("X-Cloaker-Manifest") || "") || "[]");
     const blob = await response.blob();
     const list = document.getElementById("cloaker-list");
-    const originalRow = list.firstElementChild;
     resetCloakerResults();
-    if (originalRow) list.append(originalRow);
     items.forEach((item) => list.append(cloakerRow(item.name, item.sha256, sizeLabel(item.size), false)));
     const match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
     cloaker.zipUrl = URL.createObjectURL(blob);
@@ -675,6 +678,7 @@ cloakerForm.addEventListener("submit", async (event) => {
   } catch (error) {
     toast(error.message || "Não foi possível gerar as versões.");
   } finally {
+    cloaker.inFlight = false;
     syncCloakerControls();
   }
 });

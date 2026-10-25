@@ -19,11 +19,14 @@ import re
 import secrets
 import subprocess
 import tempfile
+import threading
+import time
 import unicodedata
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import BinaryIO
 
 import imageio_ffmpeg
 import numpy as np
@@ -35,17 +38,23 @@ IMAGE_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 VIDEO_TYPES = {"video/mp4": "mp4", "video/quicktime": "mov"}
 MAX_IMAGE_BYTES = 15_000_000
 MAX_VIDEO_BYTES = 100_000_000
+MAX_IMAGE_PIXELS = 40_000_000
 MAX_COPIES_IMAGE = 20
 MAX_COPIES_VIDEO = 10
 INTENSITIES = {"leve", "media"}
 MIN_SIDE = 16
-FFMPEG_TIMEOUT = 120
+PROBE_TIMEOUT = 30
+VIDEO_JOB_BUDGET = 600  # segundos para todas as cópias de um vídeo
 
 _PIL_FORMATS = {"jpg": "JPEG", "png": "PNG", "webp": "WEBP"}
 _TYPE_ALIASES = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
 _EXIF_IFD = 0x8769
 _DATETIME_ORIGINAL = 0x9003
 _IMAGE_UNIQUE_ID = 0xA420
+# Força o demuxer mov/mp4 e só arquivo local: playlists e ffconcat disfarçados de .mp4 são recusados.
+_FFMPEG_INPUT = ["-protocol_whitelist", "file", "-f", "mov"]
+# Um vídeo por vez: libx264 ocupa a CPU toda e cada job pode levar minutos.
+_VIDEO_SLOTS = threading.BoundedSemaphore(1)
 
 # Faixas das micro-alterações por intensidade.
 _PARAMS = {
@@ -58,12 +67,19 @@ class CloakerError(ValueError):
     """Entrada inválida; a mensagem vai direto para o usuário."""
 
 
+class CloakerBusy(CloakerError):
+    """Já existe um vídeo sendo processado."""
+
+
 @dataclass
 class Variant:
+    """Uma cópia gerada: em memória (`data`) ou em disco (`path`, vídeos com workdir)."""
+
     name: str
-    data: bytes
     sha256: str
     size: int
+    data: bytes = b""
+    path: Path | None = None
 
 
 def slugify(filename: str) -> str:
@@ -84,7 +100,12 @@ def _random_moment(rng: random.Random) -> datetime:
 def _open_image(raw: bytes, ext: str) -> Image.Image:
     try:
         img = Image.open(io.BytesIO(raw))
+        # Confere o tamanho antes de decodificar: um PNG pequeno pode ter bilhões de pixels.
+        if img.width * img.height > MAX_IMAGE_PIXELS:
+            raise CloakerError(f"Imagem acima de {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
         img.load()
+    except Image.DecompressionBombError as exc:
+        raise CloakerError(f"Imagem acima de {MAX_IMAGE_PIXELS // 1_000_000} megapixels.") from exc
     except (UnidentifiedImageError, OSError) as exc:
         raise CloakerError("Não foi possível abrir a imagem. O arquivo pode estar corrompido.") from exc
     if img.format != _PIL_FORMATS[ext]:
@@ -108,8 +129,12 @@ def cloak_image(raw: bytes, ext: str, rng: random.Random, intensity: str, fresh_
     """Uma variante da imagem, no mesmo formato e tamanho do original."""
     params = _PARAMS[intensity]
     img = ImageOps.exif_transpose(_open_image(raw, ext))
-    if img.mode == "P":
-        img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+    # Transparência por cor-chave (P, L ou RGB + "transparency") vira canal alfa de verdade,
+    # senão some ao limpar o info.
+    if "transparency" in img.info and img.mode in {"P", "L", "RGB"}:
+        img = img.convert("RGBA")
+    elif img.mode == "P":
+        img = img.convert("RGB")
     elif img.mode not in {"RGB", "RGBA", "L"}:
         img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
     if ext == "jpg" and img.mode == "RGBA":
@@ -158,33 +183,45 @@ def _ffmpeg() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def _video_size(src: Path) -> tuple[int, int]:
-    info = subprocess.run(
-        [_ffmpeg(), "-hide_banner", "-i", str(src)], capture_output=True, text=True, timeout=FFMPEG_TIMEOUT
-    ).stderr
-    match = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", info)
-    if not match:
+def probe_video(src: Path) -> float:
+    """Valida o vídeo e devolve a duração em segundos (60 se o arquivo não informar)."""
+    try:
+        info = subprocess.run(
+            [_ffmpeg(), "-hide_banner", *_FFMPEG_INPUT, "-i", str(src)],
+            capture_output=True, text=True, timeout=PROBE_TIMEOUT,
+        ).stderr
+    except subprocess.TimeoutExpired as exc:
+        raise CloakerError("Não foi possível ler o vídeo.") from exc
+    size = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", info)
+    if not size:
         raise CloakerError("O arquivo não é um vídeo válido.")
-    width, height = int(match.group(1)), int(match.group(2))
-    if min(width, height) < MIN_SIDE:
+    if min(int(size.group(1)), int(size.group(2))) < MIN_SIDE:
         raise CloakerError(f"Vídeo pequeno demais (mínimo {MIN_SIDE} px por lado).")
-    return width, height
+    duration = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", info)
+    if not duration:
+        return 60.0
+    h, m, s = duration.groups()
+    return int(h) * 3600 + int(m) * 60 + float(s)
 
 
-def cloak_video(src: Path, dst: Path, rng: random.Random, intensity: str, fresh_meta: bool = False) -> None:
+def cloak_video(
+    src: Path, dst: Path, rng: random.Random, intensity: str, fresh_meta: bool = False, timeout: float = 120
+) -> None:
     """Uma variante do vídeo em mp4 (H.264 + AAC), com dimensões pares."""
     params = _PARAMS[intensity]
-    width, height = _video_size(src)
-    crop = rng.randint(*params["crop"])
+    crop = 2 * rng.randint(*params["crop"])
     tone = params["tone"]
+    # O scale é relativo ao próprio quadro: com a rotação do celular já aplicada pelo ffmpeg,
+    # um vídeo em pé continua em pé. Lados pares porque o libx264 exige.
     filters = ",".join([
-        f"crop=iw-{2 * crop}:ih-{2 * crop}",
-        f"scale={width - width % 2}:{height - height % 2}",  # libx264 exige lados pares
+        f"crop=iw-{crop}:ih-{crop}",
+        f"scale=trunc((iw+{crop})/2)*2:trunc((ih+{crop})/2)*2",
+        "setsar=1",
         f"eq=brightness={rng.uniform(-tone, tone):.4f}:contrast={rng.uniform(1 - tone, 1 + tone):.4f}",
         "format=yuv420p",
     ])
     cmd = [
-        _ffmpeg(), "-y", "-loglevel", "error", "-i", str(src),
+        _ffmpeg(), "-y", "-loglevel", "error", *_FFMPEG_INPUT, "-i", str(src),
         "-map", "0:v:0", "-map", "0:a?", "-map_metadata", "-1", "-map_chapters", "-1",
         "-vf", filters,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", str(rng.randint(*params["crf"])),
@@ -197,8 +234,10 @@ def cloak_video(src: Path, dst: Path, rng: random.Random, intensity: str, fresh_
         cmd += ["-metadata", "creation_time=" + _random_moment(rng).strftime("%Y-%m-%dT%H:%M:%S.000000Z")]
     cmd.append(str(dst))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=FFMPEG_TIMEOUT)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise CloakerError("O vídeo demorou demais para processar. Tente menos cópias ou um vídeo mais curto.") from exc
+    except subprocess.CalledProcessError as exc:
         raise CloakerError("Não foi possível processar o vídeo.") from exc
 
 
@@ -224,8 +263,34 @@ def _check_request(raw: bytes, content_type: str, copies: int, intensity: str) -
     return kind, is_video
 
 
-def _variant(name: str, data: bytes) -> Variant:
-    return Variant(name=name, data=data, sha256=hashlib.sha256(data).hexdigest(), size=len(data))
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _video_variants(
+    raw: bytes, kind: str, slug: str, copies: int, intensity: str, fresh_meta: bool,
+    rng: random.Random, workdir: Path,
+) -> list[Variant]:
+    src = workdir / ("entrada." + VIDEO_TYPES[kind])
+    src.write_bytes(raw)
+    try:
+        duration = probe_video(src)
+        deadline = time.monotonic() + VIDEO_JOB_BUDGET
+        variants = []
+        for index in range(1, copies + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CloakerError("O vídeo demorou demais para processar. Tente menos cópias ou um vídeo mais curto.")
+            dst = workdir / f"{slug}_{index:02d}.mp4"
+            cloak_video(src, dst, rng, intensity, fresh_meta, timeout=min(60 + 3 * duration, remaining))
+            variants.append(Variant(dst.name, _sha256_file(dst), dst.stat().st_size, path=dst))
+        return variants
+    finally:
+        src.unlink(missing_ok=True)
 
 
 def build_variants(
@@ -236,36 +301,47 @@ def build_variants(
     intensity: str = "leve",
     fresh_meta: bool = False,
     seed: int | None = None,
+    workdir: Path | None = None,
 ) -> list[Variant]:
-    """Valida a entrada e gera `copies` variantes com hashes distintos entre si e do original."""
+    """Valida a entrada e gera `copies` variantes com hashes distintos entre si e do original.
+
+    Vídeos com `workdir` ficam em disco (`Variant.path`), quem chama apaga a pasta.
+    Sem `workdir`, usa uma pasta temporária própria e devolve tudo em memória.
+    """
     kind, is_video = _check_request(raw, content_type, copies, intensity)
     rng = random.Random(seed if seed is not None else secrets.randbits(64))
     slug = slugify(filename)
-    seen = {hashlib.sha256(raw).hexdigest()}
-    variants: list[Variant] = []
 
     if is_video:
-        tmp_root = ROOT / "data" / "tmp"
-        tmp_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=tmp_root) as work:
-            src = Path(work) / ("entrada." + VIDEO_TYPES[kind])
-            src.write_bytes(raw)
-            for index in range(1, copies + 1):
-                dst = Path(work) / f"saida_{index}.mp4"
-                cloak_video(src, dst, rng, intensity, fresh_meta)
-                variants.append(_variant(f"{slug}_{index:02d}.mp4", dst.read_bytes()))
-        return variants
+        if not _VIDEO_SLOTS.acquire(blocking=False):
+            raise CloakerBusy("Outro vídeo está sendo processado. Tente de novo em instantes.")
+        try:
+            if workdir is not None:
+                return _video_variants(raw, kind, slug, copies, intensity, fresh_meta, rng, workdir)
+            tmp_root = ROOT / "data" / "tmp"
+            tmp_root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=tmp_root) as work:
+                variants = _video_variants(raw, kind, slug, copies, intensity, fresh_meta, rng, Path(work))
+                for v in variants:
+                    v.data, v.path = v.path.read_bytes(), None
+                return variants
+        finally:
+            _VIDEO_SLOTS.release()
 
     ext = IMAGE_TYPES[kind]
+    seen = {hashlib.sha256(raw).hexdigest()}
+    variants: list[Variant] = []
     for index in range(1, copies + 1):
-        # Colisão é praticamente impossível; mesmo assim, nunca devolve hash repetido.
+        # Colisão é praticamente impossível; ainda assim, tenta de novo em vez de repetir hash.
         for _attempt in range(5):
             data = cloak_image(raw, ext, rng, intensity, fresh_meta)
             digest = hashlib.sha256(data).hexdigest()
             if digest not in seen:
                 break
+        else:
+            raise CloakerError("Não foi possível gerar versões distintas. Tente a intensidade média.")
         seen.add(digest)
-        variants.append(_variant(f"{slug}_{index:02d}.{ext}", data))
+        variants.append(Variant(f"{slug}_{index:02d}.{ext}", digest, len(data), data=data))
     return variants
 
 
@@ -273,11 +349,21 @@ def manifest(variants: list[Variant]) -> list[dict]:
     return [{"name": v.name, "sha256": v.sha256, "size": v.size} for v in variants]
 
 
-def zip_variants(variants: list[Variant]) -> bytes:
-    """Zip sem compressão (mídia já é comprimida) com as variantes e o manifest.json."""
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+def write_zip(variants: list[Variant], target: Path | BinaryIO) -> None:
+    """Zip sem compressão (mídia já é comprimida) com as variantes e o manifest.json.
+
+    Variantes em disco são copiadas aos pedaços, sem carregar o vídeo inteiro na memória.
+    """
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_STORED) as zf:
         for v in variants:
-            zf.writestr(v.name, v.data)
+            if v.path is not None:
+                zf.write(v.path, v.name)
+            else:
+                zf.writestr(v.name, v.data)
         zf.writestr("manifest.json", json.dumps(manifest(variants), indent=2))
+
+
+def zip_variants(variants: list[Variant]) -> bytes:
+    buf = io.BytesIO()
+    write_zip(variants, buf)
     return buf.getvalue()

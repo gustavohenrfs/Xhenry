@@ -66,6 +66,18 @@ def test_filename_sanitized(client):
         assert "foto-final_01.png" in zf.namelist()
 
 
+def test_busy_returns_429(client, make_video):
+    from app import cloaker
+
+    assert cloaker._VIDEO_SLOTS.acquire(blocking=False)
+    try:
+        resp = _post(client, make_video(), "video/mp4", name="v.mp4", copies=1)
+    finally:
+        cloaker._VIDEO_SLOTS.release()
+    assert resp.status_code == 429
+    assert "Outro vídeo" in resp.json()["detail"]
+
+
 def test_tmp_cleaned(client, make_video):
     tmp = ROOT / "data" / "tmp"
     before = set(tmp.iterdir()) if tmp.exists() else set()
