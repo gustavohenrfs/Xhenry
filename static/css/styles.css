@@ -129,6 +129,7 @@ header,
 
 #nav {
   display: flex;
+  flex: 1;
   flex-direction: column;
 }
 
@@ -385,6 +386,79 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .pane { display: none !important; }
 .pane.on { display: block !important; }
 #pane-settings.on { display: block !important; }
+
+/* Mantém o conteúdo nítido durante o hover e corrige os blocos de operações. */
+.glow:hover,
+.account-card:hover,
+#kpis > *:hover,
+#folder-cards > *:hover,
+#ops-accounts > *:hover,
+#pane-dashboard article:hover,
+#pane-ops form:hover,
+#pane-post form:hover,
+#pane-settings form:hover,
+#pane-settings article:hover {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+}
+
+.glow:hover > *,
+.account-card:hover > *,
+#kpis > *:hover > *,
+#folder-cards > *:hover > *,
+#ops-accounts > *:hover > *,
+#pane-dashboard article:hover > *,
+#pane-ops form:hover > *,
+#pane-post form:hover > *,
+#pane-settings form:hover > *,
+#pane-settings article:hover > * {
+  filter: none !important;
+  -webkit-filter: none !important;
+  opacity: 1 !important;
+  transform: translateZ(0);
+}
+
+#account-form {
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  padding: .25rem;
+  background: rgba(8, 12, 25, .62);
+}
+
+#account-form > input,
+#account-form > button {
+  min-height: 3rem;
+}
+
+#folder-cards > *,
+#ops-accounts > * {
+  min-width: 0;
+  min-height: 8rem;
+  text-align: center;
+}
+
+#pane-settings > div {
+  align-items: stretch;
+}
+
+#pane-settings form,
+#pane-settings article,
+#pane-settings form > h2,
+#pane-settings article > p:first-child {
+  text-align: center;
+}
+
+#pane-settings form > .flex,
+#pane-settings form > .flex-wrap {
+  justify-content: center;
+}
+
+#pane-settings form input,
+#pane-settings form textarea {
+  text-align: center;
+}
 
 .auth-modal {
   position: fixed;
