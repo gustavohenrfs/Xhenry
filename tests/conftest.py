@@ -61,6 +61,41 @@ def make_video(tmp_path):
     return _make
 
 
+def p3_icc() -> bytes:
+    """Perfil ICC v2 mínimo de Display P3 (matriz + gama 2.2), montado à mão para os testes."""
+    import struct
+
+    def s15(v: float) -> bytes:
+        return struct.pack(">i", round(v * 65536))
+
+    def xyz(x: float, y: float, z: float) -> bytes:
+        return b"XYZ " + b"\0" * 4 + s15(x) + s15(y) + s15(z)
+
+    text = b"Display P3 teste\0"
+    desc = b"desc" + b"\0" * 4 + struct.pack(">I", len(text)) + text + b"\0" * 8 + b"\0" * 3 + b"\0" * 67
+    curve = b"curv" + b"\0" * 4 + struct.pack(">IH", 1, 0x0233) + b"\0" * 2  # gama 2.2 (u8Fixed8)
+    blobs = {
+        b"desc": desc,
+        b"wtpt": xyz(0.9642, 1.0, 0.8249),
+        b"rXYZ": xyz(0.5151, 0.2412, -0.0011),
+        b"gXYZ": xyz(0.2920, 0.6922, 0.0419),
+        b"bXYZ": xyz(0.1571, 0.0666, 0.7841),
+        b"rTRC": curve, b"gTRC": curve, b"bTRC": curve,
+    }
+    table, data = b"", b""
+    offset = 128 + 4 + 12 * len(blobs)
+    for sig, blob in blobs.items():
+        blob += b"\0" * (-len(blob) % 4)
+        table += sig + struct.pack(">II", offset + len(data), len(blob))
+        data += blob
+    body = struct.pack(">I", len(blobs)) + table + data
+    header = (struct.pack(">I", 128 + len(body)) + b"\0" * 4 + bytes([2, 0x10, 0, 0])
+              + b"mntrRGB XYZ " + b"\0" * 12 + b"acsp" + b"\0" * 24 + b"\0" * 4
+              + s15(0.9642) + s15(1.0) + s15(0.8249) + b"\0" * 48)
+    assert len(header) == 128
+    return header + body
+
+
 def image_bytes(fmt: str = "JPEG", size=(64, 48), mode: str = "RGB", exif=None) -> bytes:
     """Imagem com gradiente (não uniforme, para o ruído e o recorte terem efeito)."""
     img = Image.new(mode, size)

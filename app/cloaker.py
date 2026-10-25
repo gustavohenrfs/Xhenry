@@ -30,7 +30,7 @@ from typing import BinaryIO
 
 import imageio_ffmpeg
 import numpy as np
-from PIL import Image, ImageEnhance, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageCms, ImageEnhance, ImageOps, UnidentifiedImageError
 
 from app.config import ROOT
 
@@ -97,24 +97,50 @@ def _random_moment(rng: random.Random) -> datetime:
 # ---------------------------------------------------------------- imagem
 
 
-def _open_image(raw: bytes, ext: str) -> Image.Image:
+def _open_image(raw: bytes, decode: bool = True) -> Image.Image:
+    too_big = f"Imagem acima de {MAX_IMAGE_PIXELS // 1_000_000} megapixels."
     try:
         img = Image.open(io.BytesIO(raw))
         # Confere o tamanho antes de decodificar: um PNG pequeno pode ter bilhões de pixels.
         if img.width * img.height > MAX_IMAGE_PIXELS:
-            raise CloakerError(f"Imagem acima de {MAX_IMAGE_PIXELS // 1_000_000} megapixels.")
-        img.load()
+            raise CloakerError(too_big)
+        if decode:
+            img.load()
     except Image.DecompressionBombError as exc:
-        raise CloakerError(f"Imagem acima de {MAX_IMAGE_PIXELS // 1_000_000} megapixels.") from exc
+        raise CloakerError(too_big) from exc
     except (UnidentifiedImageError, OSError) as exc:
         raise CloakerError("Não foi possível abrir a imagem. O arquivo pode estar corrompido.") from exc
-    if img.format != _PIL_FORMATS[ext]:
-        raise CloakerError("O conteúdo do arquivo não corresponde ao formato informado.")
+    if img.format not in _PIL_FORMATS.values():
+        raise CloakerError("Formato não suportado. Envie JPG, PNG, WebP, MP4 ou MOV.")
     if getattr(img, "is_animated", False):
         raise CloakerError("Imagens animadas não são suportadas.")
     if min(img.size) < MIN_SIDE:
         raise CloakerError(f"Imagem pequena demais (mínimo {MIN_SIDE} px por lado).")
     return img
+
+
+def detect_image_ext(raw: bytes) -> str:
+    """Extensão real da imagem pelo conteúdo (um WebP salvo como .jpg vira "webp")."""
+    fmt = _open_image(raw, decode=False).format
+    return next(ext for ext, name in _PIL_FORMATS.items() if name == fmt)
+
+
+def _to_srgb(img: Image.Image, icc: bytes | None) -> Image.Image:
+    """Converte para sRGB antes de o perfil ser descartado; sem isso, fotos P3/AdobeRGB ficam apagadas.
+
+    Perfil ilegível ou incompatível com o modo: segue sem conversão.
+    """
+    if not icc or img.mode not in {"RGB", "RGBA", "CMYK"}:
+        return img
+    try:
+        return ImageCms.profileToProfile(
+            img,
+            ImageCms.ImageCmsProfile(io.BytesIO(icc)),
+            ImageCms.createProfile("sRGB"),
+            outputMode="RGBA" if img.mode == "RGBA" else "RGB",
+        )
+    except (ImageCms.PyCMSError, OSError, ValueError):
+        return img
 
 
 def _fresh_exif(rng: random.Random) -> bytes:
@@ -126,9 +152,10 @@ def _fresh_exif(rng: random.Random) -> bytes:
 
 
 def cloak_image(raw: bytes, ext: str, rng: random.Random, intensity: str, fresh_meta: bool) -> bytes:
-    """Uma variante da imagem, no mesmo formato e tamanho do original."""
+    """Uma variante da imagem no formato `ext` (o real, ver `detect_image_ext`) e no tamanho do original."""
     params = _PARAMS[intensity]
-    img = ImageOps.exif_transpose(_open_image(raw, ext))
+    original = _open_image(raw)
+    img = _to_srgb(ImageOps.exif_transpose(original), original.info.get("icc_profile"))
     # Transparência por cor-chave (P, L ou RGB + "transparency") vira canal alfa de verdade,
     # senão some ao limpar o info.
     if "transparency" in img.info and img.mode in {"P", "L", "RGB"}:
@@ -328,7 +355,7 @@ def build_variants(
         finally:
             _VIDEO_SLOTS.release()
 
-    ext = IMAGE_TYPES[kind]
+    ext = detect_image_ext(raw)
     seen = {hashlib.sha256(raw).hexdigest()}
     variants: list[Variant] = []
     for index in range(1, copies + 1):

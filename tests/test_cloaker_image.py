@@ -8,7 +8,7 @@ import json
 import zipfile
 
 import pytest
-from conftest import image_bytes
+from conftest import image_bytes, p3_icc
 from PIL import Image
 
 from app.cloaker import CloakerError, build_variants, manifest, zip_variants
@@ -97,10 +97,42 @@ def test_rejects_animated_gif_and_fake_extension():
     with pytest.raises(CloakerError, match="animad"):
         build_variants(webp.getvalue(), "image/webp", "a.webp", copies=1)
 
-    with pytest.raises(CloakerError):
-        build_variants(image_bytes("PNG"), "image/jpeg", "falsa.jpg", copies=1)
+    with pytest.raises(CloakerError, match="Formato não suportado"):
+        build_variants(gif.getvalue(), "image/png", "gif-disfarcado.png", copies=1)
     with pytest.raises(CloakerError):
         build_variants(b"isto nao e imagem", "image/png", "texto.png", copies=1)
+
+
+def test_mismatched_extension_uses_real_format():
+    # WebP salvo como .jpg é comum em imagens baixadas da web.
+    variant = build_variants(image_bytes("WEBP"), "image/jpeg", "baixada.jpg", copies=1, seed=9)[0]
+    assert variant.name == "baixada_01.webp"
+    assert _open(variant).format == "WEBP"
+    png = build_variants(image_bytes("PNG"), "image/jpeg", "falsa.jpg", copies=1, seed=9)[0]
+    assert png.name == "falsa_01.png" and _open(png).format == "PNG"
+
+
+def _flat_jpeg(color, icc=None) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (48, 48), color).save(buf, "JPEG", quality=100, **({"icc_profile": icc} if icc else {}))
+    return buf.getvalue()
+
+
+def test_wide_gamut_converted_to_srgb_before_stripping():
+    color = (60, 170, 90)
+    plain = _open(build_variants(_flat_jpeg(color), "image/jpeg", "a.jpg", copies=1, seed=10)[0])
+    p3 = _open(build_variants(_flat_jpeg(color, p3_icc()), "image/jpeg", "b.jpg", copies=1, seed=10)[0])
+    assert "icc_profile" not in p3.info
+    # Verde P3 em sRGB fica mais saturado: o canal verde sobe e o vermelho desce em relação ao sem perfil.
+    r_plain, g_plain, _ = plain.getpixel((24, 24))
+    r_p3, g_p3, _ = p3.getpixel((24, 24))
+    assert r_p3 < r_plain - 8
+    assert g_p3 >= g_plain
+
+
+def test_broken_icc_profile_does_not_fail():
+    variant = build_variants(_flat_jpeg((60, 170, 90), b"lixo" * 40), "image/jpeg", "c.jpg", copies=1, seed=11)[0]
+    assert _open(variant).format == "JPEG"
 
 
 def test_rejects_too_many_pixels():
