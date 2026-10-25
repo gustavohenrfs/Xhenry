@@ -78,6 +78,40 @@ def test_busy_returns_429(client, make_video):
     assert "Outro vídeo" in resp.json()["detail"]
 
 
+JOB = "0123456789abcdef0123456789abcdef"
+
+
+def test_progress_tracked_during_job_and_cleared_after(client, monkeypatch):
+    from app.routers import cloaker as route
+    from app.cloaker import build_variants as real_build
+
+    seen = {}
+
+    def fake_build(*args, on_progress=None, **kwargs):
+        on_progress(0, 2)
+        seen["start"] = client.get(f"/api/cloaker/progress/{JOB}").json()
+        on_progress(1, 2)
+        seen["middle"] = client.get(f"/api/cloaker/progress/{JOB}").json()
+        return real_build(*args, on_progress=on_progress, **kwargs)
+
+    monkeypatch.setattr(route, "build_variants", fake_build)
+    resp = _post(client, image_bytes(), "image/jpeg", copies=2, job_id=JOB)
+    assert resp.status_code == 200, resp.text
+    assert seen["start"] == {"stage": "processing", "done": 0, "total": 2}
+    assert seen["middle"] == {"stage": "processing", "done": 1, "total": 2}
+    assert client.get(f"/api/cloaker/progress/{JOB}").status_code == 404
+
+
+def test_progress_unknown_job_404(client):
+    resp = client.get(f"/api/cloaker/progress/{'f' * 32}")
+    assert resp.status_code == 404
+
+
+def test_invalid_job_id_400(client):
+    resp = _post(client, image_bytes(), "image/jpeg", copies=1, job_id="../nao-hex")
+    assert resp.status_code == 400
+
+
 def test_tmp_cleaned(client, make_video):
     tmp = ROOT / "data" / "tmp"
     before = set(tmp.iterdir()) if tmp.exists() else set()

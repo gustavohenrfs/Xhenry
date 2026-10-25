@@ -26,7 +26,14 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
+
+# Chamado com (cópias prontas, total): uma vez com 0 antes de começar e depois de cada cópia.
+Progress = Callable[[int, int], None]
+
+
+def _no_progress(_done: int, _total: int) -> None:
+    pass
 
 import imageio_ffmpeg
 import numpy as np
@@ -40,11 +47,11 @@ MAX_IMAGE_BYTES = 15_000_000
 MAX_VIDEO_BYTES = 100_000_000  # VPS Contabo; o nginx precisa de client_max_body_size acima disso
 MAX_IMAGE_PIXELS = 40_000_000
 MAX_COPIES_IMAGE = 20
-MAX_COPIES_VIDEO = 10
+MAX_COPIES_VIDEO = 20
 INTENSITIES = {"leve", "media"}
 MIN_SIDE = 16
 PROBE_TIMEOUT = 30
-VIDEO_JOB_BUDGET = 600  # segundos para todas as cópias de um vídeo
+VIDEO_JOB_BUDGET = 1800  # segundos para todas as cópias; o proxy_read_timeout do nginx precisa ser maior
 # Falta de memória/CPU (ffmpeg morto) e estouro de tempo: o arquivo é válido, o servidor é que não deu conta.
 SERVER_LIMIT_MESSAGE = "O vídeo é muito grande para o servidor atual. Tente um vídeo menor ou faça upgrade."
 
@@ -301,7 +308,7 @@ def _sha256_file(path: Path) -> str:
 
 def _video_variants(
     raw: bytes, kind: str, slug: str, copies: int, intensity: str, fresh_meta: bool,
-    rng: random.Random, workdir: Path,
+    rng: random.Random, workdir: Path, on_progress: Progress,
 ) -> list[Variant]:
     src = workdir / ("entrada." + VIDEO_TYPES[kind])
     src.write_bytes(raw)
@@ -309,6 +316,7 @@ def _video_variants(
         duration = probe_video(src)
         deadline = time.monotonic() + VIDEO_JOB_BUDGET
         variants = []
+        on_progress(0, copies)
         for index in range(1, copies + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -316,6 +324,7 @@ def _video_variants(
             dst = workdir / f"{slug}_{index:02d}.mp4"
             cloak_video(src, dst, rng, intensity, fresh_meta, timeout=min(60 + 3 * duration, remaining))
             variants.append(Variant(dst.name, _sha256_file(dst), dst.stat().st_size, path=dst))
+            on_progress(index, copies)
         return variants
     finally:
         src.unlink(missing_ok=True)
@@ -330,6 +339,7 @@ def build_variants(
     fresh_meta: bool = False,
     seed: int | None = None,
     workdir: Path | None = None,
+    on_progress: Progress = _no_progress,
 ) -> list[Variant]:
     """Valida a entrada e gera `copies` variantes com hashes distintos entre si e do original.
 
@@ -345,11 +355,11 @@ def build_variants(
             raise CloakerBusy("Outro vídeo está sendo processado. Tente de novo em instantes.")
         try:
             if workdir is not None:
-                return _video_variants(raw, kind, slug, copies, intensity, fresh_meta, rng, workdir)
+                return _video_variants(raw, kind, slug, copies, intensity, fresh_meta, rng, workdir, on_progress)
             tmp_root = ROOT / "data" / "tmp"
             tmp_root.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(dir=tmp_root) as work:
-                variants = _video_variants(raw, kind, slug, copies, intensity, fresh_meta, rng, Path(work))
+                variants = _video_variants(raw, kind, slug, copies, intensity, fresh_meta, rng, Path(work), on_progress)
                 for v in variants:
                     v.data, v.path = v.path.read_bytes(), None
                 return variants
@@ -359,6 +369,7 @@ def build_variants(
     ext = detect_image_ext(raw)
     seen = {hashlib.sha256(raw).hexdigest()}
     variants: list[Variant] = []
+    on_progress(0, copies)
     for index in range(1, copies + 1):
         # Colisão é praticamente impossível; ainda assim, tenta de novo em vez de repetir hash.
         for _attempt in range(5):
@@ -370,6 +381,7 @@ def build_variants(
             raise CloakerError("Não foi possível gerar versões distintas. Tente a intensidade média.")
         seen.add(digest)
         variants.append(Variant(f"{slug}_{index:02d}.{ext}", digest, len(data), data=data))
+        on_progress(index, copies)
     return variants
 
 

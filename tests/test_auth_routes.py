@@ -21,6 +21,7 @@ PROTECTED = [
     ("get", "/api/check/fulano", None),
     ("post", "/api/check-all", None),
     ("get", "/debug-metrics", None),
+    ("get", "/api/cloaker/progress/0123456789abcdef0123456789abcdef", None),
 ]
 
 PUBLIC = ["/", "/health", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]

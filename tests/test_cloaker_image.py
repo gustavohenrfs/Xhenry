@@ -158,6 +158,12 @@ def test_grayscale_png_transparency_kept():
     assert img.getchannel("A").getextrema()[0] == 0
 
 
+def test_image_progress_callback():
+    calls = []
+    build_variants(image_bytes(), "image/jpeg", "p.jpg", copies=3, seed=12, on_progress=lambda d, t: calls.append((d, t)))
+    assert calls == [(0, 3), (1, 3), (2, 3), (3, 3)]
+
+
 def test_copies_bounds():
     raw = image_bytes()
     for copies in (0, 21):

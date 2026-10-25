@@ -136,8 +136,14 @@ def test_job_budget_reports_server_limit(make_video, monkeypatch):
 def test_video_limits():
     with pytest.raises(CloakerError, match="Vídeo acima de 100 MB"):
         build_variants(b"\0" * 100_000_001, "video/mp4", "grande.mp4", copies=1)
-    with pytest.raises(CloakerError, match="entre 1 e 10 cópias"):
-        build_variants(b"\0" * 10, "video/mp4", "muitas.mp4", copies=11)
+    with pytest.raises(CloakerError, match="entre 1 e 20 cópias"):
+        build_variants(b"\0" * 10, "video/mp4", "muitas.mp4", copies=21)
+
+
+def test_video_progress_callback(make_video):
+    calls = []
+    build_variants(make_video(), "video/mp4", "p.mp4", copies=2, seed=12, on_progress=lambda d, t: calls.append((d, t)))
+    assert calls == [(0, 2), (1, 2), (2, 2)]
 
 
 def test_mov_comes_out_as_mp4(make_video):

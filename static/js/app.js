@@ -505,10 +505,10 @@ note.textContent = "(o arquivo só aceita fotos por enquanto)";
 document.getElementById("post-form").appendChild(note);
 
 // Cloaker: gera N variantes da mídia no servidor e entrega um .zip
-const cloaker = { intensity: "leve", zipUrl: "", previewUrl: "", originalRow: null, inFlight: false };
+const cloaker = { intensity: "leve", zipUrl: "", previewUrl: "", originalRow: null, inFlight: false, phase: "", progressPct: 0 };
 // Mesmos limites de app/cloaker.py; conferidos aqui para não subir o arquivo à toa.
 const CLOAKER_MAX_VIDEO_BYTES = 100e6;
-const CLOAKER_MAX_VIDEO_COPIES = 10;
+const CLOAKER_MAX_VIDEO_COPIES = 20;
 const CLOAKER_NOTES = {
   leve: "Recorte de 1–2 px e ajuste de tom de até 2%.",
   media: "Recorte de 2–4 px e ajuste de tom de até 4%. Mais diferença, ainda invisível."
@@ -533,7 +533,6 @@ function syncCloakerControls() {
   if (Number(cloakerCopies.value) > max) cloakerCopies.value = String(max);
   const copies = Number(cloakerCopies.value);
   document.getElementById("cloaker-copies-out").textContent = copies;
-  document.getElementById("cloaker-copies-note").classList.toggle("hidden", !isVideo(file));
   cloakerSubmit.textContent = cloaker.inFlight ? "Gerando…" : "Gerar " + versionsLabel(copies);
   cloakerSubmit.disabled = !file || cloaker.inFlight;
   cloakerMedia.disabled = cloaker.inFlight;
@@ -651,6 +650,91 @@ cloakerDrop.addEventListener("drop", (event) => {
   onCloakerFile();
 });
 
+// Barra única que só avança: envio 0–20%, cópias 20–90%, zip 90–93%, download 93–100%.
+const CLOAKER_PHASES = { upload: [0, 20], processing: [20, 90], zipping: [90, 93], download: [93, 100] };
+
+function showCloakerProgress(phase, fraction, label) {
+  const [from, to] = CLOAKER_PHASES[phase];
+  const pct = Math.max(cloaker.progressPct || 0, from + (to - from) * Math.min(1, Math.max(0, fraction)));
+  cloaker.progressPct = pct;
+  document.getElementById("cloaker-progress").classList.remove("hidden");
+  document.getElementById("cloaker-progress-label").textContent = label;
+  document.getElementById("cloaker-progress-pct").textContent = Math.round(pct) + "%";
+  document.getElementById("cloaker-progress-bar").setAttribute("aria-valuenow", String(Math.round(pct)));
+  const fill = document.getElementById("cloaker-progress-fill");
+  fill.style.width = pct.toFixed(1) + "%";
+  // Entre uma cópia e outra o número não muda; o pulso mostra que o servidor segue trabalhando.
+  fill.classList.toggle("motion-safe:animate-pulse", phase === "processing" || phase === "zipping");
+}
+
+function hideCloakerProgress() {
+  cloaker.progressPct = 0;
+  document.getElementById("cloaker-progress").classList.add("hidden");
+  document.getElementById("cloaker-progress-fill").style.width = "0%";
+}
+
+function randomJobId() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Enquanto o POST não responde, pergunta ao servidor quantas cópias já ficaram prontas.
+function pollCloakerProgress(jobId) {
+  let busy = false;
+  const timer = setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const state = await api("/api/cloaker/progress/" + jobId);
+      if (!cloaker.inFlight || cloaker.phase === "download") return;
+      if (state.stage === "zipping") {
+        showCloakerProgress("zipping", 0.5, "Montando o .zip…");
+      } else if (state.total) {
+        const label = state.done >= state.total
+          ? "Finalizando…"
+          : "Gerando cópia " + (state.done + 1) + " de " + state.total + "…";
+        showCloakerProgress("processing", state.done / state.total, label);
+      }
+    } catch (error) {
+      // 404 enquanto o servidor ainda lê o arquivo: segue tentando.
+    } finally {
+      busy = false;
+    }
+  }, 1000);
+  return () => clearInterval(timer);
+}
+
+// XHR em vez de fetch: só ele informa o progresso do envio.
+function sendCloaker(body, onPhase) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/cloaker");
+    xhr.responseType = "blob";
+    if (token()) xhr.setRequestHeader("Authorization", "Bearer " + token());
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onPhase("upload", e.loaded / e.total); };
+    xhr.upload.onload = () => onPhase("processing", 0);
+    xhr.onreadystatechange = () => { if (xhr.readyState === XMLHttpRequest.HEADERS_RECEIVED) onPhase("download", 0); };
+    xhr.onprogress = (e) => { if (e.lengthComputable) onPhase("download", e.loaded / e.total); };
+    xhr.onerror = () => reject(new Error("Falha de conexão. Tente de novo."));
+    xhr.onload = async () => {
+      if (xhr.status === 200) {
+        resolve({
+          items: JSON.parse(atob(xhr.getResponseHeader("X-Cloaker-Manifest") || "") || "[]"),
+          blob: xhr.response,
+          disposition: xhr.getResponseHeader("Content-Disposition") || ""
+        });
+        return;
+      }
+      const text = xhr.response ? await xhr.response.text().catch(() => "") : "";
+      let body = {};
+      try { body = JSON.parse(text); } catch (error) { body = {}; }
+      reject(new Error(detailOf(body, xhr.statusText || "Não foi possível gerar as versões.")));
+    };
+    xhr.send(body);
+  });
+}
+
 cloakerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = cloakerFile();
@@ -660,32 +744,50 @@ cloakerForm.addEventListener("submit", async (event) => {
     return;
   }
   const copies = Number(cloakerCopies.value);
+  const jobId = randomJobId();
   const body = new FormData();
   body.set("media", file);
   body.set("copies", String(copies));
   body.set("intensity", cloaker.intensity);
   body.set("fresh_meta", String(document.getElementById("cloaker-fresh").checked));
+  body.set("job_id", jobId);
   cloaker.inFlight = true;
+  cloaker.phase = "upload";
   syncCloakerControls();
+  showCloakerProgress("upload", 0, "Enviando arquivo… 0%");
+  let stopPolling = () => {};
   try {
-    const response = await apiResponse("/api/cloaker", { method: "POST", body });
-    const items = JSON.parse(atob(response.headers.get("X-Cloaker-Manifest") || "") || "[]");
-    const blob = await response.blob();
+    const result = await sendCloaker(body, (phase, fraction) => {
+      if (phase === "upload") {
+        showCloakerProgress("upload", fraction, "Enviando arquivo… " + Math.round(fraction * 100) + "%");
+      } else if (phase === "processing" && cloaker.phase === "upload") {
+        cloaker.phase = "processing";
+        showCloakerProgress("processing", 0, "Preparando " + versionsLabel(copies) + "…");
+        stopPolling = pollCloakerProgress(jobId);
+      } else if (phase === "download") {
+        cloaker.phase = "download";
+        stopPolling();
+        showCloakerProgress("download", fraction, "Baixando o .zip… " + Math.round(fraction * 100) + "%");
+      }
+    });
     const list = document.getElementById("cloaker-list");
     resetCloakerResults();
-    items.forEach((item) => list.append(cloakerRow(item.name, item.sha256, sizeLabel(item.size), false)));
-    const match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
-    cloaker.zipUrl = URL.createObjectURL(blob);
+    result.items.forEach((item) => list.append(cloakerRow(item.name, item.sha256, sizeLabel(item.size), false)));
+    const match = /filename="([^"]+)"/.exec(result.disposition);
+    cloaker.zipUrl = URL.createObjectURL(result.blob);
     const download = document.getElementById("cloaker-download");
     download.href = cloaker.zipUrl;
     download.download = match ? match[1] : "cloaker.zip";
     download.classList.remove("hidden");
     download.classList.add("block");
-    toast(items.length === 1 ? "1 versão gerada." : items.length + " versões geradas.");
+    toast(result.items.length === 1 ? "1 versão gerada." : result.items.length + " versões geradas.");
   } catch (error) {
     toast(error.message || "Não foi possível gerar as versões.");
   } finally {
+    stopPolling();
     cloaker.inFlight = false;
+    cloaker.phase = "";
+    hideCloakerProgress();
     syncCloakerControls();
   }
 });

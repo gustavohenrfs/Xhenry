@@ -247,9 +247,7 @@
                   <label for="cloaker-copies" class="text-sm text-white">Cópias</label>
                   <output id="cloaker-copies-out" for="cloaker-copies" class="font-display text-2xl text-white">5</output>
                 </div>
-                <input id="cloaker-copies" type="range" min="1" max="20" value="5" class="mt-2 w-full accent-[#ff2ec8]">
-                <p id="cloaker-copies-note" class="mt-1 hidden text-xs text-mute">Vídeos geram no máximo 10 cópias.</p>
-              </div>
+                <input id="cloaker-copies" type="range" min="1" max="20" value="5" class="mt-2 w-full accent-[#ff2ec8]">              </div>
               <div>
                 <p class="text-sm text-white">Intensidade</p>
                 <div id="cloaker-intensity" class="mt-2 flex rounded-full border border-neon/30 p-1 text-sm" role="radiogroup" aria-label="Intensidade">
@@ -263,6 +261,15 @@
                 <span>Gravar metadados novos<span class="block text-xs text-mute">Data e ID aleatórios. Desmarcado, a cópia sai sem metadados.</span></span>
               </label>
               <button id="cloaker-submit" class="w-full rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit" disabled>Gerar 5 versões</button>
+              <div id="cloaker-progress" class="hidden space-y-2" aria-live="polite">
+                <div class="flex items-baseline justify-between gap-3 text-xs">
+                  <span id="cloaker-progress-label" class="text-white">Enviando arquivo…</span>
+                  <span id="cloaker-progress-pct" class="shrink-0 font-mono text-mute">0%</span>
+                </div>
+                <div id="cloaker-progress-bar" class="h-2 w-full overflow-hidden rounded-full border border-neon/30 bg-ink" role="progressbar" aria-labelledby="cloaker-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <div id="cloaker-progress-fill" class="h-full w-0 rounded-full bg-neon motion-safe:transition-[width] motion-safe:duration-500"></div>
+                </div>
+              </div>
             </form>
             <article id="cloaker-results" class="rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-3">
               <p id="cloaker-empty" class="text-sm text-mute">Envie uma imagem (JPG, PNG, WebP) ou vídeo (MP4, MOV).</p>
@@ -381,6 +388,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=6"></script>
+  <script src="/static/js/app.js?v=7"></script>
 </body>
 </html>
