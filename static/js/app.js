@@ -105,7 +105,7 @@ function setTab(tab) {
 }
 function kpi(label, value, hot, trend) {
   const card = document.createElement("article");
-  card.className = "glow rounded-3xl border bg-card px-4 py-4 relative " + (hot ? "border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : "border-neon/20");
+  card.className = "glow kpi-card flex min-h-24 flex-col items-center justify-center rounded-3xl border bg-card px-4 py-4 relative text-center items-center justify-center" + (hot ? " border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : " border-neon/20");
   const k = document.createElement("p");
   k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
   k.textContent = label;
@@ -135,21 +135,10 @@ function chartOptions() {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: {
-      legend: { labels: { boxWidth: 10, color: '#b39ab4' } },
-      tooltip: {
-        backgroundColor: 'rgba(16,9,20,.92)',
-        borderColor: 'rgba(255,46,200,.4)',
-        borderWidth: 1,
-        titleColor: '#fff7fc',
-        bodyColor: '#ffd6f2',
-        displayColors: false,
-        backdropFilter: 'blur(12px)'
-      }
-    },
+    plugins: { legend: { labels: { boxWidth: 10 } } },
     scales: {
-      x: { grid: { display: false }, ticks: { maxTicksLimit: 8, color: '#b39ab4' } },
-      y: { beginAtZero: true, ticks: { precision: 0, color: '#b39ab4' } }
+      x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+      y: { beginAtZero: true, ticks: { precision: 0 } }
     }
   };
 }
@@ -194,10 +183,9 @@ function renderAccounts(accounts) {
     host.replaceChildren(empty);
     return;
   }
-  const fragment = document.createDocumentFragment();
-  visible.forEach((account) => {
+  host.replaceChildren(...visible.map((account) => {
     const card = document.createElement("article");
-    card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4" + (state.openId === account.id ? " is-open" : "");
+    card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4 text-center flex flex-col items-center justify-center" + (state.openId === account.id ? " is-open" : "");
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
       state.openId = state.openId === account.id ? null : account.id;
@@ -210,7 +198,7 @@ function renderAccounts(accounts) {
     handle.className = "text-sm text-mute";
     handle.textContent = "@" + account.username + " · " + account.folder_name;
     const grid = document.createElement("dl");
-    grid.className = "mt-4 grid grid-cols-2 gap-x-2 gap-y-3 text-sm sm:grid-cols-4";
+    grid.className = "mt-4 grid grid-cols-2 items-center justify-center gap-x-2 gap-y-3 text-center text-sm sm:grid-cols-4";
     [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
@@ -237,9 +225,8 @@ function renderAccounts(accounts) {
     note.className = "status-reveal mt-2 text-[11px] text-mute";
     note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
     card.append(name, handle, grid, reveal, note);
-    fragment.append(card);
-  });
-  host.replaceChildren(fragment);
+    return card;
+  }));
 }
 function renderFolders(folders) {
   const host = document.getElementById("folder-cards");
@@ -368,7 +355,6 @@ async function load({ silent = false } = {}) {
     renderAccounts(data.accounts);
     renderFolders(data.folders);
     renderOpsAccounts(data.accounts);
-    addTiltEffect();
   } catch (error) {
     if (!silent) toast(error.message || "Falha ao carregar.");
   } finally {
@@ -566,7 +552,7 @@ document.getElementById("profile-form").addEventListener("submit", async (event)
   } catch (error) { toast(error.message || "Não salvou o perfil."); }
 });
 
-// Cropper.js integration for 1080x1080 square crop
+// Recorte quadrado 1080x1080 da foto de perfil (Cropper.js)
 const profilePhotoInput = document.getElementById("profile-photo");
 const cropModal = document.getElementById("crop-modal");
 const cropImage = document.getElementById("crop-image");
@@ -620,7 +606,6 @@ if (cropConfirm) {
     }, "image/jpeg", 0.9);
   });
 }
-
 document.getElementById("settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = {
@@ -822,6 +807,7 @@ async function boot() {
 // Date display + native picker
 const dateDisplay = document.getElementById("date-display");
 const dateInput = document.getElementById("specific-date");
+if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
 
 function formatBR(d) {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, "/");
@@ -856,28 +842,6 @@ if (dateDisplay && dateInput) {
 
 setPeriod("today");
 setAuthMode("login");
-
-// 3D Tilt on holographic cards
-function addTiltEffect() {
-  document.querySelectorAll('.glow, .account-card').forEach(card => {
-    if (card.dataset.tilt) return;  // evita empilhar listeners a cada refresh
-    card.dataset.tilt = '1';
-    card.addEventListener('mousemove', (e) => {
-      const rect = card.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width - 0.5) * 12;
-      const y = ((e.clientY - rect.top) / rect.height - 0.5) * -12;
-      card.style.transform = `perspective(900px) rotateX(${y}deg) rotateY(${x}deg)`;
-      card.style.transition = 'transform .1s ease-out';
-    });
-    card.addEventListener('mouseleave', () => {
-      card.style.transition = 'transform .4s cubic-bezier(0.23,1,0.32,1)';
-      card.style.transform = 'perspective(900px) rotateX(0) rotateY(0)';
-    });
-  });
-}
-
-document.addEventListener("DOMContentLoaded", () => { setTimeout(addTiltEffect, 500); });
-
 // Auto-refresh: a cada 60s, só na aba Dashboard, com a página visível e logado.
 const AUTO_REFRESH_MS = 60000;
 function autoRefresh() {
