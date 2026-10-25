@@ -56,6 +56,11 @@ def secret_key() -> str:
     return key
 
 
+def registration_open() -> bool:
+    """Cadastro só com ALLOW_REGISTRATION=true; ausente ou qualquer outro valor fecha."""
+    return os.getenv("ALLOW_REGISTRATION", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000).hex()
@@ -129,6 +134,8 @@ def current_user(
 
 @router.post("/api/register", status_code=201)
 def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    if not registration_open():
+        raise HTTPException(403, "Cadastro desativado. Peça acesso ao administrador.")
     email = normalize_email(payload.email)
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, "Já existe uma conta com esse email.")
