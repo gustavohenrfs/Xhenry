@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 import app.models  # registra tabelas no metadata
 from app.config import ROOT
 from app.database import Base, SessionLocal, engine, load_env_file
-from app.routers import accounts, auth, checks, pages
+from app.routers import accounts, auth, checks, cloaker, pages
 from app.services import ensure_owner, ensure_user_auth_columns, token_configured
 
 load_env_file(ROOT / ".env")
@@ -47,6 +47,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(checks.router)
+app.include_router(cloaker.router)
 app.include_router(pages.router)
 
 
