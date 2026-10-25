@@ -240,7 +240,7 @@
               <label id="cloaker-drop" class="block cursor-pointer rounded-2xl border border-dashed border-neon/40 bg-ink px-4 py-8 text-center transition-colors focus-within:ring-2 focus-within:ring-neon hover:border-neon">
                 <input id="cloaker-media" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" class="sr-only">
                 <span id="cloaker-drop-title" class="block text-sm text-white">Solte a imagem ou o vídeo aqui</span>
-                <span id="cloaker-drop-hint" class="mt-1 block text-xs text-mute">ou clique para escolher. JPG, PNG ou WebP até 15 MB; MP4 ou MOV até 20 MB.</span>
+                <span id="cloaker-drop-hint" class="mt-1 block text-xs text-mute">ou clique para escolher. JPG, PNG ou WebP até 15 MB; MP4 ou MOV até 100 MB.</span>
               </label>
               <div>
                 <div class="flex items-baseline justify-between">
@@ -248,7 +248,7 @@
                   <output id="cloaker-copies-out" for="cloaker-copies" class="font-display text-2xl text-white">5</output>
                 </div>
                 <input id="cloaker-copies" type="range" min="1" max="20" value="5" class="mt-2 w-full accent-[#ff2ec8]">
-                <p id="cloaker-copies-note" class="mt-1 hidden text-xs text-mute">Vídeos geram no máximo 3 cópias.</p>
+                <p id="cloaker-copies-note" class="mt-1 hidden text-xs text-mute">Vídeos geram no máximo 10 cópias.</p>
               </div>
               <div>
                 <p class="text-sm text-white">Intensidade</p>
@@ -381,6 +381,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=5"></script>
+  <script src="/static/js/app.js?v=6"></script>
 </body>
 </html>

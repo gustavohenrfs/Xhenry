@@ -37,10 +37,10 @@ from app.config import ROOT
 IMAGE_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 VIDEO_TYPES = {"video/mp4": "mp4", "video/quicktime": "mov"}
 MAX_IMAGE_BYTES = 15_000_000
-MAX_VIDEO_BYTES = 20_000_000  # limite do Render Free; subir ao migrar para o VPS
+MAX_VIDEO_BYTES = 100_000_000  # VPS Contabo; o nginx precisa de client_max_body_size acima disso
 MAX_IMAGE_PIXELS = 40_000_000
 MAX_COPIES_IMAGE = 20
-MAX_COPIES_VIDEO = 3  # limite do Render Free; subir ao migrar para o VPS
+MAX_COPIES_VIDEO = 10
 INTENSITIES = {"leve", "media"}
 MIN_SIDE = 16
 PROBE_TIMEOUT = 30

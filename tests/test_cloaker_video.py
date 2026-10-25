@@ -133,11 +133,11 @@ def test_job_budget_reports_server_limit(make_video, monkeypatch):
     assert str(info.value) == SERVER_LIMIT
 
 
-def test_render_free_video_limits():
-    with pytest.raises(CloakerError, match="Vídeo acima de 20 MB"):
-        build_variants(b"\0" * 20_000_001, "video/mp4", "grande.mp4", copies=1)
-    with pytest.raises(CloakerError, match="entre 1 e 3 cópias"):
-        build_variants(b"\0" * 10, "video/mp4", "muitas.mp4", copies=4)
+def test_video_limits():
+    with pytest.raises(CloakerError, match="Vídeo acima de 100 MB"):
+        build_variants(b"\0" * 100_000_001, "video/mp4", "grande.mp4", copies=1)
+    with pytest.raises(CloakerError, match="entre 1 e 10 cópias"):
+        build_variants(b"\0" * 10, "video/mp4", "muitas.mp4", copies=11)
 
 
 def test_mov_comes_out_as_mp4(make_video):

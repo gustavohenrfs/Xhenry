@@ -506,9 +506,9 @@ document.getElementById("post-form").appendChild(note);
 
 // Cloaker: gera N variantes da mídia no servidor e entrega um .zip
 const cloaker = { intensity: "leve", zipUrl: "", previewUrl: "", originalRow: null, inFlight: false };
-// Mesmos limites de app/cloaker.py (Render Free); conferidos aqui para não subir o arquivo à toa.
-const CLOAKER_MAX_VIDEO_BYTES = 20e6;
-const CLOAKER_MAX_VIDEO_COPIES = 3;
+// Mesmos limites de app/cloaker.py; conferidos aqui para não subir o arquivo à toa.
+const CLOAKER_MAX_VIDEO_BYTES = 100e6;
+const CLOAKER_MAX_VIDEO_COPIES = 10;
 const CLOAKER_NOTES = {
   leve: "Recorte de 1–2 px e ajuste de tom de até 2%.",
   media: "Recorte de 2–4 px e ajuste de tom de até 4%. Mais diferença, ainda invisível."
@@ -613,7 +613,7 @@ async function onCloakerFile() {
   document.getElementById("cloaker-drop-title").textContent = file ? file.name : "Solte a imagem ou o vídeo aqui";
   document.getElementById("cloaker-drop-hint").textContent = file
     ? sizeLabel(file.size) + ". Clique para trocar."
-    : "ou clique para escolher. JPG, PNG ou WebP até 15 MB; MP4 ou MOV até 20 MB.";
+    : "ou clique para escolher. JPG, PNG ou WebP até 15 MB; MP4 ou MOV até 100 MB.";
   syncCloakerControls();
   if (!file) return;
   cloaker.previewUrl = URL.createObjectURL(file);
@@ -656,7 +656,7 @@ cloakerForm.addEventListener("submit", async (event) => {
   const file = cloakerFile();
   if (!file || cloaker.inFlight) return;
   if (isVideo(file) && file.size > CLOAKER_MAX_VIDEO_BYTES) {
-    toast("Vídeo acima de 20 MB.");
+    toast("Vídeo acima de " + CLOAKER_MAX_VIDEO_BYTES / 1e6 + " MB.");
     return;
   }
   const copies = Number(cloakerCopies.value);
