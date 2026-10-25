@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Cloaker", settings: "Configurações", archived: "Arquivadas" };
+const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas" };
 const TOKEN_KEY = "access_token";
 const state = { tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login" };
 let lineChart = null;
