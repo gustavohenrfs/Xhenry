@@ -37,10 +37,6 @@ class LoginIn(BaseModel):
     senha: str
 
 
-class ForgotIn(BaseModel):
-    email: str
-
-
 class ChangePasswordIn(BaseModel):
     nova_senha: str = Field(min_length=8, max_length=128)
 
@@ -192,17 +188,6 @@ async def update_me(
     return public_user(row)
 
 
-@router.post("/api/forgot-password")
-def forgot_password(payload: ForgotIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    email = normalize_email(payload.email)
-    user = db.scalar(select(User).where(User.email == email))
-    if user:
-        # Reset to default temp password
-        user.senha_hash = hash_password("xhenry123")
-        db.commit()
-    return {"ok": True, "message": "Se o email existir, a senha foi redefinida para xhenry123. Use-a para entrar e troque depois."}
-
-
 @router.post("/api/change-password")
 def change_password(payload: ChangePasswordIn, user=Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     row = db.get(User, user.id)
@@ -220,14 +205,3 @@ def delete_me(user=Depends(current_user), db: Session = Depends(get_db)):
         db.delete(row)
         db.commit()
     return None
-
-
-# ROTA TEMPORÁRIA PARA APAGAR CONTA POR EMAIL (só usar uma vez)
-@router.get("/api/delete-by-email")
-def delete_by_email(email: str, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == email.lower()))
-    if user:
-        db.delete(user)
-        db.commit()
-        return {"deleted": True}
-    return {"deleted": False}

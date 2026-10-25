@@ -57,7 +57,13 @@ def token_configured() -> bool:
 def ensure_user_auth_columns() -> None:
     # create_all não altera tabela que já existe.
     insp = inspect(engine)
-    if "users" not in insp.get_table_names():
+    tables = insp.get_table_names()
+    if "x_accounts" in tables:
+        account_cols = {col["name"] for col in insp.get_columns("x_accounts")}
+        if "is_archived" not in account_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE x_accounts ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT FALSE"))
+    if "users" not in tables:
         return
     cols = {col["name"] for col in insp.get_columns("users")}
     statements = []
@@ -67,6 +73,8 @@ def ensure_user_auth_columns() -> None:
         statements.append("ALTER TABLE users ADD COLUMN nome_exibicao VARCHAR(120)")
     if "avatar_url" not in cols:
         statements.append("ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512)")
+    if "logo_url" not in cols:
+        statements.append("ALTER TABLE users ADD COLUMN logo_url VARCHAR(512)")
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))

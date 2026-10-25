@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import INDEX, ROOT
@@ -47,27 +46,6 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "service": "xhenry", "token_configured": token_configured()}
 
 
-@router.get("/fix-db")
-def fix_is_archived_column(db: Session = Depends(get_db)) -> dict[str, str]:
-    """Rota temporária para adicionar colunas novas.
-    Acesse via navegador: https://seu-app.onrender.com/fix-db
-    Depois de usar, pode remover esta rota.
-    """
-    try:
-        db.execute(text("""
-            ALTER TABLE x_accounts 
-            ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE;
-        """))
-        db.execute(text("""
-            ALTER TABLE users 
-            ADD COLUMN IF NOT EXISTS logo_url VARCHAR(512);
-        """))
-        db.commit()
-        return {"status": "ok", "message": "Colunas atualizadas com sucesso!"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
 from app.models import DailyMetric
 from sqlalchemy import select, desc
 
@@ -91,20 +69,4 @@ def debug_metrics(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
         }
         for r in rows
     ]
-
-
-@router.get("/debug-limpar")
-def debug_limpar(db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Rota temporária para limpar dados antigos.
-    Executa DELETEs para limpar lixo de 2013 e dados anteriores a 2026-10-20.
-    Acesse via navegador: /debug-limpar
-    """
-    try:
-        db.execute(text("DELETE FROM daily_metrics WHERE metric_date < '2026-10-20'"))
-        db.execute(text("DELETE FROM tweet_samples WHERE posted_at < '2026-10-20'"))
-        db.commit()
-        return {"status": "ok", "message": "Dados antigos removidos com sucesso!"}
-    except Exception as e:
-        db.rollback()
-        return {"status": "error", "message": str(e)}
 
