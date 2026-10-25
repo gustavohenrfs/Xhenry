@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", settings: "Configurações", archived: "Arquivadas" };
+const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Cloaker", settings: "Configurações", archived: "Arquivadas" };
 const TOKEN_KEY = "access_token";
 const state = { tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login" };
 let lineChart = null;
@@ -73,16 +73,23 @@ function setAuthMode(mode) {
   document.querySelector("#auth-form button[type=submit]").textContent = register ? "Criar conta" : "Entrar";
   document.getElementById("auth-switch").textContent = register ? "Já tenho conta" : "Criar conta";
 }
-async function api(path, options) {
+// Envia o Bearer e lança o detail do servidor em caso de erro; devolve o Response cru.
+async function apiResponse(path, options) {
   const opts = Object.assign({}, options);
   const headers = new Headers(opts.headers || {});
   if (token() && !headers.has("Authorization")) headers.set("Authorization", "Bearer " + token());
   opts.headers = headers;
   const response = await fetch(path, opts);
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(detailOf(body, response.statusText));
+  }
+  return response;
+}
+async function api(path, options) {
+  const response = await apiResponse(path, options);
   if (response.status === 204) return null;
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(detailOf(body, response.statusText));
-  return body;
+  return response.json().catch(() => ({}));
 }
 function setPeriod(period) {
   state.period = period;
@@ -496,6 +503,182 @@ const note = document.createElement("p");
 note.className = "text-[10px] text-mute mt-1";
 note.textContent = "(o arquivo só aceita fotos por enquanto)";
 document.getElementById("post-form").appendChild(note);
+
+// Cloaker: gera N variantes da mídia no servidor e entrega um .zip
+const cloaker = { intensity: "leve", zipUrl: "", previewUrl: "" };
+const CLOAKER_NOTES = {
+  leve: "Recorte de 1–2 px e ajuste de tom de até 2%.",
+  media: "Recorte de 2–4 px e ajuste de tom de até 4%. Mais diferença, ainda invisível."
+};
+const cloakerForm = document.getElementById("cloaker-form");
+const cloakerMedia = document.getElementById("cloaker-media");
+const cloakerDrop = document.getElementById("cloaker-drop");
+const cloakerCopies = document.getElementById("cloaker-copies");
+const cloakerSubmit = document.getElementById("cloaker-submit");
+
+function cloakerFile() { return cloakerMedia.files[0] || null; }
+function isVideo(file) { return Boolean(file && file.type.startsWith("video/")); }
+function versionsLabel(n) { return n === 1 ? "1 versão" : n + " versões"; }
+function sizeLabel(bytes) {
+  return bytes >= 1e6 ? (bytes / 1e6).toFixed(1).replace(".", ",") + " MB" : Math.max(1, Math.round(bytes / 1e3)) + " KB";
+}
+
+function syncCloakerControls() {
+  const file = cloakerFile();
+  const max = isVideo(file) ? 10 : 20;
+  cloakerCopies.max = String(max);
+  if (Number(cloakerCopies.value) > max) cloakerCopies.value = String(max);
+  const copies = Number(cloakerCopies.value);
+  document.getElementById("cloaker-copies-out").textContent = copies;
+  document.getElementById("cloaker-copies-note").classList.toggle("hidden", !isVideo(file));
+  cloakerSubmit.textContent = "Gerar " + versionsLabel(copies);
+  cloakerSubmit.disabled = !file;
+  document.querySelectorAll("[data-intensity]").forEach((button) => {
+    const on = button.dataset.intensity === cloaker.intensity;
+    button.classList.toggle("bg-neon", on);
+    button.classList.toggle("text-ink", on);
+    button.classList.toggle("text-mute", !on);
+    button.setAttribute("aria-checked", String(on));
+  });
+  document.getElementById("cloaker-intensity-note").textContent = CLOAKER_NOTES[cloaker.intensity];
+}
+
+// Faixa de 16 células: cada uma vem de 4 caracteres do sha256, no tom entre roxo e rosa neon.
+function fingerprintStrip(sha256) {
+  const strip = document.createElement("div");
+  strip.className = "flex h-3 w-full gap-px overflow-hidden rounded";
+  strip.setAttribute("aria-hidden", "true");
+  for (let i = 0; i < 16; i += 1) {
+    const chunk = sha256.slice(i * 4, i * 4 + 4);
+    const hue = 268 + (parseInt(chunk.slice(0, 2), 16) / 255) * 48;
+    const light = 36 + (parseInt(chunk.slice(2), 16) / 255) * 34;
+    const cell = document.createElement("span");
+    cell.className = "flex-1";
+    cell.style.background = "hsl(" + hue.toFixed(1) + " 88% " + light.toFixed(1) + "%)";
+    strip.append(cell);
+  }
+  return strip;
+}
+
+function cloakerRow(name, sha256, detail, muted) {
+  const row = document.createElement("li");
+  row.className = "space-y-1.5";
+  const head = document.createElement("div");
+  head.className = "flex items-baseline justify-between gap-3 text-sm";
+  const label = document.createElement("span");
+  label.className = "min-w-0 truncate " + (muted ? "text-mute" : "text-white");
+  label.textContent = name;
+  const hash = document.createElement("span");
+  hash.className = "shrink-0 font-mono text-xs text-mute";
+  hash.title = sha256;
+  hash.textContent = sha256.slice(0, 8) + (detail ? " · " + detail : "");
+  head.append(label, hash);
+  row.append(head, fingerprintStrip(sha256));
+  if (muted) row.classList.add("opacity-60");
+  return row;
+}
+
+function resetCloakerResults() {
+  if (cloaker.zipUrl) URL.revokeObjectURL(cloaker.zipUrl);
+  cloaker.zipUrl = "";
+  document.getElementById("cloaker-list").replaceChildren();
+  const download = document.getElementById("cloaker-download");
+  download.classList.add("hidden");
+  download.classList.remove("block");
+  download.removeAttribute("href");
+}
+
+async function sha256Hex(file) {
+  if (!window.crypto || !crypto.subtle) return "";
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function onCloakerFile() {
+  const file = cloakerFile();
+  resetCloakerResults();
+  if (cloaker.previewUrl) URL.revokeObjectURL(cloaker.previewUrl);
+  cloaker.previewUrl = "";
+  const preview = document.getElementById("cloaker-preview");
+  preview.replaceChildren();
+  preview.classList.toggle("hidden", !file);
+  document.getElementById("cloaker-empty").classList.toggle("hidden", Boolean(file));
+  document.getElementById("cloaker-drop-title").textContent = file ? file.name : "Solte a imagem ou o vídeo aqui";
+  document.getElementById("cloaker-drop-hint").textContent = file
+    ? sizeLabel(file.size) + ". Clique para trocar."
+    : "ou clique para escolher. JPG, PNG ou WebP até 15 MB; MP4 ou MOV até 100 MB.";
+  syncCloakerControls();
+  if (!file) return;
+  cloaker.previewUrl = URL.createObjectURL(file);
+  const media = document.createElement(isVideo(file) ? "video" : "img");
+  media.src = cloaker.previewUrl;
+  media.className = "max-h-64 w-full rounded-2xl bg-ink object-contain";
+  if (isVideo(file)) { media.muted = true; media.controls = true; } else { media.alt = "Prévia do original"; }
+  preview.append(media);
+  const original = await sha256Hex(file).catch(() => "");
+  if (original && cloakerFile() === file) {
+    document.getElementById("cloaker-list").replaceChildren(cloakerRow("Original", original, sizeLabel(file.size), true));
+  }
+}
+
+cloakerMedia.addEventListener("change", onCloakerFile);
+cloakerCopies.addEventListener("input", syncCloakerControls);
+document.getElementById("cloaker-intensity").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-intensity]");
+  if (!button) return;
+  cloaker.intensity = button.dataset.intensity;
+  syncCloakerControls();
+});
+["dragenter", "dragover"].forEach((type) => cloakerDrop.addEventListener(type, (event) => {
+  event.preventDefault();
+  cloakerDrop.classList.add("border-neon", "bg-neon/10");
+}));
+["dragleave", "drop"].forEach((type) => cloakerDrop.addEventListener(type, () => {
+  cloakerDrop.classList.remove("border-neon", "bg-neon/10");
+}));
+cloakerDrop.addEventListener("drop", (event) => {
+  event.preventDefault();
+  if (!event.dataTransfer.files.length) return;
+  cloakerMedia.files = event.dataTransfer.files;
+  onCloakerFile();
+});
+
+cloakerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const file = cloakerFile();
+  if (!file) return;
+  const copies = Number(cloakerCopies.value);
+  const body = new FormData();
+  body.set("media", file);
+  body.set("copies", String(copies));
+  body.set("intensity", cloaker.intensity);
+  body.set("fresh_meta", String(document.getElementById("cloaker-fresh").checked));
+  cloakerSubmit.disabled = true;
+  cloakerSubmit.textContent = "Gerando…";
+  try {
+    const response = await apiResponse("/api/cloaker", { method: "POST", body });
+    const items = JSON.parse(atob(response.headers.get("X-Cloaker-Manifest") || "") || "[]");
+    const blob = await response.blob();
+    const list = document.getElementById("cloaker-list");
+    const originalRow = list.firstElementChild;
+    resetCloakerResults();
+    if (originalRow) list.append(originalRow);
+    items.forEach((item) => list.append(cloakerRow(item.name, item.sha256, sizeLabel(item.size), false)));
+    const match = /filename="([^"]+)"/.exec(response.headers.get("Content-Disposition") || "");
+    cloaker.zipUrl = URL.createObjectURL(blob);
+    const download = document.getElementById("cloaker-download");
+    download.href = cloaker.zipUrl;
+    download.download = match ? match[1] : "cloaker.zip";
+    download.classList.remove("hidden");
+    download.classList.add("block");
+    toast(items.length === 1 ? "1 versão gerada." : items.length + " versões geradas.");
+  } catch (error) {
+    toast(error.message || "Não foi possível gerar as versões.");
+  } finally {
+    syncCloakerControls();
+  }
+});
+syncCloakerControls();
 async function loadSettings() {
   try {
     const settings = await api("/api/settings");

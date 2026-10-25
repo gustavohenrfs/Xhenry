@@ -120,6 +120,7 @@
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Dashboard</button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
+        <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Cloaker</button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
       </nav>
       <div id="user-foot" class="mt-auto flex items-center gap-3 px-2">
@@ -158,6 +159,7 @@
           <button type="button" data-tab="dashboard" class="nav-btn active shrink-0 rounded-full px-3 py-2 text-xs">Dashboard</button>
           <button type="button" data-tab="ops" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Operações</button>
           <button type="button" data-tab="post" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Verificar Post</button>
+          <button type="button" data-tab="cloaker" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Cloaker</button>
           <button type="button" data-tab="settings" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Configurações</button>
         </div>
         <p id="banner" class="mt-3 hidden rounded-2xl border border-neon/40 bg-neon/10 px-3 py-2 text-sm text-neon"></p>
@@ -227,6 +229,48 @@
             <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Verificar Post</button>
             <article id="verdict" class="hidden rounded-2xl border border-neon/20 bg-ink p-4 text-sm leading-6"></article>
           </form>
+        </section>
+        <section id="pane-cloaker" class="pane">
+          <div class="grid gap-4 lg:grid-cols-5">
+            <form id="cloaker-form" class="glow space-y-5 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
+              <div>
+                <h2 class="font-display text-2xl text-white">Cloaker</h2>
+                <p class="mt-1 text-sm text-mute">Gera cópias com hash e metadados diferentes, visualmente iguais ao original.</p>
+              </div>
+              <label id="cloaker-drop" class="block cursor-pointer rounded-2xl border border-dashed border-neon/40 bg-ink px-4 py-8 text-center transition-colors focus-within:ring-2 focus-within:ring-neon hover:border-neon">
+                <input id="cloaker-media" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime" class="sr-only">
+                <span id="cloaker-drop-title" class="block text-sm text-white">Solte a imagem ou o vídeo aqui</span>
+                <span id="cloaker-drop-hint" class="mt-1 block text-xs text-mute">ou clique para escolher. JPG, PNG ou WebP até 15 MB; MP4 ou MOV até 100 MB.</span>
+              </label>
+              <div>
+                <div class="flex items-baseline justify-between">
+                  <label for="cloaker-copies" class="text-sm text-white">Cópias</label>
+                  <output id="cloaker-copies-out" for="cloaker-copies" class="font-display text-2xl text-white">5</output>
+                </div>
+                <input id="cloaker-copies" type="range" min="1" max="20" value="5" class="mt-2 w-full accent-[#ff2ec8]">
+                <p id="cloaker-copies-note" class="mt-1 hidden text-xs text-mute">Vídeos geram no máximo 10 cópias.</p>
+              </div>
+              <div>
+                <p class="text-sm text-white">Intensidade</p>
+                <div id="cloaker-intensity" class="mt-2 flex rounded-full border border-neon/30 p-1 text-sm" role="radiogroup" aria-label="Intensidade">
+                  <button type="button" data-intensity="leve" role="radio" class="flex-1 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon">Leve</button>
+                  <button type="button" data-intensity="media" role="radio" class="flex-1 rounded-full px-3 py-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neon">Média</button>
+                </div>
+                <p id="cloaker-intensity-note" class="mt-1 text-xs text-mute">Recorte de 1–2 px e ajuste de tom de até 2%.</p>
+              </div>
+              <label class="flex items-start gap-3 text-sm text-white">
+                <input id="cloaker-fresh" type="checkbox" class="mt-1 accent-[#ff2ec8]">
+                <span>Gravar metadados novos<span class="block text-xs text-mute">Data e ID aleatórios. Desmarcado, a cópia sai sem metadados.</span></span>
+              </label>
+              <button id="cloaker-submit" class="w-full rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit" disabled>Gerar 5 versões</button>
+            </form>
+            <article id="cloaker-results" class="rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-3">
+              <p id="cloaker-empty" class="text-sm text-mute">Envie uma imagem (JPG, PNG, WebP) ou vídeo (MP4, MOV).</p>
+              <div id="cloaker-preview" class="hidden"></div>
+              <ol id="cloaker-list" class="mt-5 space-y-3"></ol>
+              <a id="cloaker-download" class="mt-5 hidden w-full rounded-2xl border border-neon/40 px-5 py-3 text-center text-sm text-white hover:bg-neon hover:text-ink">Baixar .zip</a>
+            </article>
+          </div>
         </section>
         <section id="pane-settings" class="pane">
           <div class="grid gap-4 lg:grid-cols-2">
@@ -337,6 +381,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=2"></script>
+  <script src="/static/js/app.js?v=3"></script>
 </body>
 </html>
