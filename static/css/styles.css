@@ -120,6 +120,16 @@ header,
   -webkit-backdrop-filter: blur(22px) saturate(135%);
 }
 
+#kpis > *,
+#accounts > * {
+  text-align: center;
+}
+
+#kpis > * > *,
+#accounts > * > * {
+  transform: translateZ(0);
+}
+
 aside {
   border-right-color: rgba(103, 220, 255, 0.16) !important;
   background: linear-gradient(180deg, rgba(12, 18, 36, 0.9), rgba(7, 10, 21, 0.78)) !important;
@@ -143,6 +153,8 @@ header {
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
   transition: transform 260ms cubic-bezier(.2,.8,.2,1), box-shadow 260ms ease, border-color 260ms ease;
 }
 
@@ -200,6 +212,8 @@ header {
   border-color: transparent !important;
   transform: perspective(900px) translateY(-6px) rotateX(1deg);
   box-shadow: 0 0 0 1px rgba(103,220,255,.24), 0 0 28px rgba(103,220,255,.18), 0 25px 65px rgba(0,0,0,.34);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .glow:hover::before,
