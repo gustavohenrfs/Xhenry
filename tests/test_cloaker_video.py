@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
 
 import pytest
 from conftest import duration_of, probe
@@ -89,6 +90,54 @@ def test_video_to_disk_with_workdir(make_video, tmp_path):
         assert v.data == b"" and v.path is not None and v.path.parent == tmp_path
         assert v.sha256 == hashlib.sha256(v.path.read_bytes()).hexdigest()
         assert v.size == v.path.stat().st_size
+
+
+def test_ffmpeg_killed_reports_server_limit(make_video, monkeypatch):
+    # No Render Free o ffmpeg é morto por falta de memória (SIGKILL); não é culpa do arquivo.
+    raw = make_video()
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if "libx264" in cmd:
+            raise subprocess.CalledProcessError(-9, cmd)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(cloaker.subprocess, "run", fake_run)
+    with pytest.raises(CloakerError) as info:
+        build_variants(raw, "video/mp4", "grande.mp4", copies=1)
+    assert str(info.value) == SERVER_LIMIT
+
+
+SERVER_LIMIT = "O vídeo é muito grande para o servidor atual. Tente um vídeo menor ou faça upgrade."
+
+
+def test_ffmpeg_timeout_reports_server_limit(make_video, monkeypatch):
+    raw = make_video()
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if "libx264" in cmd:
+            raise subprocess.TimeoutExpired(cmd, 1)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(cloaker.subprocess, "run", fake_run)
+    with pytest.raises(CloakerError) as info:
+        build_variants(raw, "video/mp4", "lento.mp4", copies=1)
+    assert str(info.value) == SERVER_LIMIT
+
+
+def test_job_budget_reports_server_limit(make_video, monkeypatch):
+    monkeypatch.setattr(cloaker, "VIDEO_JOB_BUDGET", 0)
+    with pytest.raises(CloakerError) as info:
+        build_variants(make_video(), "video/mp4", "orcamento.mp4", copies=1)
+    assert str(info.value) == SERVER_LIMIT
+
+
+def test_render_free_video_limits():
+    with pytest.raises(CloakerError, match="Vídeo acima de 20 MB"):
+        build_variants(b"\0" * 20_000_001, "video/mp4", "grande.mp4", copies=1)
+    with pytest.raises(CloakerError, match="entre 1 e 3 cópias"):
+        build_variants(b"\0" * 10, "video/mp4", "muitas.mp4", copies=4)
 
 
 def test_mov_comes_out_as_mp4(make_video):

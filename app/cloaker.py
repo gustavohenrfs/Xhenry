@@ -37,14 +37,16 @@ from app.config import ROOT
 IMAGE_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 VIDEO_TYPES = {"video/mp4": "mp4", "video/quicktime": "mov"}
 MAX_IMAGE_BYTES = 15_000_000
-MAX_VIDEO_BYTES = 100_000_000
+MAX_VIDEO_BYTES = 20_000_000  # limite do Render Free; subir ao migrar para o VPS
 MAX_IMAGE_PIXELS = 40_000_000
 MAX_COPIES_IMAGE = 20
-MAX_COPIES_VIDEO = 10
+MAX_COPIES_VIDEO = 3  # limite do Render Free; subir ao migrar para o VPS
 INTENSITIES = {"leve", "media"}
 MIN_SIDE = 16
 PROBE_TIMEOUT = 30
 VIDEO_JOB_BUDGET = 600  # segundos para todas as cópias de um vídeo
+# Falta de memória/CPU (ffmpeg morto) e estouro de tempo: o arquivo é válido, o servidor é que não deu conta.
+SERVER_LIMIT_MESSAGE = "O vídeo é muito grande para o servidor atual. Tente um vídeo menor ou faça upgrade."
 
 _PIL_FORMATS = {"jpg": "JPEG", "png": "PNG", "webp": "WEBP"}
 _TYPE_ALIASES = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
@@ -262,10 +264,9 @@ def cloak_video(
     cmd.append(str(dst))
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise CloakerError("O vídeo demorou demais para processar. Tente menos cópias ou um vídeo mais curto.") from exc
-    except subprocess.CalledProcessError as exc:
-        raise CloakerError("Não foi possível processar o vídeo.") from exc
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        # O probe já validou o arquivo; falha aqui costuma ser o ffmpeg morto ou lento por falta de memória/CPU.
+        raise CloakerError(SERVER_LIMIT_MESSAGE) from exc
 
 
 # --------------------------------------------------------------- geração
@@ -279,7 +280,7 @@ def _check_request(raw: bytes, content_type: str, copies: int, intensity: str) -
     if not raw:
         raise CloakerError("O arquivo está vazio.")
     if is_video and len(raw) > MAX_VIDEO_BYTES:
-        raise CloakerError("Vídeo acima de 100 MB.")
+        raise CloakerError(f"Vídeo acima de {MAX_VIDEO_BYTES // 1_000_000} MB.")
     if not is_video and len(raw) > MAX_IMAGE_BYTES:
         raise CloakerError("Imagem acima de 15 MB.")
     limit = MAX_COPIES_VIDEO if is_video else MAX_COPIES_IMAGE
@@ -311,7 +312,7 @@ def _video_variants(
         for index in range(1, copies + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise CloakerError("O vídeo demorou demais para processar. Tente menos cópias ou um vídeo mais curto.")
+                raise CloakerError(SERVER_LIMIT_MESSAGE)
             dst = workdir / f"{slug}_{index:02d}.mp4"
             cloak_video(src, dst, rng, intensity, fresh_meta, timeout=min(60 + 3 * duration, remaining))
             variants.append(Variant(dst.name, _sha256_file(dst), dst.stat().st_size, path=dst))
