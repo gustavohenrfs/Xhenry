@@ -1,7 +1,11 @@
 const fmt = new Intl.NumberFormat("pt-BR");
 const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas" };
 const TOKEN_KEY = "access_token";
-const state = { tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login" };
+const state = {
+  tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login",
+  config: { allow_registration: false, password_reset: false }, resetToken: ""
+};
+const SESSION_EXPIRED = "Sua sessão expirou. Entre novamente.";
 let lineChart = null;
 let barChart = null;
 let toastTimer = 0;
@@ -28,6 +32,24 @@ function detailOf(body, fallback) {
   return fallback;
 }
 function token() { return localStorage.getItem(TOKEN_KEY) || ""; }
+// Lê o exp do JWT só para avisar antes; quem valida de verdade é o servidor.
+function tokenExpired() {
+  const t = token();
+  if (!t) return false;
+  try {
+    const payload = JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return payload.exp * 1000 <= Date.now();
+  } catch (error) {
+    return true;
+  }
+}
+function sessionExpired() {
+  localStorage.removeItem(TOKEN_KEY);
+  paintUser(null);
+  setAuthMode("login");
+  authMessage("auth-info", SESSION_EXPIRED);
+  showAuth(true);
+}
 function logout() {
   localStorage.removeItem(TOKEN_KEY);
   location.reload();
@@ -63,15 +85,49 @@ function paintUser(user) {
     }
   });
 }
+const AUTH_MODES = {
+  login: { title: "Entrar", submit: "Entrar" },
+  register: { title: "Criar conta", submit: "Criar conta" },
+  forgot: { title: "Recuperar senha", submit: "Enviar link pelo Telegram" },
+  reset: { title: "Nova senha", submit: "Salvar nova senha" }
+};
+// Mostra um aviso no modal de login (auth-info ou auth-error); texto vazio esconde.
+function authMessage(id, text) {
+  const el = document.getElementById(id);
+  el.textContent = text || "";
+  el.classList.toggle("hidden", !text);
+}
 function setAuthMode(mode) {
+  if (mode === "register" && !state.config.allow_registration) mode = "login";
   state.authMode = mode;
   const register = mode === "register";
-  document.getElementById("auth-title").textContent = register ? "Criar conta" : "Entrar";
-  document.getElementById("auth-name").classList.toggle("hidden", !register);
-  document.getElementById("auth-name-label").classList.toggle("hidden", !register);
-  document.getElementById("auth-name").required = register;
-  document.querySelector("#auth-form button[type=submit]").textContent = register ? "Criar conta" : "Entrar";
-  document.getElementById("auth-switch").textContent = register ? "Já tenho conta" : "Criar conta";
+  const reset = mode === "reset";
+  const field = (id, on) => {
+    document.getElementById(id + "-label").classList.toggle("hidden", !on);
+    const input = document.getElementById(id);
+    input.classList.toggle("hidden", !on);
+    input.required = on;
+  };
+  field("auth-name", register);
+  field("auth-email", !reset);
+  field("auth-password", mode !== "forgot");
+  field("auth-password2", reset);
+  document.getElementById("auth-password-label").textContent = reset ? "Nova senha" : "Senha";
+  document.getElementById("auth-title").textContent = AUTH_MODES[mode].title;
+  document.querySelector("#auth-form button[type=submit]").textContent = AUTH_MODES[mode].submit;
+  document.getElementById("forgot-link").classList.toggle("hidden", mode !== "login" || !state.config.password_reset);
+  const sw = document.getElementById("auth-switch");
+  sw.textContent = mode === "login" ? "Criar conta" : "Voltar para o login";
+  sw.classList.toggle("hidden", mode === "login" && !state.config.allow_registration);
+  authMessage("auth-info", "");
+  authMessage("auth-error", "");
+}
+async function loadConfig() {
+  try {
+    state.config = Object.assign(state.config, await api("/api/config"));
+  } catch (error) {
+    // Sem config: fica o padrão fechado (sem cadastro, sem recuperação).
+  }
 }
 // Envia o Bearer e lança o detail do servidor em caso de erro; devolve o Response cru.
 async function apiResponse(path, options) {
@@ -80,6 +136,11 @@ async function apiResponse(path, options) {
   if (token() && !headers.has("Authorization")) headers.set("Authorization", "Bearer " + token());
   opts.headers = headers;
   const response = await fetch(path, opts);
+  // 401 com token enviado = sessão vencida ou revogada: volta para o login.
+  if (response.status === 401 && headers.has("Authorization")) {
+    sessionExpired();
+    throw new Error(SESSION_EXPIRED);
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(detailOf(body, response.statusText));
@@ -726,6 +787,11 @@ function sendCloaker(body, onPhase) {
         });
         return;
       }
+      if (xhr.status === 401 && token()) {
+        sessionExpired();
+        reject(new Error(SESSION_EXPIRED));
+        return;
+      }
       const text = xhr.response ? await xhr.response.text().catch(() => "") : "";
       let body = {};
       try { body = JSON.parse(text); } catch (error) { body = {}; }
@@ -995,16 +1061,39 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
   btn.disabled = false;
   btn.textContent = orig;
 });
+function clearResetLink() {
+  state.resetToken = "";
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
 document.getElementById("auth-switch").addEventListener("click", () => {
+  if (state.authMode === "reset") clearResetLink();
   setAuthMode(state.authMode === "login" ? "register" : "login");
 });
+document.getElementById("forgot-link").addEventListener("click", () => setAuthMode("forgot"));
 document.getElementById("auth-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const error = document.getElementById("auth-error");
-  error.classList.add("hidden");
+  authMessage("auth-error", "");
   const email = document.getElementById("auth-email").value;
   const senha = document.getElementById("auth-password").value;
+  const json = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   try {
+    if (state.authMode === "forgot") {
+      const answer = await api("/api/password-reset/request", json({ email }));
+      authMessage("auth-info", answer.detail || "Link enviado ao Telegram.");
+      return;
+    }
+    if (state.authMode === "reset") {
+      if (senha !== document.getElementById("auth-password2").value) throw new Error("As senhas não conferem.");
+      await api("/api/password-reset/confirm", json({ token: state.resetToken, nova_senha: senha }));
+      clearResetLink();
+      setAuthMode("login");
+      document.getElementById("auth-password").value = "";
+      document.getElementById("auth-password2").value = "";
+      authMessage("auth-info", "Senha alterada. Entre com a nova senha.");
+      return;
+    }
+    // Token velho aqui faria o 401 de senha errada parecer sessão expirada.
+    localStorage.removeItem(TOKEN_KEY);
     if (state.authMode === "register") {
       await api("/api/register", {
         method: "POST",
@@ -1023,8 +1112,8 @@ document.getElementById("auth-form").addEventListener("submit", async (event) =>
     setTab("dashboard");
     await load();
   } catch (err) {
-    error.textContent = err.message || "Não entrou.";
-    error.classList.remove("hidden");
+    authMessage("auth-info", "");
+    authMessage("auth-error", err.message || "Não entrou.");
   }
 });
 document.addEventListener("click", (event) => {
@@ -1086,8 +1175,22 @@ document.addEventListener("click", (e) => {
 });
 
 async function boot() {
+  await loadConfig();
+  setAuthMode("login");
+  // Link do Telegram: /#reset=<token>. No hash para o token não ir ao servidor nem aos logs.
+  const reset = location.hash.match(/^#reset=([\w\-.]+)$/);
+  if (reset) {
+    state.resetToken = reset[1];
+    setAuthMode("reset");
+    showAuth(true);
+    return;
+  }
   if (!token()) {
     showAuth(true);
+    return;
+  }
+  if (tokenExpired()) {
+    sessionExpired();
     return;
   }
   try {
@@ -1096,6 +1199,7 @@ async function boot() {
     setTab("dashboard");
     await load();
   } catch (err) {
+    if (err.message === SESSION_EXPIRED) return;
     localStorage.removeItem(TOKEN_KEY);
     showAuth(true);
   }
@@ -1139,8 +1243,13 @@ if (dateDisplay && dateInput) {
 setPeriod("today");
 setAuthMode("login");
 // Auto-refresh: a cada 60s, só na aba Dashboard, com a página visível e logado.
+// O dashboard é público e nunca dá 401, então a expiração do token é conferida aqui.
 const AUTO_REFRESH_MS = 60000;
 function autoRefresh() {
+  if (tokenExpired()) {
+    sessionExpired();
+    return;
+  }
   if (state.tab === "dashboard" && token() && !document.hidden) load({ silent: true });
 }
 setInterval(autoRefresh, AUTO_REFRESH_MS);

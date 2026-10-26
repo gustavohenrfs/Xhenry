@@ -6,13 +6,14 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -20,10 +21,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
+from app.services import send_telegram, telegram_creds
 
+log = logging.getLogger("xhenry")
 router = APIRouter()
 _bearer = HTTPBearer(auto_error=False)
 TOKEN_TTL = 60 * 60 * 24 * 7
+RESET_TTL = 60 * 15
+RESET_COOLDOWN = 60
+# email -> último envio do link. Em memória: basta com um único worker, como no VPS.
+_reset_sent: dict[str, float] = {}
+RESET_INVALID = "Link inválido ou expirado. Peça um novo."
 
 
 class RegisterIn(BaseModel):
@@ -38,6 +46,15 @@ class LoginIn(BaseModel):
 
 
 class ChangePasswordIn(BaseModel):
+    nova_senha: str = Field(min_length=8, max_length=128)
+
+
+class ResetRequestIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+class ResetConfirmIn(BaseModel):
+    token: str = Field(min_length=1, max_length=2048)
     nova_senha: str = Field(min_length=8, max_length=128)
 
 
@@ -78,29 +95,77 @@ def verify_password(password: str, stored: str | None) -> bool:
     return hmac.compare_digest(check, digest)
 
 
-def issue_token(user_id: int) -> str:
+def _reset_key() -> bytes:
+    # Chave derivada: token de login não vale como link de redefinição, e vice-versa.
+    return hmac.new(secret_key().encode(), b"password-reset", hashlib.sha256).digest()
+
+
+def _sign(claims: dict[str, Any], key: bytes) -> str:
     header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    body = _b64(
-        json.dumps({"sub": str(user_id), "exp": int(time.time()) + TOKEN_TTL}, separators=(",", ":")).encode()
-    )
-    sig = hmac.new(secret_key().encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
+    body = _b64(json.dumps(claims, separators=(",", ":")).encode())
+    sig = hmac.new(key, f"{header}.{body}".encode(), hashlib.sha256).digest()
     return f"{header}.{body}.{_b64(sig)}"
+
+
+def _verify(token: str, key: bytes) -> dict[str, Any]:
+    """Payload do token se a assinatura confere e não expirou; senão ValueError."""
+    header, body, sig = token.split(".")
+    expected = hmac.new(key, f"{header}.{body}".encode(), hashlib.sha256).digest()
+    if not hmac.compare_digest(_b64_decode(sig), expected):
+        raise ValueError("assinatura")
+    payload = json.loads(_b64_decode(body))
+    if int(payload["exp"]) < int(time.time()):
+        raise ValueError("expirado")
+    return payload
+
+
+def issue_token(user_id: int) -> str:
+    return _sign({"sub": str(user_id), "exp": int(time.time()) + TOKEN_TTL}, secret_key().encode())
 
 
 def read_token(token: str) -> int:
     try:
-        header, body, sig = token.split(".")
-        expected = hmac.new(secret_key().encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
-        if not hmac.compare_digest(_b64_decode(sig), expected):
-            raise ValueError("assinatura")
-        payload = json.loads(_b64_decode(body))
-        if int(payload["exp"]) < int(time.time()):
-            raise ValueError("expirado")
-        return int(payload["sub"])
+        return int(_verify(token, secret_key().encode())["sub"])
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(401, "Token inválido.") from exc
+
+
+def _password_mark(user: Any) -> str:
+    # Muda junto com a senha: depois de redefinir, o mesmo link deixa de valer.
+    return hmac.new(_reset_key(), (user.senha_hash or "").encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def issue_reset_token(user: Any, ttl: int = RESET_TTL) -> str:
+    return _sign({"sub": str(user.id), "exp": int(time.time()) + ttl, "pwd": _password_mark(user)}, _reset_key())
+
+
+def read_reset_token(token: str, db: Session) -> User:
+    try:
+        payload = _verify(token, _reset_key())
+        user = db.get(User, int(payload["sub"]))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, RESET_INVALID) from exc
+    if user is None or not user.is_active or not hmac.compare_digest(str(payload.get("pwd", "")), _password_mark(user)):
+        raise HTTPException(400, RESET_INVALID)
+    return user
+
+
+def public_base_url(request: Request) -> str:
+    """PUBLIC_URL do .env (atrás do nginx a requisição chega como 127.0.0.1); senão a URL pedida."""
+    return (os.getenv("PUBLIC_URL", "").strip() or str(request.base_url)).rstrip("/")
+
+
+def reset_message(email: str, link: str) -> str:
+    return (
+        "🔐 Pedido de redefinição de senha no XHenry\n"
+        f"👤 Conta: {email}\n"
+        f"🔗 Link (vale {RESET_TTL // 60} min, uso único): {link}\n"
+        "Se não foi você, ignore esta mensagem."
+    )
 
 
 def normalize_email(value: str) -> str:
@@ -149,6 +214,13 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, An
     db.commit()
     db.refresh(user)
     return public_user(user)
+
+
+@router.get("/api/config")
+def public_config(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """O que a tela de login pode oferecer. Pública: roda antes de entrar."""
+    token, chat = telegram_creds(db)
+    return {"allow_registration": registration_open(), "password_reset": bool(token and chat)}
 
 
 @router.post("/api/login")
@@ -202,6 +274,35 @@ def change_password(payload: ChangePasswordIn, user=Depends(current_user), db: S
         raise HTTPException(401, "Usuário não encontrado.")
     row.senha_hash = hash_password(payload.nova_senha)
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/password-reset/request")
+def request_password_reset(payload: ResetRequestIn, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    secret_key()
+    token, chat = telegram_creds(db)
+    if not token or not chat:
+        raise HTTPException(503, "Recuperação indisponível: o bot do Telegram não está configurado.")
+    email = normalize_email(payload.email)
+    user = db.scalar(select(User).where(User.email == email))
+    now = time.time()
+    # Mesma resposta com ou sem conta, para não revelar quais emails existem.
+    if user is not None and user.is_active and now - _reset_sent.get(email, 0.0) >= RESET_COOLDOWN:
+        _reset_sent[email] = now
+        link = f"{public_base_url(request)}/#reset={issue_reset_token(user)}"
+        try:
+            send_telegram(token, chat, reset_message(email, link))
+        except HTTPException as exc:
+            log.warning("telegram reset não enviado: %s", exc.detail)
+    return {"ok": True, "detail": "Se o email estiver cadastrado, o link foi enviado ao Telegram do administrador."}
+
+
+@router.post("/api/password-reset/confirm")
+def confirm_password_reset(payload: ResetConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    user = read_reset_token(payload.token, db)
+    user.senha_hash = hash_password(payload.nova_senha)
+    db.commit()
+    _reset_sent.pop(user.email, None)
     return {"ok": True}
 
 
