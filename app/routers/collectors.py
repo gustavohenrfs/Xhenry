@@ -26,13 +26,13 @@ router = APIRouter(dependencies=[Depends(current_user)])
 class CollectorIn(BaseModel):
     handle: str = Field(min_length=1, max_length=16)
     proxy: str | None = Field(default=None, max_length=1000)
-    cookies: str | None = Field(default=None, max_length=20000)
+    cookies: str | None = Field(default=None, max_length=200_000)
 
 
 class CollectorUpdate(BaseModel):
     # None mantém o que está salvo; "" apaga.
     proxy: str | None = Field(default=None, max_length=1000)
-    cookies: str | None = Field(default=None, max_length=20000)
+    cookies: str | None = Field(default=None, max_length=200_000)
     is_active: bool | None = None
 
 

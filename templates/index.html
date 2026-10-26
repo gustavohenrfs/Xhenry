@@ -236,9 +236,13 @@
           <form id="collector-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-4">
             <div class="flex flex-wrap gap-2">
               <input id="collector-handle" maxlength="16" required placeholder="@burner1" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-              <input id="collector-proxy" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="Proxy: http://usuario:senha@ip:porta" class="min-w-64 flex-[2] rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <input id="collector-proxy" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="Proxy: ip:porta:usuario:senha" class="min-w-64 flex-[2] rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             </div>
-            <textarea id="collector-cookies" rows="3" maxlength="20000" autocomplete="off" spellcheck="false" placeholder="Cookies do x.com: o auth_token, o cabeçalho Cookie (auth_token=...; ct0=...) ou o JSON exportado pela extensão. Vazio = usa o login que já está no anyx do VPS." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 font-mono text-xs outline-none focus:border-neon"></textarea>
+            <label id="collector-drop" class="flex cursor-pointer flex-wrap items-center gap-3 rounded-2xl border-2 border-dashed border-neon/30 bg-ink px-4 py-5 text-sm transition hover:border-neon">
+              <input id="collector-file" type="file" accept=".json,application/json" class="hidden">
+              <span id="collector-file-label" class="flex-1 text-mute">Arraste aqui o arquivo .json dos cookies do x.com (exportado pela extensão) ou clique para escolher. Sem arquivo = usa o login que já está no anyx do VPS.</span>
+              <button id="collector-file-clear" type="button" class="hidden rounded-xl border border-neon/40 px-3 py-1 text-xs">Tirar arquivo</button>
+            </label>
             <div class="flex flex-wrap items-center gap-2">
               <button id="collector-submit" class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Adicionar coletor</button>
               <button id="collector-cancel" class="hidden rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Cancelar</button>
@@ -419,6 +423,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=14"></script>
+  <script src="/static/js/app.js?v=15"></script>
 </body>
 </html>

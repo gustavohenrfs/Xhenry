@@ -9,7 +9,7 @@ As métricas dos tweets são coletadas pelo `robo.py`, que roda no VPS (fora des
 O `robo.py` nunca entra logado nas contas monitoradas. Ele lê as timelines com contas descartáveis, os **coletores**, cadastradas na aba Coletores, cada uma com o seu proxy e os seus cookies do x.com.
 
 - Cada rodada do cron lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo. Com 3 coletores, são 3 contas por rodada, cada uma saindo pelo IP do seu coletor. Seguidores, no máximo 1 vez por hora por conta.
-- Proxy: `http://usuario:senha@ip:porta` (também `https://` e `socks5://`). Cookies: o `auth_token`, o cabeçalho `Cookie` ou o JSON exportado por uma extensão. Sem cookies, o robô usa o login que já estiver no `anyx` do VPS.
+- Proxy: `ip:porta:usuario:senha` (o formato dos vendedores) ou `http://usuario:senha@ip:porta` (também `https://` e `socks5://`). Cookies: arraste para a aba o arquivo `.json` exportado por uma extensão (Cookie-Editor, EditThisCookie) com a conta logada no x.com; o painel confere se tem o `auth_token`. Sem cookies, o robô usa o login que já estiver no `anyx` do VPS.
 - Proxy e cookies ficam em texto puro no banco (o robô precisa deles) e só aparecem mascarados no painel, para quem está logado.
 - Uma conta monitorada não pode ser coletor, e vice-versa.
 - 429 num coletor para a rodada e deixa o coletor de castigo até o horário que o X informar. Bloqueio, sessão caída e proxy fora também dão castigo e aviso no Telegram. Trocar cookies ou proxy na aba libera o coletor na hora.

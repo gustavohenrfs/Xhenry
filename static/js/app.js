@@ -1103,8 +1103,8 @@ function resetCollectorForm() {
   handle.value = "";
   handle.disabled = false;
   document.getElementById("collector-proxy").value = "";
-  document.getElementById("collector-cookies").value = "";
-  document.getElementById("collector-proxy").placeholder = "Proxy: http://usuario:senha@ip:porta";
+  clearCollectorFile();
+  document.getElementById("collector-proxy").placeholder = "Proxy: ip:porta:usuario:senha";
   document.getElementById("collector-submit").textContent = "Adicionar coletor";
   document.getElementById("collector-cancel").classList.add("hidden");
   document.getElementById("collector-hint").textContent = "Proxy e cookies ficam mascarados no painel; só o robô lê os valores.";
@@ -1115,8 +1115,8 @@ function editCollector(collector) {
   handle.value = "@" + collector.handle;
   handle.disabled = true;
   document.getElementById("collector-proxy").value = "";
-  document.getElementById("collector-cookies").value = "";
-  document.getElementById("collector-proxy").placeholder = collector.proxy ? "Atual: " + collector.proxy + " (vazio = mantém)" : "Proxy: http://usuario:senha@ip:porta";
+  clearCollectorFile();
+  document.getElementById("collector-proxy").placeholder = collector.proxy ? "Atual: " + collector.proxy + " (vazio = mantém)" : "Proxy: ip:porta:usuario:senha";
   document.getElementById("collector-submit").textContent = "Salvar @" + collector.handle;
   document.getElementById("collector-cancel").classList.remove("hidden");
   document.getElementById("collector-hint").textContent = "Campos vazios mantêm o que está salvo.";
@@ -1145,11 +1145,58 @@ async function removeCollector(collector) {
     await loadCollectors();
   } catch (error) { toast(error.message || "Não removeu."); }
 }
+// Cookies: só o arquivo .json exportado pela extensão (arrastar ou escolher). O servidor filtra x.com e exige auth_token.
+let collectorCookies = "";
+const COLLECTOR_FILE_HINT = document.getElementById("collector-file-label").textContent;
+function clearCollectorFile() {
+  collectorCookies = "";
+  document.getElementById("collector-file").value = "";
+  const label = document.getElementById("collector-file-label");
+  label.textContent = COLLECTOR_FILE_HINT;
+  label.classList.add("text-mute");
+  document.getElementById("collector-file-clear").classList.add("hidden");
+}
+function countXCookies(data) {
+  if (data && !Array.isArray(data) && Array.isArray(data.cookies)) data = data.cookies;
+  if (Array.isArray(data)) {
+    const mine = data.filter((c) => c && c.name && /(^|\.)(x|twitter)\.com$/.test(String(c.domain || ".x.com")));
+    return { total: mine.length, token: mine.some((c) => c.name === "auth_token" && c.value) };
+  }
+  if (data && typeof data === "object") return { total: Object.keys(data).length, token: Boolean(data.auth_token) };
+  return { total: 0, token: false };
+}
+async function loadCollectorFile(file) {
+  if (!file) return;
+  clearCollectorFile();
+  if (file.size > 200000) { toast("Arquivo grande demais para ser de cookies."); return; }
+  const text = (await file.text()).trim();
+  let data;
+  try { data = JSON.parse(text); } catch { toast("Esse arquivo não é um JSON válido."); return; }
+  const { total, token } = countXCookies(data);
+  if (!token) { toast("O arquivo não tem o cookie auth_token do x.com. Exporte os cookies com a conta logada."); return; }
+  collectorCookies = text;
+  const label = document.getElementById("collector-file-label");
+  label.textContent = "✓ " + file.name + " — " + total + " cookies do x.com, com auth_token";
+  label.classList.remove("text-mute");
+  document.getElementById("collector-file-clear").classList.remove("hidden");
+}
+const collectorDrop = document.getElementById("collector-drop");
+document.getElementById("collector-file").addEventListener("change", (event) => loadCollectorFile(event.target.files[0]));
+document.getElementById("collector-file-clear").addEventListener("click", (event) => { event.preventDefault(); clearCollectorFile(); });
+["dragenter", "dragover"].forEach((name) => collectorDrop.addEventListener(name, (event) => {
+  event.preventDefault();
+  collectorDrop.classList.add("border-neon");
+}));
+["dragleave", "drop"].forEach((name) => collectorDrop.addEventListener(name, () => collectorDrop.classList.remove("border-neon")));
+collectorDrop.addEventListener("drop", (event) => {
+  event.preventDefault();
+  loadCollectorFile(event.dataTransfer.files[0]);
+});
 document.getElementById("collector-cancel").addEventListener("click", resetCollectorForm);
 document.getElementById("collector-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const proxy = document.getElementById("collector-proxy").value.trim();
-  const cookies = document.getElementById("collector-cookies").value.trim();
+  const cookies = collectorCookies;
   if (collectorEditing) {
     const body = {};
     if (proxy) body.proxy = proxy;

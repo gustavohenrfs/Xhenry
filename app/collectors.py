@@ -16,9 +16,21 @@ LOGIN_COOKIES = ("auth_token", "ct0", "twid", "kdt")
 _TOKEN = re.compile(r"[0-9a-fA-F]{40}")
 
 
+def _colon_proxy(text: str) -> str:
+    """ip:porta:usuário:senha (formato dos vendedores de proxy) vira usuário:senha@ip:porta."""
+    scheme, sep, rest = text.rpartition("://")
+    if "@" in rest:
+        return text
+    host, port, *auth = rest.split(":", 3)
+    if len(auth) != 2 or not port.isdigit():
+        return text
+    user, password = (quote(value, safe="") for value in auth)
+    return f"{scheme}{sep}{user}:{password}@{host}:{port}"
+
+
 def parse_proxy(raw: str) -> str:
-    """Normaliza esquema://[usuário:senha@]host:porta. Sem esquema, assume http."""
-    text = raw.strip()
+    """Normaliza esquema://[usuário:senha@]host:porta (ou ip:porta:usuário:senha). Sem esquema, assume http."""
+    text = _colon_proxy(raw.strip())
     if "://" not in text:
         text = "http://" + text
     try:

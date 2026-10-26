@@ -27,6 +27,9 @@ SECRET = "senha-super-secreta"
     ("  SOCKS5://u:p@proxy.exemplo.com:1080 ", "socks5://u:p@proxy.exemplo.com:1080"),
     ("http://us%40er:p%3Ass@host:1", "http://us%40er:p%3Ass@host:1"),
     ("https://host:443", "https://host:443"),
+    # Formato dos vendedores: ip:porta:usuário:senha.
+    ("203.0.113.7:5619:usuario:senha123", "http://usuario:senha123@203.0.113.7:5619"),
+    ("socks5://1.2.3.4:1080:u:se:nha", "socks5://u:se%3Anha@1.2.3.4:1080"),
 ])
 def test_parse_proxy(raw, expected):
     assert parse_proxy(raw) == expected
