@@ -403,7 +403,12 @@ function renderOpsAccounts(accounts) {
     deleteBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs text-mute";
     deleteBtn.textContent = "Excluir";
     deleteBtn.addEventListener("click", () => removeAccount(account));
-    actions.append(editBtn, deleteBtn);
+    const archiveBtn = document.createElement("button");
+    archiveBtn.type = "button";
+    archiveBtn.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+    archiveBtn.textContent = "Arquivar";
+    archiveBtn.addEventListener("click", () => archiveAccount(account));
+    actions.append(editBtn, archiveBtn, deleteBtn);
     card.append(name, handle, grid, actions);
     return card;
   }));
@@ -484,6 +489,33 @@ async function removeAccount(account) {
   if (!ok) return;
   try { await api("/api/accounts/" + account.id, { method: "DELETE" }); await load(); }
   catch (error) { toast(error.message || "Não removeu."); }
+}
+
+async function setArchived(account, archived) {
+  await api("/api/accounts/" + account.id, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_archived: archived })
+  });
+}
+async function archiveAccount(account) {
+  const ok = await showConfirm(
+    "Arquivar conta",
+    "@" + account.username + " sai do dashboard e o robô para de coletar. O histórico fica guardado na aba Arquivadas."
+  );
+  if (!ok) return;
+  try {
+    await setArchived(account, true);
+    toast("@" + account.username + " arquivada.");
+    await load();
+  } catch (error) { toast(error.message || "Não arquivou."); }
+}
+async function unarchiveAccount(account) {
+  try {
+    await setArchived(account, false);
+    toast("@" + account.username + " voltou para o dashboard.");
+    await Promise.all([loadArchived(), load({ silent: true })]);
+  } catch (error) { toast(error.message || "Não desarquivou."); }
 }
 
 async function editAccount(account) {
@@ -893,32 +925,96 @@ async function loadSettings() {
   } catch (error) { toast(error.message || "Não leu as configurações."); }
 }
 
+let archivedCharts = [];
+function dateBR(iso) {
+  return iso ? new Date(iso).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "—";
+}
+function archivedCard(account) {
+  const card = document.createElement("article");
+  card.className = "glow rounded-2xl border border-neon/20 bg-card p-4";
+  const head = document.createElement("div");
+  head.className = "flex items-start justify-between gap-3";
+  const who = document.createElement("div");
+  who.className = "min-w-0";
+  const name = document.createElement("p");
+  name.className = "font-medium text-white";
+  name.textContent = account.display_name || "@" + account.username;
+  const handle = document.createElement("p");
+  handle.className = "text-sm text-mute";
+  handle.textContent = "@" + account.username + " · " + account.folder_name;
+  who.append(name, handle);
+  const badge = document.createElement("span");
+  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] st-" + (account.status || "none");
+  badge.textContent = account.status_label;
+  head.append(who, badge);
+
+  const dates = document.createElement("p");
+  dates.className = "mt-2 text-xs text-mute";
+  const span = account.first_post_at ? "posts de " + dateBR(account.first_post_at) + " a " + dateBR(account.last_post_at) : "nenhum post coletado";
+  dates.textContent = "Arquivada em " + dateBR(account.archived_at) + " · " + span;
+
+  const grid = document.createElement("dl");
+  grid.className = "mt-4 grid grid-cols-3 gap-x-2 gap-y-3 text-center text-sm sm:grid-cols-5";
+  [["Views", account.views], ["Curtidas", account.likes], ["Retweets", account.retweets], ["Replies", account.replies], ["Seguidores", account.followers]].forEach(([label, value]) => {
+    const wrap = document.createElement("div");
+    const dt = document.createElement("dt");
+    dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.className = "mt-1 text-white";
+    dd.textContent = num(value);
+    wrap.append(dt, dd);
+    grid.append(wrap);
+  });
+
+  const chartBox = document.createElement("div");
+  chartBox.className = "mt-4 h-32";
+  const history = account.history || [];
+  if (window.Chart && history.length) {
+    const canvas = document.createElement("canvas");
+    chartBox.append(canvas);
+    const options = chartOptions();
+    options.plugins.legend = { display: false };
+    archivedCharts.push(new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: history.map((day) => day.date.slice(5)),
+        datasets: [{
+          label: "Views", data: history.map((day) => day.views), borderColor: "#ff2ec8",
+          backgroundColor: "rgba(255,46,200,.16)", fill: true, tension: 0.35, pointRadius: history.length > 40 ? 0 : 2, borderWidth: 2
+        }]
+      },
+      options
+    }));
+  } else {
+    chartBox.className = "mt-4 flex h-16 items-center justify-center rounded-2xl border border-neon/10 text-xs text-mute";
+    chartBox.textContent = "Sem histórico diário de views.";
+  }
+
+  const unarchive = document.createElement("button");
+  unarchive.type = "button";
+  unarchive.className = "mt-4 rounded-full border border-neon/40 px-3 py-1 text-xs";
+  unarchive.textContent = "Desarquivar";
+  unarchive.addEventListener("click", () => unarchiveAccount(account));
+  card.append(head, dates, grid, chartBox, unarchive);
+  return card;
+}
 async function loadArchived() {
   const host = document.getElementById("archived-accounts");
   if (!host) return;
+  const message = (text) => {
+    const p = document.createElement("p");
+    p.className = "text-sm text-mute";
+    p.textContent = text;
+    return p;
+  };
   try {
-    const data = await api("/api/dashboard?period=total");
-    const archived = (data.accounts || []).filter(a => a.is_archived);
-    if (!archived.length) {
-      host.innerHTML = '<p class="text-sm text-mute">Nenhuma conta arquivada.</p>';
-      return;
-    }
-    host.innerHTML = "";
-    archived.forEach(account => {
-      const div = document.createElement("div");
-      div.className = "flex items-center justify-between rounded-2xl border border-neon/15 bg-card px-4 py-3";
-      div.innerHTML = `
-        <div>
-          <p class="font-medium">${account.display_name || "@" + account.username}</p>
-          <p class="text-xs text-mute">@${account.username}</p>
-        </div>
-        <button class="rounded-full border border-neon/40 px-3 py-1 text-xs">Desarquivar</button>
-      `;
-      div.querySelector("button").onclick = () => toggleArchive(account);
-      host.appendChild(div);
-    });
-  } catch (e) {
-    host.innerHTML = '<p class="text-sm text-mute">Erro ao carregar.</p>';
+    const accounts = await api("/api/accounts/archived");
+    archivedCharts.forEach((chart) => chart.destroy());
+    archivedCharts = [];
+    host.replaceChildren(...(accounts.length ? accounts.map(archivedCard) : [message("Nenhuma conta arquivada.")]));
+  } catch (error) {
+    host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
 }
 document.getElementById("profile-form").addEventListener("submit", async (event) => {

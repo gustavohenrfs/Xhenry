@@ -24,7 +24,7 @@ PROTECTED = [
     ("get", "/api/cloaker/progress/0123456789abcdef0123456789abcdef", None),
 ]
 
-PUBLIC = ["/", "/health", "/api/config", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
+PUBLIC = ["/", "/health", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
 
 
 @pytest.fixture(scope="module")

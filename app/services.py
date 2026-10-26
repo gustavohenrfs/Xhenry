@@ -63,6 +63,10 @@ def ensure_user_auth_columns() -> None:
         if "is_archived" not in account_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE x_accounts ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT FALSE"))
+        if "archived_at" not in account_cols:
+            kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE x_accounts ADD COLUMN archived_at {kind}"))
     if "users" not in tables:
         return
     cols = {col["name"] for col in insp.get_columns("users")}
@@ -520,7 +524,9 @@ def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> 
 
 
 def accounts_for(db: Session, handle: str, folder_id: int | None) -> list[XAccount]:
-    query = select(XAccount).where(XAccount.username == handle, XAccount.is_active.is_(True))
+    query = select(XAccount).where(
+        XAccount.username == handle, XAccount.is_active.is_(True), XAccount.is_archived.is_(False)
+    )
     if folder_id is not None:
         query = query.where(XAccount.folder_id == folder_id)
     return list(db.scalars(query).all())
@@ -615,6 +621,7 @@ def account_payload(db: Session, account: XAccount, start: date, end: date) -> d
     return {
         "id": account.id,
         "folder_id": account.folder_id,
+        "is_archived": account.is_archived,
         "folder_name": account.folder.name if account.folder else "",
         "username": account.username,
         "display_name": account.display_name,
@@ -692,7 +699,8 @@ def build_suggestions(db: Session, accounts: list[XAccount], start: date, end: d
 
 
 def selected_accounts(db: Session, folder_id: int | None) -> list[XAccount]:
-    query = select(XAccount).where(XAccount.is_active.is_(True))
+    """Contas que entram no dashboard e nas verificações: ativas e não arquivadas."""
+    query = select(XAccount).where(XAccount.is_active.is_(True), XAccount.is_archived.is_(False))
     if folder_id is not None:
         query = query.where(XAccount.folder_id == folder_id)
     return list(db.scalars(query).all())
@@ -738,7 +746,8 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         series.append(bucket)
     folder_cards = []
     for folder in folders:
-        members = [card for card in [account_payload(db, account, start, end) for account in folder.accounts]]
+        live = [account for account in folder.accounts if not account.is_archived]
+        members = [account_payload(db, account, start, end) for account in live]
         folder_cards.append(
             {
                 "id": folder.id,
@@ -746,7 +755,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
                 "kind": folder.kind.value,
                 "color": folder.color,
                 "description": folder.description,
-                "accounts": len(folder.accounts),
+                "accounts": len(live),
                 "healthy": sum(1 for card in members if card["status"] == "healthy"),
                 "search_ban": sum(1 for card in members if card["status"] == "search_ban"),
                 "ghost_ban": sum(1 for card in members if card["status"] == "ghost_ban"),
@@ -789,6 +798,38 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         ],
         "suggestions": build_suggestions(db, accounts, start, end),
     }
+
+
+def archived_payload(db: Session) -> list[dict[str, Any]]:
+    """Contas arquivadas com o histórico inteiro: totais, datas e views/seguidores por dia."""
+    start, end = period_window("total")
+    accounts = db.scalars(
+        select(XAccount).where(XAccount.is_archived.is_(True)).order_by(XAccount.archived_at.desc(), XAccount.id)
+    ).all()
+    items = []
+    for account in accounts:
+        card = account_payload(db, account, start, end)
+        first, last = db.execute(
+            select(func.min(TweetSample.posted_at), func.max(TweetSample.posted_at)).where(
+                TweetSample.account_id == account.id
+            )
+        ).one()
+        days = db.scalars(
+            select(DailyMetric).where(DailyMetric.account_id == account.id).order_by(DailyMetric.metric_date)
+        ).all()
+        card.update(
+            {
+                "archived_at": as_utc(account.archived_at).isoformat() if account.archived_at else None,
+                "first_post_at": as_utc(first).isoformat() if first else None,
+                "last_post_at": as_utc(last).isoformat() if last else None,
+                "history": [
+                    {"date": row.metric_date.isoformat(), "views": row.views, "followers": row.followers_count}
+                    for row in days
+                ],
+            }
+        )
+        items.append(card)
+    return items
 
 
 def get_settings(db: Session) -> AppSetting:

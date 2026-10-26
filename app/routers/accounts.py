@@ -14,11 +14,13 @@ from app.database import get_db
 from app.models import DEFAULT_TZ, Folder, FolderKind, XAccount
 from app.routers.auth import current_user
 from app.services import (
+    archived_payload,
     build_suggestions,
     check_handle,
     dashboard,
     ensure_owner,
     normalize_username,
+    now_utc,
     period_window,
     selected_accounts,
     token_configured,
@@ -42,6 +44,7 @@ class AccountIn(BaseModel):
 
 class AccountUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=80)
+    is_archived: bool | None = None
 
 
 @router.get("/api/folders")
@@ -54,7 +57,7 @@ def list_folders(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
             "kind": row.kind.value,
             "color": row.color,
             "description": row.description,
-            "accounts": len(row.accounts),
+            "accounts": sum(1 for account in row.accounts if not account.is_archived),
         }
         for row in rows
     ]
@@ -115,6 +118,8 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
     exists = db.scalar(
         select(XAccount).where(XAccount.folder_id == folder.id, XAccount.username == username)
     )
+    if exists and exists.is_archived:
+        raise HTTPException(409, "Essa conta está arquivada nesta pasta. Desarquive na aba Arquivadas.")
     if exists:
         raise HTTPException(409, "Essa conta já está na pasta.")
     account = XAccount(
@@ -146,9 +151,18 @@ def update_account(account_id: int, payload: AccountUpdate, db: Session = Depend
         raise HTTPException(404, "Conta não encontrada.")
     if payload.display_name is not None:
         account.display_name = payload.display_name.strip() or None
+    if payload.is_archived is not None and payload.is_archived != account.is_archived:
+        # Arquivar só esconde: tweet_samples, daily_metrics e health_checks ficam no banco.
+        account.is_archived = payload.is_archived
+        account.archived_at = now_utc() if payload.is_archived else None
     db.commit()
     db.refresh(account)
-    return {"id": account.id, "display_name": account.display_name}
+    return {"id": account.id, "display_name": account.display_name, "is_archived": account.is_archived}
+
+
+@router.get("/api/accounts/archived")
+def list_archived(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    return archived_payload(db)
 
 
 @router.get("/api/check/{handle}", dependencies=[Depends(current_user)])

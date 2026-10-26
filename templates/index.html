@@ -119,6 +119,7 @@
       <nav id="nav" class="mt-8 space-y-2">
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Dashboard</button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
+        <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Arquivadas</button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
         <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Metadados</button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
@@ -158,6 +159,7 @@
         <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
           <button type="button" data-tab="dashboard" class="nav-btn active shrink-0 rounded-full px-3 py-2 text-xs">Dashboard</button>
           <button type="button" data-tab="ops" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Operações</button>
+          <button type="button" data-tab="archived" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Arquivadas</button>
           <button type="button" data-tab="post" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Verificar Post</button>
           <button type="button" data-tab="cloaker" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Metadados</button>
           <button type="button" data-tab="settings" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Configurações</button>
@@ -222,6 +224,10 @@
             <button class="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-ink" type="submit">Adicionar conta</button>
           </form>
           <div id="ops-accounts" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3"></div>
+        </section>
+        <section id="pane-archived" class="pane space-y-4">
+          <p class="text-sm text-mute">Contas arquivadas saem do dashboard e o robô para de coletar. O histórico fica guardado aqui.</p>
+          <div id="archived-accounts" class="grid gap-3 lg:grid-cols-2"></div>
         </section>
         <section id="pane-post" class="pane">
           <form id="post-form" class="glow mx-auto max-w-2xl space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
@@ -395,6 +401,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=11"></script>
+  <script src="/static/js/app.js?v=12"></script>
 </body>
 </html>
