@@ -144,20 +144,6 @@ def metric_value(metrics: dict | None, key: str) -> int | None:
     return int(metrics[key])
 
 
-def engagement_of(metrics: dict | None) -> int:
-    if not metrics:
-        return 0
-    return int(metrics.get("like_count") or 0) + int(metrics.get("retweet_count") or 0) + int(
-        metrics.get("reply_count") or 0
-    ) + int(metrics.get("quote_count") or 0)
-
-
-def rate_of(engagement: int, impressions: int | None) -> float | None:
-    if impressions is None or impressions <= 0:
-        return None
-    return engagement / impressions
-
-
 def parse_time(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -298,7 +284,6 @@ def upsert_tweet(db: Session, account: XAccount, raw: dict) -> date | None:
     metrics = raw.get("public_metrics") if isinstance(raw.get("public_metrics"), dict) else {}
     impressions = metric_value(metrics, "impression_count")
     views = metric_value(metrics, "view_count")
-    engagement = engagement_of(metrics)
     preview = str(raw.get("text") or "").replace("\n", " ")[:280] or None
     row = db.scalar(
         select(TweetSample).where(TweetSample.account_id == account.id, TweetSample.tweet_id == str(raw["id"]))
@@ -321,8 +306,6 @@ def upsert_tweet(db: Session, account: XAccount, raw: dict) -> date | None:
     row.bookmark_count = int(metrics.get("bookmark_count") or 0)
     row.impression_count = impressions
     row.view_count = views
-    row.engagement_count = engagement
-    row.engagement_rate = rate_of(engagement, impressions)
     row.lang = raw.get("lang")
     row.collected_at = now_utc()
     return local_date
@@ -343,7 +326,6 @@ def recompute_days(db: Session, account: XAccount, days: set[date], profile_metr
             impressions = sum(int(row.impression_count or 0) for row in day_rows)
         if day_rows and all(row.view_count is not None for row in day_rows):
             views = sum(int(row.view_count or 0) for row in day_rows)
-        engagement = sum(int(row.engagement_count or 0) for row in day_rows)
         row = db.scalar(
             select(DailyMetric).where(DailyMetric.account_id == account.id, DailyMetric.metric_date == day)
         )
@@ -358,8 +340,6 @@ def recompute_days(db: Session, account: XAccount, days: set[date], profile_metr
         row.bookmarks = sum(int(item.bookmark_count or 0) for item in day_rows)
         row.impressions = impressions
         row.views = views
-        row.engagement_count = engagement
-        row.engagement_rate = rate_of(engagement, impressions)
         row.collected_at = now_utc()
         if day == today and profile_metrics:
             row.followers_count = metric_value(profile_metrics, "followers_count")
@@ -410,8 +390,6 @@ def rebuild_folder_day(db: Session, folder_id: int, day: date) -> None:
     rollup.replies = sum(int(row.replies or 0) for _, row in metrics)
     rollup.quotes = sum(int(row.quotes or 0) for _, row in metrics)
     rollup.posts_count = sum(int(row.posts_count or 0) for _, row in metrics)
-    rollup.engagement_count = sum(int(row.engagement_count or 0) for _, row in metrics)
-    rollup.engagement_rate = rate_of(rollup.engagement_count, rollup.impressions)
     rollup.built_at = now_utc()
 
 
@@ -626,7 +604,6 @@ def account_payload(db: Session, account: XAccount, start: date, end: date) -> d
     ]
     impressions = sum(int(row.impression_count or row.view_count or 0) for row in samples) if samples else None
     views = sum(int(row.view_count or 0) for row in samples)
-    engagement = sum(int(row.engagement_count or 0) for row in samples)
     status = account.last_health_status.value if account.last_health_status else None
     last_check = db.scalar(
         select(HealthCheck)
@@ -653,8 +630,6 @@ def account_payload(db: Session, account: XAccount, start: date, end: date) -> d
         "replies": sum(int(row.reply_count or 0) for row in samples),
         "impressions": impressions,
         "views": views,
-        "engagement": engagement,
-        "engagement_rate": rate_of(engagement, impressions),
         "posts": len(samples),
     }
 
@@ -665,21 +640,21 @@ def suggestion_payload(samples: list[TweetSample], basis: str) -> dict[str, Any]
         buckets.setdefault(sample.hour_local, []).append(sample)
     ranked = []
     for hour, rows in buckets.items():
-        avg = sum(int(row.engagement_count or 0) for row in rows) / len(rows)
+        avg = sum(int(row.view_count or 0) for row in rows) / len(rows)
         by_day: dict[int, list[int]] = {}
         for row in rows:
-            by_day.setdefault(row.weekday, []).append(int(row.engagement_count or 0))
+            by_day.setdefault(row.weekday, []).append(int(row.view_count or 0))
         best_day = max(by_day, key=lambda key: sum(by_day[key]) / len(by_day[key]))
         ranked.append(
             {
                 "hour": hour,
                 "label": f"{hour:02d}:00–{(hour + 1) % 24:02d}:00",
-                "avg_engagement": round(avg, 2),
+                "avg_views": round(avg, 2),
                 "samples": len(rows),
                 "best_weekday": WEEKDAYS[best_day],
             }
         )
-    ranked.sort(key=lambda item: (item["avg_engagement"], item["samples"]), reverse=True)
+    ranked.sort(key=lambda item: (item["avg_views"], item["samples"]), reverse=True)
     top = ranked[:3]
     if not top:
         return {
@@ -687,13 +662,13 @@ def suggestion_payload(samples: list[TweetSample], basis: str) -> dict[str, Any]
             "items": [],
             "note": "Sem tweets coletados. Verifique as contas para montar o histórico.",
         }
-    if all(item["avg_engagement"] == 0 for item in top):
+    if all(item["avg_views"] == 0 for item in top):
         return {
             "basis": basis,
             "items": [],
-            "note": "Os posts coletados ainda estão com engajamento zerado. Sem horário recomendado.",
+            "note": "Os posts coletados ainda estão sem views. Sem horário recomendado.",
         }
-    note = "Horários com maior média de curtidas + reposts + replies + quotes nos posts coletados."
+    note = "Horários com maior média de views nos posts coletados."
     if any(item["samples"] < 3 for item in top):
         note += " Amostra pequena: trate como indício, não como regra."
     if basis == "all":
@@ -742,7 +717,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     by_day: dict[date, dict[str, Any]] = {}
     day = start
     while day <= end:
-        by_day[day] = {"date": day.isoformat(), "engagement": 0, "impressions": None, "posts": 0, "_imps": []}
+        by_day[day] = {"date": day.isoformat(), "views": 0, "impressions": None, "posts": 0, "_imps": []}
         day += timedelta(days=1)
     for account in accounts:
         tz = zone(account.timezone)
@@ -751,7 +726,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             if local_day not in by_day:
                 continue
             bucket = by_day[local_day]
-            bucket["engagement"] += int(sample.engagement_count or 0)
+            bucket["views"] += int(sample.view_count or 0)
             bucket["posts"] += 1
             bucket["_imps"].append(sample.impression_count)
     series = []
@@ -799,7 +774,6 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             "likes": sum(likes_values) if likes_values else None,
             "retweets": sum(retweets_values) if retweets_values else None,
             "replies": sum(replies_values) if replies_values else None,
-            "engagement": sum(int(card["engagement"] or 0) for card in cards),
             "impressions": sum(impression_values) if impression_values else None,
         },
         "folders": folder_cards,
@@ -808,7 +782,6 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         "by_account": [
             {
                 "username": card["username"],
-                "engagement": card["engagement"],
                 "views": card["views"],
                 "impressions": card["impressions"],
             }
@@ -866,7 +839,8 @@ def viral_message(name: str, username: str, gain: int, when: str, likes: int, re
         f"👤 Conta: {name} (@{username})\n"
         f"👁 Ganho de impressao no post: {gain}\n"
         f"⏰ Horário do post: {when}\n"
-        f"💬 Engajamento: {likes + reposts}\n"
+        f"❤️ Curtidas: {likes}\n"
+        f"🔁 Retweets: {reposts}\n"
         f"🔗 Link do Post: {link}"
     )
 

@@ -215,8 +215,8 @@ function renderCharts(data) {
   const lineData = {
     labels: data.series.map((row) => row.date.slice(5)),
     datasets: [{
-      label: "Engajamento",
-      data: data.series.map((row) => row.engagement),
+      label: "Views",
+      data: data.series.map((row) => row.views),
       borderColor: "#ff2ec8",
       backgroundColor: "rgba(255,46,200,.16)",
       fill: true,
@@ -226,13 +226,10 @@ function renderCharts(data) {
     }]
   };
   const names = data.by_account.map((row) => "@" + row.username);
-  const hasViews = data.by_account.some((row) => row.views !== null && row.views !== undefined);
-  document.getElementById("bar-caption").textContent = hasViews ? "Engajamento e views" : "Engajamento — views ainda não vieram da API";
   const barData = {
     labels: names.length ? names : ["—"],
     datasets: [
-      { label: "Engajamento", data: names.length ? data.by_account.map((row) => row.engagement) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 },
-      { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [null], backgroundColor: "rgba(255,214,242,.75)", borderRadius: 8, maxBarThickness: 28 }
+      { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 }
     ]
   };
   // Atualiza os gráficos no lugar (sem destruir/recriar), para não piscar no auto-refresh.

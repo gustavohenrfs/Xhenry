@@ -185,12 +185,12 @@
           <div class="grid gap-4 xl:grid-cols-5">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
               <h2 class="font-display text-xl text-white">Potencial de Crescimento</h2>
-              <p class="mb-3 text-xs text-mute">Curva de engajamento dos posts coletados</p>
+              <p class="mb-3 text-xs text-mute">Views por dia dos posts coletados</p>
               <div class="h-64"><canvas id="line-chart"></canvas></div>
             </article>
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-2">
               <h2 class="font-display text-xl text-white">Melhor Conta</h2>
-              <p id="bar-caption" class="mb-3 text-xs text-mute">Engajamento e views</p>
+              <p class="mb-3 text-xs text-mute">Views por conta no período</p>
               <div class="h-64"><canvas id="bar-chart"></canvas></div>
             </article>
           </div>
@@ -310,16 +310,15 @@
             <div class="flex flex-wrap gap-2 pt-2">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
               <button id="test-note" class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar Notificação</button>
-            </div>
-            <p class="text-xs leading-5 text-mute">Alerta de queda: se o engajamento cair mais de 30% do dia para a noite, ou se o alcance indicar ban.</p>
-          </form>
+            </div>          </form>
           <article class="rounded-3xl border border-neon/25 bg-card p-6">
             <p class="text-[11px] uppercase tracking-[0.16em] text-neon">Prévia da mensagem</p>
             <pre class="mt-4 whitespace-pre-wrap font-sans text-sm leading-7 text-white">🚀 Post viralizando!
 👤 Conta: [Nome] ([@User])
 👁 Ganho de impressao no post: [Quantidade]
 ⏰ Horário do post: [Data/Hora]
-💬 Engajamento: [Curtidas+RTs]
+❤️ Curtidas: [Quantidade]
+🔁 Retweets: [Quantidade]
 🔗 Link do Post: [Link]</pre>
           </article>
 
@@ -391,6 +390,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=9"></script>
+  <script src="/static/js/app.js?v=10"></script>
 </body>
 </html>

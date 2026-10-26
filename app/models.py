@@ -213,6 +213,7 @@ class DailyMetric(IntPK, Base):
     bookmarks: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     impressions: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     views: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Legado: o app não lê nem grava mais. Fica para não quebrar o robo.py nem exigir migração.
     engagement_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     engagement_rate: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     raw_public_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -241,6 +242,7 @@ class FolderDailyMetric(IntPK, Base):
     quotes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     impressions: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     views: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Legado: o app não lê nem grava mais. Fica para não quebrar o robo.py nem exigir migração.
     engagement_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     engagement_rate: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     posts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
@@ -272,6 +274,7 @@ class TweetSample(IntPK, Base):
     bookmark_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     impression_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     view_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Legado: o app não lê nem grava mais. Fica para não quebrar o robo.py nem exigir migração.
     engagement_count: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     engagement_rate: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     lang: Mapped[str | None] = mapped_column(String(16), nullable=True)
