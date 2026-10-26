@@ -6,7 +6,4 @@ python-multipart>=0.0.12
 psycopg[binary]
 Pillow>=10.4.0
 opencv-python-headless>=4.10.0.84
-jinja2
-passlib[bcrypt]
-pyjwt
 imageio-ffmpeg>=0.5

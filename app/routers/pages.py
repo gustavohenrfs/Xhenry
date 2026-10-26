@@ -1,16 +1,13 @@
-"""Rotas de página, saúde e manutenção."""
+"""Rotas de página e saúde."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
-from sqlalchemy.orm import Session
 
 from app.config import INDEX, ROOT
-from app.database import get_db
-from app.routers.auth import current_user
 from app.services import token_configured
 
 router = APIRouter()
@@ -45,29 +42,3 @@ def favicon() -> Response:
 @router.get("/health")
 def health() -> dict[str, Any]:
     return {"status": "ok", "service": "xhenry", "token_configured": token_configured()}
-
-
-from app.models import DailyMetric
-from sqlalchemy import select, desc
-
-
-@router.get("/debug-metrics", dependencies=[Depends(current_user)])
-def debug_metrics(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    """Rota temporária para debug de fuso horário.
-    Retorna os últimos 5 registros de daily_metrics.
-    Acesse via navegador: /debug-metrics
-    """
-    rows = db.scalars(
-        select(DailyMetric)
-        .order_by(desc(DailyMetric.metric_date))
-        .limit(5)
-    ).all()
-    return [
-        {
-            "metric_date": str(r.metric_date),
-            "impressions": r.impressions,
-            "likes": r.likes,
-        }
-        for r in rows
-    ]
-

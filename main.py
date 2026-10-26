@@ -15,7 +15,6 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 import app.models  # registra tabelas no metadata
 from app.config import ROOT
@@ -48,7 +47,6 @@ async def lifespan(_app: FastAPI):
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
-templates = Jinja2Templates(directory=str(ROOT / "templates"))
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 app.include_router(auth.router)
