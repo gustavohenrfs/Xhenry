@@ -4,6 +4,16 @@ Painel para monitorar contas do X organizadas em pastas: saúde da conta (Search
 
 As métricas dos tweets são coletadas pelo `robo.py`, que roda no VPS (fora deste repositório) e grava no mesmo banco. O painel só lê o banco; a API oficial do X é usada apenas para a verificação de saúde.
 
+## Coletores
+
+O `robo.py` nunca entra logado nas contas monitoradas. Ele lê as timelines com contas descartáveis, os **coletores**, cadastradas na aba Coletores, cada uma com o seu proxy e os seus cookies do x.com.
+
+- Cada rodada do cron lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo. Com 3 coletores, são 3 contas por rodada, cada uma saindo pelo IP do seu coletor. Seguidores, no máximo 1 vez por hora por conta.
+- Proxy: `http://usuario:senha@ip:porta` (também `https://` e `socks5://`). Cookies: o `auth_token`, o cabeçalho `Cookie` ou o JSON exportado por uma extensão. Sem cookies, o robô usa o login que já estiver no `anyx` do VPS.
+- Proxy e cookies ficam em texto puro no banco (o robô precisa deles) e só aparecem mascarados no painel, para quem está logado.
+- Uma conta monitorada não pode ser coletor, e vice-versa.
+- 429 num coletor para a rodada e deixa o coletor de castigo até o horário que o X informar. Bloqueio, sessão caída e proxy fora também dão castigo e aviso no Telegram. Trocar cookies ou proxy na aba libera o coletor na hora.
+
 ## Rodar localmente
 
 ```bash
@@ -44,6 +54,7 @@ O `.env.example` traz todas comentadas.
 ## Alertas no Telegram
 
 - **Post viralizando** e **queda de views** (hoje x ontem, a partir das 23h): enviados pelo `robo.py`.
+- **Coletor limitado (429), bloqueado, deslogado ou com proxy fora** e **robô sem coletor**: enviados pelo `robo.py`.
 - **Erro na coleta**: enviado pelo `robo.py`.
 - **Robô parado**: o painel avisa quando o robô fica mais de `ROBO_SILENCE_MIN` minutos sem coletar.
 - **Search Ban / Ghost Ban**: o painel avisa quando uma verificação muda o status da conta.

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import DEFAULT_TZ, Folder, FolderKind, XAccount
+from app.models import DEFAULT_TZ, Collector, Folder, FolderKind, XAccount
 from app.routers.auth import current_user
 from app.services import (
     archived_payload,
@@ -122,6 +122,9 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
         raise HTTPException(409, "Essa conta está arquivada nesta pasta. Desarquive na aba Arquivadas.")
     if exists:
         raise HTTPException(409, "Essa conta já está na pasta.")
+    if db.scalar(select(Collector).where(Collector.handle == username)):
+        # O robô entra logado nos coletores; uma conta monitorada não pode ser um deles.
+        raise HTTPException(400, f"@{username} é um coletor. Remova-o da aba Coletores antes de monitorar.")
     account = XAccount(
         folder_id=folder.id,
         username=username,

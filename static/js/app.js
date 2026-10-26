@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas" };
+const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login",
@@ -170,6 +170,7 @@ function setTab(tab) {
   if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
+  if (tab === "collectors") loadCollectors();
 }
 function kpi(label, value, hot, trend) {
   const card = document.createElement("article");
@@ -1017,6 +1018,160 @@ async function loadArchived() {
     host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
 }
+// Coletores: contas descartáveis que o robô usa para ler. Proxy e cookies chegam mascarados.
+const COLLECTOR_STATES = { ready: ["Pronto", "st-healthy"], paused: ["Pausado", "st-search_ban"], off: ["Desligado", "st-none"] };
+const COLLECTOR_RESULTS = {
+  ok: "Última leitura ok", limite: "X limitou (429)", bloqueio: "X bloqueou a leitura",
+  sessao: "Sessão caiu: cole cookies novos", proxy: "Proxy não respondeu", erro: "Erro na última leitura"
+};
+let collectorEditing = null;
+function timeBR(iso) {
+  return iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+}
+function collectorLine(label, value, warn) {
+  const p = document.createElement("p");
+  p.className = "mt-1 break-all text-xs " + (warn ? "text-amber-200" : "text-mute");
+  const b = document.createElement("span");
+  b.className = "text-white/70";
+  b.textContent = label + ": ";
+  p.append(b, document.createTextNode(value));
+  return p;
+}
+function collectorButton(text, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+function collectorCard(collector) {
+  const card = document.createElement("article");
+  card.className = "glow rounded-2xl border border-neon/20 bg-card p-4";
+  const head = document.createElement("div");
+  head.className = "flex items-start justify-between gap-3";
+  const name = document.createElement("p");
+  name.className = "min-w-0 truncate font-medium text-white";
+  name.textContent = "@" + collector.handle;
+  const [label, style] = COLLECTOR_STATES[collector.state] || COLLECTOR_STATES.off;
+  const badge = document.createElement("span");
+  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] " + style;
+  badge.textContent = collector.state === "paused" ? label + " até " + timeBR(collector.paused_until) : label;
+  head.append(name, badge);
+
+  card.append(
+    head,
+    collectorLine("Proxy", collector.proxy || "nenhum: sai pelo IP do VPS", !collector.proxy),
+    collectorLine("Cookies", collector.cookies || "nenhum: usa o login do anyx no VPS", false),
+    collectorLine("Última leitura", timeBR(collector.last_used_at), false)
+  );
+  if (collector.last_status && collector.last_status !== "ok") {
+    const detail = COLLECTOR_RESULTS[collector.last_status] || collector.last_status;
+    card.append(collectorLine("Aviso", collector.last_error ? detail + " — " + collector.last_error : detail, true));
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "mt-4 flex flex-wrap gap-2";
+  actions.append(
+    collectorButton("Editar", () => editCollector(collector)),
+    collectorButton(collector.is_active ? "Desligar" : "Ligar", () => saveCollector(collector.id, { is_active: !collector.is_active })),
+  );
+  if (collector.proxy) actions.append(collectorButton("Tirar proxy", () => saveCollector(collector.id, { proxy: "" })));
+  actions.append(collectorButton("Remover", () => removeCollector(collector)));
+  card.append(actions);
+  return card;
+}
+async function loadCollectors() {
+  const host = document.getElementById("collector-list");
+  if (!host) return;
+  const message = (text) => {
+    const p = document.createElement("p");
+    p.className = "text-sm text-mute";
+    p.textContent = text;
+    return p;
+  };
+  try {
+    const collectors = await api("/api/collectors");
+    host.replaceChildren(...(collectors.length ? collectors.map(collectorCard) : [message("Nenhum coletor. Sem coletores o robô não lê nenhuma timeline.")]));
+  } catch (error) {
+    host.replaceChildren(message(error.message || "Erro ao carregar."));
+  }
+}
+function resetCollectorForm() {
+  collectorEditing = null;
+  const handle = document.getElementById("collector-handle");
+  handle.value = "";
+  handle.disabled = false;
+  document.getElementById("collector-proxy").value = "";
+  document.getElementById("collector-cookies").value = "";
+  document.getElementById("collector-proxy").placeholder = "Proxy: http://usuario:senha@ip:porta";
+  document.getElementById("collector-submit").textContent = "Adicionar coletor";
+  document.getElementById("collector-cancel").classList.add("hidden");
+  document.getElementById("collector-hint").textContent = "Proxy e cookies ficam mascarados no painel; só o robô lê os valores.";
+}
+function editCollector(collector) {
+  collectorEditing = collector;
+  const handle = document.getElementById("collector-handle");
+  handle.value = "@" + collector.handle;
+  handle.disabled = true;
+  document.getElementById("collector-proxy").value = "";
+  document.getElementById("collector-cookies").value = "";
+  document.getElementById("collector-proxy").placeholder = collector.proxy ? "Atual: " + collector.proxy + " (vazio = mantém)" : "Proxy: http://usuario:senha@ip:porta";
+  document.getElementById("collector-submit").textContent = "Salvar @" + collector.handle;
+  document.getElementById("collector-cancel").classList.remove("hidden");
+  document.getElementById("collector-hint").textContent = "Campos vazios mantêm o que está salvo.";
+  document.getElementById("collector-form").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function saveCollector(id, body) {
+  try {
+    await api("/api/collectors/" + id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    await loadCollectors();
+    return true;
+  } catch (error) {
+    toast(error.message || "Não salvou o coletor.");
+    return false;
+  }
+}
+async function removeCollector(collector) {
+  const ok = await showConfirm("Remover coletor", "O robô deixa de usar @" + collector.handle + ". Proxy e cookies salvos são apagados.");
+  if (!ok) return;
+  try {
+    await api("/api/collectors/" + collector.id, { method: "DELETE" });
+    if (collectorEditing && collectorEditing.id === collector.id) resetCollectorForm();
+    await loadCollectors();
+  } catch (error) { toast(error.message || "Não removeu."); }
+}
+document.getElementById("collector-cancel").addEventListener("click", resetCollectorForm);
+document.getElementById("collector-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const proxy = document.getElementById("collector-proxy").value.trim();
+  const cookies = document.getElementById("collector-cookies").value.trim();
+  if (collectorEditing) {
+    const body = {};
+    if (proxy) body.proxy = proxy;
+    if (cookies) body.cookies = cookies;
+    if (!Object.keys(body).length) { resetCollectorForm(); return; }
+    if (await saveCollector(collectorEditing.id, body)) {
+      toast("@" + collectorEditing.handle + " atualizado.");
+      resetCollectorForm();
+    }
+    return;
+  }
+  try {
+    const created = await api("/api/collectors", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: document.getElementById("collector-handle").value.trim(), proxy, cookies })
+    });
+    toast("@" + created.handle + " adicionado.");
+    resetCollectorForm();
+    await loadCollectors();
+  } catch (error) { toast(error.message || "Não adicionou o coletor."); }
+});
 document.getElementById("profile-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const body = new FormData();

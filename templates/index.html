@@ -120,6 +120,7 @@
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Dashboard</button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
         <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Arquivadas</button>
+        <button type="button" data-tab="collectors" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Coletores</button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
         <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Metadados</button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
@@ -160,6 +161,7 @@
           <button type="button" data-tab="dashboard" class="nav-btn active shrink-0 rounded-full px-3 py-2 text-xs">Dashboard</button>
           <button type="button" data-tab="ops" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Operações</button>
           <button type="button" data-tab="archived" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Arquivadas</button>
+          <button type="button" data-tab="collectors" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Coletores</button>
           <button type="button" data-tab="post" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Verificar Post</button>
           <button type="button" data-tab="cloaker" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Metadados</button>
           <button type="button" data-tab="settings" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Configurações</button>
@@ -228,6 +230,22 @@
         <section id="pane-archived" class="pane space-y-4">
           <p class="text-sm text-mute">Contas arquivadas saem do dashboard e o robô para de coletar. O histórico fica guardado aqui.</p>
           <div id="archived-accounts" class="grid gap-3 lg:grid-cols-2"></div>
+        </section>
+        <section id="pane-collectors" class="pane space-y-4">
+          <p class="text-sm text-mute">Contas descartáveis que o robô usa para ler as timelines das contas monitoradas. Cada rodada lê uma conta por coletor, cada uma saindo pelo proxy do seu coletor. Nunca use aqui uma conta que gera dinheiro.</p>
+          <form id="collector-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-4">
+            <div class="flex flex-wrap gap-2">
+              <input id="collector-handle" maxlength="16" required placeholder="@burner1" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <input id="collector-proxy" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="Proxy: http://usuario:senha@ip:porta" class="min-w-64 flex-[2] rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            </div>
+            <textarea id="collector-cookies" rows="3" maxlength="20000" autocomplete="off" spellcheck="false" placeholder="Cookies do x.com: o auth_token, o cabeçalho Cookie (auth_token=...; ct0=...) ou o JSON exportado pela extensão. Vazio = usa o login que já está no anyx do VPS." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 font-mono text-xs outline-none focus:border-neon"></textarea>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="collector-submit" class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Adicionar coletor</button>
+              <button id="collector-cancel" class="hidden rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Cancelar</button>
+              <p id="collector-hint" class="text-xs text-mute">Proxy e cookies ficam mascarados no painel; só o robô lê os valores.</p>
+            </div>
+          </form>
+          <div id="collector-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
         </section>
         <section id="pane-post" class="pane">
           <form id="post-form" class="glow mx-auto max-w-2xl space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
@@ -401,6 +419,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=13"></script>
+  <script src="/static/js/app.js?v=14"></script>
 </body>
 </html>

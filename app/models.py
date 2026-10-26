@@ -151,6 +151,9 @@ class XAccount(IntPK, TimestampMixin, Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_health_status: Mapped[HealthStatus | None] = mapped_column(_enum(HealthStatus, "health_status"), nullable=True)
     last_health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Rodízio do robo.py: a conta coletada há mais tempo vai primeiro; seguidores no máximo 1x por hora.
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    followers_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     folder: Mapped[Folder] = relationship(back_populates="accounts")
     health_checks: Mapped[list[HealthCheck]] = relationship(
         back_populates="account",
@@ -164,6 +167,26 @@ class XAccount(IntPK, TimestampMixin, Base):
     tweet_samples: Mapped[list[TweetSample]] = relationship(
         back_populates="account", cascade="all, delete-orphan", passive_deletes=True
     )
+
+
+class Collector(IntPK, TimestampMixin, Base):
+    """Conta descartável que o robo.py usa para ler as timelines, cada uma com o seu proxy.
+
+    proxy e cookies ficam em texto puro porque o robô precisa deles; a API só devolve mascarado.
+    """
+
+    __tablename__ = "collectors"
+
+    handle: Mapped[str] = mapped_column(String(15), unique=True, nullable=False)
+    proxy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON {nome: valor} dos cookies do x.com; vazio = o robô usa o que já estiver no anyx do VPS.
+    cookies: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ok, limite, bloqueio, sessao, proxy, erro (gravado pelo robô)
+    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class HealthCheck(IntPK, Base):

@@ -63,10 +63,11 @@ def ensure_user_auth_columns() -> None:
         if "is_archived" not in account_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE x_accounts ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT FALSE"))
-        if "archived_at" not in account_cols:
-            kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE x_accounts ADD COLUMN archived_at {kind}"))
+        kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
+        for column in ("archived_at", "collected_at", "followers_at"):
+            if column not in account_cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE x_accounts ADD COLUMN {column} {kind}"))
     if "users" not in tables:
         return
     cols = {col["name"] for col in insp.get_columns("users")}

@@ -21,6 +21,10 @@ PROTECTED = [
     ("get", "/api/check/fulano", None),
     ("post", "/api/check-all", None),
     ("get", "/api/cloaker/progress/0123456789abcdef0123456789abcdef", None),
+    ("get", "/api/collectors", None),
+    ("post", "/api/collectors", {"handle": "burner1"}),
+    ("patch", "/api/collectors/1", {"is_active": False}),
+    ("delete", "/api/collectors/1", None),
 ]
 
 PUBLIC = ["/", "/health", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
