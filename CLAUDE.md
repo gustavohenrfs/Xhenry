@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-XHenry (formerly "Suzana", still the SQLite filename `data/suzana.db` and the owner email `local@suzana`) is a dashboard for monitoring X (Twitter) accounts grouped into folders: account health (search ban / ghost ban / suspended), engagement metrics, best-time-to-post suggestions, Telegram alerts, and a Grok (xAI) "will this post get restricted?" reviewer. FastAPI + SQLAlchemy backend, single-page vanilla JS frontend. All user-facing strings, comments and docstrings are in Brazilian Portuguese — keep new ones in Portuguese.
+XHenry (formerly "Suzana", still the SQLite filename `data/suzana.db` and the owner email `local@suzana`) is a dashboard for monitoring X (Twitter) accounts grouped into folders: account health (search ban / ghost ban / suspended), post metrics (views, likes, retweets, replies, followers), best-time-to-post suggestions, Telegram alerts, and a Grok (xAI) "will this post get restricted?" reviewer. FastAPI + SQLAlchemy backend, single-page vanilla JS frontend. All user-facing strings, comments and docstrings are in Brazilian Portuguese — keep new ones in Portuguese.
 
 ## Commands
 
