@@ -53,6 +53,17 @@ O `.env.example` traz todas comentadas.
 
 - Rode com um único worker do uvicorn (o progresso da aba Metadados e o vigia ficam em memória).
 - No nginx: `client_max_body_size 110M` e `proxy_read_timeout 1860s` (vídeos da aba Metadados).
+- Bots de varredura (`/.env`, `/credentials.json`...): bloqueie no nginx, dentro de cada `server { ... }` do painel (porta 80 e 443), para não chegarem ao backend:
+
+  ```nginx
+  # Bots de varredura: fecha a conexão sem responder e sem chegar ao backend.
+  location ~* ^/(instance/|\.env|credentials\.json|service_account\.json|config\.py) {
+      access_log off;
+      return 444;
+  }
+  ```
+
+  Depois: `nginx -t && systemctl reload nginx`. `curl -sv https://SEU_DOMINIO/.env` deve dar "Empty reply from server".
 - `robo.py` no cron a cada 5 minutos.
 - Backup diário: `scripts/backup.sh` no cron (instruções no topo do arquivo). Precisa do `postgresql-client`.
 
