@@ -2,7 +2,7 @@
 
 Painel para monitorar contas do X organizadas em pastas: saúde da conta (Search Ban, Ghost Ban, suspensa), Views, Curtidas, Retweets, Replies e Seguidores, melhor horário para postar, alertas no Telegram, revisão de post com o Grok (xAI) e geração de cópias de mídia sem metadados (aba Metadados).
 
-As métricas dos tweets são coletadas pelo `robo.py`, que roda no VPS (fora deste repositório) e grava no mesmo banco. O painel só lê o banco; a API oficial do X é usada apenas para a verificação de saúde.
+As métricas dos tweets são coletadas pelo `robo.py` (na raiz deste repositório), que roda no cron do VPS e grava no mesmo banco. O painel só lê o banco; a API oficial do X é usada apenas para a verificação de saúde.
 
 ## Coletores
 
@@ -78,7 +78,13 @@ O `.env.example` traz todas comentadas.
   ```
 
   Depois: `nginx -t && systemctl reload nginx`. `curl -sv https://SEU_DOMINIO/.env` deve dar "Empty reply from server".
-- `robo.py` no cron **a cada minuto** (`* * * * *`). Ele mesmo decide se roda, pela aba Configurações; fora do intervalo, sai na hora sem abrir o navegador.
+- `robo.py` no cron **a cada minuto**, como o usuário que tem o `anyx` logado (nunca root: o Chrome não abre como root). Ele mesmo decide se roda, pela aba Configurações; fora do intervalo, sai na hora sem abrir o navegador.
+
+  ```cron
+  * * * * * cd /caminho/do/Xhenry && python3 robo.py >> $HOME/robo.log 2>&1
+  ```
+
+  Precisa de `psycopg[binary]` e `anyx` (`pip install anyx && playwright install chromium`) no Python desse usuário. Ele lê o `.env` do painel; se esse usuário não puder lê-lo, aponte outro com `ROBO_ENV_FILE=/caminho/.env` na linha do cron. A trava e o estado ficam em `~/.xhenry-robo` (mude com `ROBO_STATE_DIR`). Atualizar o robô é o mesmo `git pull` do painel.
 - Backup diário: `scripts/backup.sh` no cron (instruções no topo do arquivo). Precisa do `postgresql-client`.
 
 ## Testes
@@ -89,3 +95,5 @@ python -m pytest -q
 ```
 
 Os testes usam um SQLite descartável; a API do X e o Telegram são simulados, nunca chamados.
+
+O teste ponta a ponta do robô (`tests/test_robo_e2e.py`) precisa de um Postgres **descartável** (apaga as tabelas) e só roda com `ROBO_TEST_DATABASE_URL=postgresql://...`; sem ela, é pulado.
