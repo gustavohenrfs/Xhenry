@@ -21,6 +21,7 @@ O painel exige login para tudo que altera dados ou gasta cota (pastas, contas, v
 - Defina `SECRET_KEY` no `.env` (obrigatória para entrar).
 - O cadastro fica fechado por padrão. Para criar uma conta, ligue `ALLOW_REGISTRATION=true`, cadastre-se pela tela de login e desligue de novo.
 - **Esqueceu a senha?** O link de redefinição (15 min, uso único) é enviado para o chat do Telegram configurado. Defina `PUBLIC_URL` com o endereço público do painel para o link sair certo.
+- Redefinir ou trocar a senha desconecta todos os aparelhos que estavam logados (quem trocou pelo painel continua dentro).
 - Todas as contas que entram enxergam e editam os mesmos dados (não há separação por usuário).
 
 ## Configuração (`.env`)

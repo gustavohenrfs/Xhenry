@@ -79,6 +79,8 @@ def ensure_user_auth_columns() -> None:
         statements.append("ALTER TABLE users ADD COLUMN avatar_url VARCHAR(512)")
     if "logo_url" not in cols:
         statements.append("ALTER TABLE users ADD COLUMN logo_url VARCHAR(512)")
+    if "token_version" not in cols:
+        statements.append("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))

@@ -119,17 +119,25 @@ def _verify(token: str, key: bytes) -> dict[str, Any]:
     return payload
 
 
-def issue_token(user_id: int) -> str:
-    return _sign({"sub": str(user_id), "exp": int(time.time()) + TOKEN_TTL}, secret_key().encode())
+def issue_token(user_id: int, version: int = 0) -> str:
+    claims = {"sub": str(user_id), "exp": int(time.time()) + TOKEN_TTL, "ver": version}
+    return _sign(claims, secret_key().encode())
 
 
-def read_token(token: str) -> int:
+def read_token(token: str) -> tuple[int, int]:
+    """(id do usuário, versão do token). Token de antes da versão conta como 0."""
     try:
-        return int(_verify(token, secret_key().encode())["sub"])
+        payload = _verify(token, secret_key().encode())
+        return int(payload["sub"]), int(payload.get("ver", 0))
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(401, "Token inválido.") from exc
+
+
+def revoke_sessions(user: User) -> None:
+    # Todo token emitido antes disto deixa de valer em current_user.
+    user.token_version = (user.token_version or 0) + 1
 
 
 def _password_mark(user: Any) -> str:
@@ -191,9 +199,12 @@ def current_user(
 ):
     if creds is None or not creds.credentials:
         raise HTTPException(401, "Login necessário.")
-    user = db.get(User, read_token(creds.credentials))
+    user_id, version = read_token(creds.credentials)
+    user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise HTTPException(401, "Usuário não encontrado.")
+    if version != (user.token_version or 0):
+        raise HTTPException(401, "Sessão encerrada. Entre novamente.")
     return user
 
 
@@ -229,7 +240,7 @@ def login(payload: LoginIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     user = db.scalar(select(User).where(User.email == email))
     if user is None or not verify_password(payload.senha, user.senha_hash):
         raise HTTPException(401, "Email ou senha incorretos.")
-    return {"access_token": issue_token(user.id), "token_type": "bearer", "user": public_user(user)}
+    return {"access_token": issue_token(user.id, user.token_version or 0), "token_type": "bearer", "user": public_user(user)}
 
 
 @router.get("/api/me")
@@ -273,8 +284,10 @@ def change_password(payload: ChangePasswordIn, user=Depends(current_user), db: S
     if row is None:
         raise HTTPException(401, "Usuário não encontrado.")
     row.senha_hash = hash_password(payload.nova_senha)
+    revoke_sessions(row)
     db.commit()
-    return {"ok": True}
+    # Os outros aparelhos saem; quem trocou continua com o token novo.
+    return {"ok": True, "access_token": issue_token(row.id, row.token_version)}
 
 
 @router.post("/api/password-reset/request")
@@ -301,6 +314,7 @@ def request_password_reset(payload: ResetRequestIn, request: Request, db: Sessio
 def confirm_password_reset(payload: ResetConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     user = read_reset_token(payload.token, db)
     user.senha_hash = hash_password(payload.nova_senha)
+    revoke_sessions(user)
     db.commit()
     _reset_sent.pop(user.email, None)
     return {"ok": True}

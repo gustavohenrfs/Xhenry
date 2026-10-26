@@ -102,6 +102,8 @@ class User(IntPK, TimestampMixin, Base):
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    # Vai dentro do token de login; trocar ou redefinir a senha incrementa e derruba as sessões antigas.
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     folders: Mapped[list[Folder]] = relationship(
         back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
     )

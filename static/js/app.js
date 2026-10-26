@@ -1120,13 +1120,15 @@ document.getElementById("password-form").addEventListener("submit", async (event
     return;
   }
   try {
-    await api("/api/change-password", {
+    const result = await api("/api/change-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nova_senha: nova })
     });
+    // O token antigo deixou de valer; guarda o novo para continuar logado aqui.
+    if (result && result.access_token) localStorage.setItem(TOKEN_KEY, result.access_token);
     document.getElementById("new-password").value = "";
-    toast("Senha atualizada com sucesso.");
+    toast("Senha atualizada. Os outros aparelhos foram desconectados.");
   } catch (error) { toast(error.message || "Falha ao trocar senha."); }
 });
 
