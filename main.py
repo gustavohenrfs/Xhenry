@@ -8,9 +8,10 @@ Métricas vêm do robo.py no VPS. /api/check usa a API oficial só para saúde d
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +22,7 @@ from app.config import ROOT
 from app.database import Base, SessionLocal, engine, load_env_file
 from app.routers import accounts, auth, checks, cloaker, pages
 from app.services import ensure_owner, ensure_user_auth_columns, token_configured
+from app.watchdog import watch_forever, watchdog_enabled
 
 load_env_file(ROOT / ".env")
 log = logging.getLogger("xhenry")
@@ -36,7 +38,12 @@ async def lifespan(_app: FastAPI):
     with SessionLocal() as db:
         ensure_owner(db)
     log.info("token X: %s", "configurado" if token_configured() else "ausente")
+    watcher = asyncio.create_task(watch_forever()) if watchdog_enabled() else None
     yield
+    if watcher is not None:
+        watcher.cancel()
+        with suppress(asyncio.CancelledError):
+            await watcher
 
 
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"

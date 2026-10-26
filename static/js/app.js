@@ -238,6 +238,30 @@ function renderCharts(data) {
   if (barChart) { barChart.data = barData; barChart.update("none"); }
   else barChart = new Chart(document.getElementById("bar-chart"), { type: "bar", data: barData, options: chartOptions() });
 }
+// Top 3 horários do build_suggestions (vem junto no /api/dashboard, com o mesmo período e pasta).
+function renderSuggestions(suggestions) {
+  const host = document.getElementById("best-times");
+  const items = (suggestions && suggestions.items) || [];
+  document.getElementById("best-times-note").textContent = (suggestions && suggestions.note) || "";
+  host.replaceChildren(...items.map((item, index) => {
+    const li = document.createElement("li");
+    li.className = "rounded-2xl border px-4 py-4 text-center " + (index === 0 ? "border-neon/50 bg-neon/10" : "border-neon/20 bg-ink");
+    const rank = document.createElement("p");
+    rank.className = "text-[11px] uppercase tracking-[0.16em] " + (index === 0 ? "text-neon" : "text-mute");
+    rank.textContent = index + 1 + "º lugar";
+    const hour = document.createElement("p");
+    hour.className = "mt-2 font-mono text-2xl text-white tracking-tight";
+    hour.textContent = item.label;
+    const views = document.createElement("p");
+    views.className = "mt-1 text-sm text-white";
+    views.textContent = num(Math.round(item.avg_views)) + " views em média";
+    const meta = document.createElement("p");
+    meta.className = "mt-1 text-xs text-mute";
+    meta.textContent = "melhor dia: " + item.best_weekday + " · " + item.samples + (item.samples === 1 ? " post" : " posts");
+    li.append(rank, hour, views, meta);
+    return li;
+  }));
+}
 function renderAccounts(accounts) {
   const host = document.getElementById("accounts");
   const visible = accounts.filter((a) => !a.is_archived);
@@ -417,6 +441,7 @@ async function load({ silent = false } = {}) {
     document.getElementById("range-label").textContent = data.start + " → " + data.end;
     renderKpis(data.kpis);
     renderCharts(data);
+    renderSuggestions(data.suggestions);
     renderAccounts(data.accounts);
     renderFolders(data.folders);
     renderOpsAccounts(data.accounts);

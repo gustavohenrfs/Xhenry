@@ -12,6 +12,8 @@ from pathlib import Path
 
 # Banco SQLite descartável: precisa existir antes de qualquer import de app.*
 os.environ["DATABASE_URL"] = "sqlite:///" + (Path(tempfile.mkdtemp()) / "test.db").as_posix()
+# Sem vigia em segundo plano nos testes: eles chamam as funções do watchdog direto.
+os.environ["WATCHDOG"] = "off"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import imageio_ffmpeg  # noqa: E402
