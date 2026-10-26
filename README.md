@@ -8,7 +8,9 @@ As métricas dos tweets são coletadas pelo `robo.py`, que roda no VPS (fora des
 
 O `robo.py` nunca entra logado nas contas monitoradas. Ele lê as timelines com contas descartáveis, os **coletores**, cadastradas na aba Coletores, cada uma com o seu proxy e os seus cookies do x.com.
 
-- Cada rodada do cron lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo. Com 3 coletores, são 3 contas por rodada, cada uma saindo pelo IP do seu coletor. Seguidores, no máximo 1 vez por hora por conta.
+- Cada rodada automática lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo. Com 3 coletores, são 3 contas por rodada, cada uma saindo pelo IP do seu coletor. Seguidores, no máximo 1 vez por hora por conta.
+- **Configurações → Robô:** liga ou desliga a coleta automática e escolhe o intervalo (5 min a 24 h). O robô lê isso a cada minuto.
+- **Atualizar Dados** (topo do Dashboard) manda os coletores lerem todas as contas na hora, revezando os coletores (até 3 contas por coletor), mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto e o botão espera a rodada terminar.
 - Proxy: `ip:porta:usuario:senha` (o formato dos vendedores) ou `http://usuario:senha@ip:porta` (também `https://` e `socks5://`). Cookies: arraste para a aba o arquivo `.json` exportado por uma extensão (Cookie-Editor, EditThisCookie) com a conta logada no x.com; o painel confere se tem o `auth_token`. Sem cookies, o robô usa o login que já estiver no `anyx` do VPS.
 - Proxy e cookies ficam em texto puro no banco (o robô precisa deles) e só aparecem mascarados no painel, para quem está logado.
 - Uma conta monitorada não pode ser coletor, e vice-versa.
@@ -43,8 +45,9 @@ O painel exige login para tudo que altera dados ou gasta cota (pastas, contas, v
 | `ALLOW_REGISTRATION` | `true` abre o cadastro. Padrão: fechado. |
 | `PUBLIC_URL` | Endereço público, usado no link de redefinição de senha. |
 | `X_BEARER_TOKEN` | Só para Verificar (saúde da conta). Sem ele o painel abre e Verificar responde 503. |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `XAI_API_KEY` | Alternativa ao que se salva em Configurações (o que está salvo lá tem prioridade). |
-| `ROBO_SILENCE_MIN` | Avisa no Telegram se o robô ficar esse tempo sem coletar. Padrão: 15. |
+| `TELEGRAM_BOT_TOKEN` (ou `TELEGRAM_TOKEN`), `TELEGRAM_CHAT_ID` | O bot do Telegram, um só para o painel, o robô e o backup. Alertas e "Esqueceu a senha?" dependem dele. |
+| `XAI_API_KEY` | Alternativa à chave salva em Configurações (a salva lá tem prioridade). |
+| `ROBO_SILENCE_MIN` | Avisa no Telegram se o robô ficar esse tempo sem coletar. Padrão: 15 (ou 2 intervalos + 5 min, se o intervalo for maior). Com a coleta automática desligada, não avisa. |
 | `AUTO_CHECK_MINUTES` | Verificação automática de saúde. Padrão: desligada (gasta cota da API do X). |
 | `WATCHDOG` | `off` desliga o vigia em segundo plano. |
 | `BACKUP_DIR`, `BACKUP_KEEP_DAYS` | Pasta e retenção do backup diário. |
@@ -75,7 +78,7 @@ O `.env.example` traz todas comentadas.
   ```
 
   Depois: `nginx -t && systemctl reload nginx`. `curl -sv https://SEU_DOMINIO/.env` deve dar "Empty reply from server".
-- `robo.py` no cron a cada 5 minutos.
+- `robo.py` no cron **a cada minuto** (`* * * * *`). Ele mesmo decide se roda, pela aba Configurações; fora do intervalo, sai na hora sem abrir o navegador.
 - Backup diário: `scripts/backup.sh` no cron (instruções no topo do arquivo). Precisa do `postgresql-client`.
 
 ## Testes

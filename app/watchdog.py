@@ -1,9 +1,10 @@
 """Vigia em segundo plano, dentro do uvicorn.
 
 - Avisa no Telegram quando o robo.py para de coletar (sem batimento OK há mais
-  de ROBO_SILENCE_MIN minutos). O robô grava um batimento por rodada em
+  de ROBO_SILENCE_MIN minutos, ou de 2 intervalos + 5 min quando o intervalo
+  da aba Configurações é maior). O robô grava um batimento por rodada em
   sync_runs (kind=tweets, account_id NULL). Sem nenhum batimento ainda (robô
-  antigo), fica quieto para não dar alarme falso.
+  antigo) ou com a coleta automática desligada, fica quieto.
 - Se AUTO_CHECK_MINUTES > 0, verifica a saúde das contas nesse intervalo; o
   alerta de Ghost/Search Ban sai do check_handle (dispatch_alerts). Gasta cota
   da API do X (3 chamadas por conta), por isso vem desligado.
@@ -25,10 +26,11 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, XAccount
-from app.services import as_utc, check_handle, now_utc, token_configured, try_send, zone
+from app.services import as_utc, check_handle, get_settings, now_utc, token_configured, try_send, zone
 
 log = logging.getLogger("xhenry")
 TICK_SECONDS = 60
+PENDING_GRACE = timedelta(minutes=5)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -42,8 +44,9 @@ def watchdog_enabled() -> bool:
     return os.getenv("WATCHDOG", "on").strip().lower() not in {"0", "off", "false", "no"}
 
 
-def silence_limit() -> timedelta:
-    return timedelta(minutes=_env_int("ROBO_SILENCE_MIN", 15) or 15)
+def silence_limit(interval_min: int = 5) -> timedelta:
+    base = _env_int("ROBO_SILENCE_MIN", 15) or 15
+    return timedelta(minutes=max(base, 2 * interval_min + 5))
 
 
 def last_robot_beat(db: Session) -> datetime | None:
@@ -59,12 +62,18 @@ def last_robot_beat(db: Session) -> datetime | None:
 
 
 def check_silence(db: Session, now: datetime | None = None) -> bool:
+    settings = get_settings(db)
+    if not settings.robo_enabled:
+        return False
     last = last_robot_beat(db)
     if last is None:
         return False
     now = now or now_utc()
+    pending = settings.robo_run_requested_at
+    if pending is not None and now - as_utc(pending) < PENDING_GRACE:
+        return False  # acabou de religar ou de pedir coleta: o robô pega no próximo minuto
     quiet = now - last
-    if quiet <= silence_limit():
+    if quiet <= silence_limit(settings.robo_interval_min):
         return False
     when = last.astimezone(zone(DEFAULT_TZ)).strftime("%d/%m/%Y %H:%M")
     text = (

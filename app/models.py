@@ -335,6 +335,10 @@ class AppSetting(IntPK, Base):
     telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     impression_goal: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
     xai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Robô (aba Configurações): coleta automática, intervalo e o pedido do botão "Atualizar Dados".
+    robo_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    robo_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
+    robo_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AlertSent(IntPK, Base):

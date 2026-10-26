@@ -214,18 +214,29 @@
             <div id="accounts" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
           </section>
         </section>
-        <section id="pane-ops" class="pane space-y-6">
-          <form id="folder-form" class="glow flex flex-wrap gap-2 rounded-3xl border border-neon/25 bg-card p-4">
-            <input id="folder-name" required maxlength="120" placeholder="Nome da pasta" class="min-w-56 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-            <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Criar pasta</button>
-          </form>
-          <div id="folder-cards" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
-          <form id="account-form" class="flex flex-wrap gap-2">
-            <input id="account-handle" maxlength="16" placeholder="@handle" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-card px-3 py-3 text-sm outline-none focus:border-neon">
-            <input id="account-label" maxlength="80" placeholder="Nome de exibição, ex: Conta 01" class="min-w-48 flex-1 rounded-2xl border border-neon/25 bg-card px-3 py-3 text-sm outline-none focus:border-neon">
-            <button class="rounded-2xl bg-white px-4 py-3 text-sm font-medium text-ink" type="submit">Adicionar conta</button>
-          </form>
-          <div id="ops-accounts" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3"></div>
+        <section id="pane-ops" class="pane">
+          <!-- Tela 1: só as pastas. Clicar numa pasta abre a tela 2 com as contas dela. -->
+          <div id="ops-folders-view" class="space-y-6">
+            <form id="folder-form" class="glow flex flex-wrap gap-2 rounded-3xl border border-neon/25 bg-card p-4">
+              <input id="folder-name" required maxlength="120" placeholder="Nome da pasta" class="min-w-56 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Criar pasta</button>
+            </form>
+            <div id="folder-cards" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+          </div>
+          <div id="ops-folder-view" class="hidden space-y-6">
+            <div class="flex flex-wrap items-center gap-3">
+              <button id="ops-back" type="button" class="rounded-full border border-neon/40 px-4 py-2 text-sm hover:border-neon">&larr; Pastas</button>
+              <h2 id="ops-folder-name" class="min-w-0 flex-1 truncate font-display text-3xl text-white"></h2>
+              <button id="ops-folder-edit" type="button" class="rounded-full border border-neon/40 px-3 py-1 text-xs">Renomear</button>
+              <button id="ops-folder-delete" type="button" class="rounded-full border border-neon/40 px-3 py-1 text-xs text-mute">Excluir pasta</button>
+            </div>
+            <form id="account-form" class="glow flex flex-wrap gap-2 rounded-3xl border border-neon/25 bg-card p-4">
+              <input id="account-handle" maxlength="16" required placeholder="@handle" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <input id="account-label" maxlength="80" placeholder="Nome de exibição, ex: Conta 01" class="min-w-48 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Adicionar conta</button>
+            </form>
+            <div id="ops-accounts" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3"></div>
+          </div>
         </section>
         <section id="pane-archived" class="pane space-y-4">
           <p class="text-sm text-mute">Contas arquivadas saem do dashboard e o robô para de coletar. O histórico fica guardado aqui.</p>
@@ -329,13 +340,7 @@
           </form>
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-token">Token do bot</label>
-            <div class="relative">
-              <input id="tg-token" type="password" autocomplete="off" placeholder="123456:ABC..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 pr-10 text-sm outline-none focus:border-neon">
-              <button type="button" data-toggle="tg-token" class="absolute right-3 top-1/2 -translate-y-1/2 text-mute hover:text-white">👁️</button>
-            </div>
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="tg-chat">Chat ID</label>
-            <input id="tg-chat" placeholder="-1001234567890" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <p id="tg-status" class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="xai-key">Chave da xAI (análise do post)</label>
             <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de views</label>
@@ -344,15 +349,19 @@
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
               <button id="test-note" class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar Notificação</button>
             </div>          </form>
-          <article class="rounded-3xl border border-neon/25 bg-card p-6">
-            <p class="text-[11px] uppercase tracking-[0.16em] text-neon">Prévia da mensagem</p>
-            <pre class="mt-4 whitespace-pre-wrap font-sans text-sm leading-7 text-white">🚀 Post viralizando!
-👤 Conta: [Nome] ([@User])
-👁 Ganho de impressao no post: [Quantidade]
-⏰ Horário do post: [Data/Hora]
-❤️ Curtidas: [Quantidade]
-🔁 Retweets: [Quantidade]
-🔗 Link do Post: [Link]</pre>
+          <article id="robo-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
+            <h2 class="font-display text-2xl text-white">Robô</h2>
+            <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
+              <span>
+                <span class="block text-sm text-white">Coleta automática</span>
+                <span class="block text-xs text-mute">Desligada, o robô só coleta quando você clica em Atualizar Dados.</span>
+              </span>
+              <input id="robo-enabled" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
+            </label>
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="robo-interval">Coletar a cada</label>
+            <select id="robo-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+            <p id="robo-status" class="text-xs text-mute">—</p>
+            <p class="text-xs text-mute">O botão Atualizar Dados (no topo do Dashboard) manda os coletores lerem as contas na hora, mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto.</p>
           </article>
 
           <!-- Change Password Form -->
@@ -423,6 +432,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=15"></script>
+  <script src="/static/js/app.js?v=16"></script>
 </body>
 </html>

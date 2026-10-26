@@ -30,8 +30,6 @@ router = APIRouter()
 
 
 class SettingsIn(BaseModel):
-    telegram_token: str | None = None
-    telegram_chat_id: str | None = None
     impression_goal: int | None = Field(default=None, ge=1, le=10_000_000)
     xai_api_key: str | None = None
 
@@ -44,10 +42,6 @@ def read_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
 @router.put("/api/settings", dependencies=[Depends(current_user)])
 def write_settings(payload: SettingsIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     row = get_settings(db)
-    if payload.telegram_token:
-        row.telegram_token = payload.telegram_token.strip()
-    if payload.telegram_chat_id is not None:
-        row.telegram_chat_id = payload.telegram_chat_id.strip() or None
     if payload.impression_goal is not None:
         row.impression_goal = payload.impression_goal
     if payload.xai_api_key:

@@ -11,8 +11,7 @@
 #   DATABASE_URL        PostgreSQL do painel (obrigatória)
 #   BACKUP_DIR          onde guardar (padrão /var/backups/xhenry)
 #   BACKUP_KEEP_DAYS    apaga backups mais velhos que isso (padrão 14)
-#   TELEGRAM_BOT_TOKEN ou TELEGRAM_TOKEN, e TELEGRAM_CHAT_ID; sem eles, tenta o
-#   app_settings do banco (o que se salva em Configurações).
+#   TELEGRAM_BOT_TOKEN ou TELEGRAM_TOKEN, e TELEGRAM_CHAT_ID (o mesmo bot do painel e do robô)
 #   XHENRY_DIR / ENV_FILE  pasta do projeto e .env (padrão: a pasta acima deste script)
 #
 # Restaurar:
@@ -53,14 +52,6 @@ telegram_creds() {
   TG_TOKEN="${TELEGRAM_BOT_TOKEN:-${TELEGRAM_TOKEN:-$(env_value TELEGRAM_BOT_TOKEN)}}"
   TG_TOKEN="${TG_TOKEN:-$(env_value TELEGRAM_TOKEN)}"
   TG_CHAT="${TELEGRAM_CHAT_ID:-$(env_value TELEGRAM_CHAT_ID)}"
-  if { [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; } && command -v psql >/dev/null && [ -n "$PG_URL" ]; then
-    local row
-    row="$(psql -At -F '|' -c \
-      "SELECT coalesce(telegram_token, ''), coalesce(telegram_chat_id, '') FROM app_settings WHERE id = 1" \
-      --dbname="$PG_URL" 2>/dev/null || true)"
-    TG_TOKEN="${TG_TOKEN:-${row%%|*}}"
-    TG_CHAT="${TG_CHAT:-${row#*|}}"
-  fi
 }
 
 notify_failure() {

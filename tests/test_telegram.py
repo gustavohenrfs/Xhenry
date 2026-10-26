@@ -115,21 +115,32 @@ def logged_in():
         app.dependency_overrides.clear()
 
 
-def test_settings_store_token_without_echoing_it(logged_in, monkeypatch):
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+def test_telegram_comes_only_from_env(logged_in, monkeypatch):
+    """Um bot só, o do .env (o mesmo do robo.py): o que ficou salvo no banco é ignorado."""
+    with SessionLocal() as session:
+        row = services.get_settings(session)
+        row.telegram_token, row.telegram_chat_id = "999:antigo", "-1"
+        session.commit()
     try:
-        resp = logged_in.put("/api/settings", json={"telegram_token": " 123:segredo ", "telegram_chat_id": "-100"})
-        assert resp.status_code == 200
+        monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+        monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+        assert services.telegram_creds(None) == ("", "")
+        assert logged_in.get("/api/settings").json()["telegram_ready"] is False
+        monkeypatch.setenv("TELEGRAM_TOKEN", "123:segredo")  # nome que o robo.py usa
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "-100")
+        assert services.telegram_creds(None) == ("123:segredo", "-100")
         body = logged_in.get("/api/settings").json()
-        assert body["telegram_token_set"] is True and body["telegram_chat_id"] == "-100"
-        assert "segredo" not in json.dumps(body)
+        assert body["telegram_ready"] is True and "segredo" not in json.dumps(body)
+        # O painel não aceita mais token pelo formulário.
+        logged_in.put("/api/settings", json={"telegram_token": "777:novo", "impression_goal": 600})
         with SessionLocal() as session:
-            assert services.telegram_creds(session) == ("123:segredo", "-100")
+            assert services.get_settings(session).telegram_token == "999:antigo"
     finally:
         with SessionLocal() as session:
             row = services.get_settings(session)
             row.telegram_token = row.telegram_chat_id = None
+            row.impression_goal = 500
             session.commit()
 
 

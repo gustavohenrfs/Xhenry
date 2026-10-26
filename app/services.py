@@ -68,6 +68,18 @@ def ensure_user_auth_columns() -> None:
             if column not in account_cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE x_accounts ADD COLUMN {column} {kind}"))
+    if "app_settings" in tables:
+        setting_cols = {col["name"] for col in insp.get_columns("app_settings")}
+        kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
+        added = {
+            "robo_enabled": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "robo_interval_min": "INTEGER NOT NULL DEFAULT 5",
+            "robo_run_requested_at": kind,
+        }
+        for column, ddl in added.items():
+            if column not in setting_cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE app_settings ADD COLUMN {column} {ddl}"))
     if "users" not in tables:
         return
     cols = {col["name"] for col in insp.get_columns("users")}
@@ -846,9 +858,9 @@ def get_settings(db: Session) -> AppSetting:
 
 
 def telegram_creds(db: Session) -> tuple[str, str]:
-    row = get_settings(db)
-    token = (row.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-    chat = (row.telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    """Bot do .env, o mesmo do robo.py (que aceita TELEGRAM_TOKEN). O que ficou salvo no banco é ignorado."""
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN") or "").strip()
+    chat = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
     return token, chat
 
 
@@ -859,7 +871,7 @@ def xai_key(db: Session) -> str:
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
     if not token or not chat_id:
-        raise HTTPException(503, "Configure o token do bot e o Chat ID em Configurações.")
+        raise HTTPException(503, "Telegram não configurado: defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS.")
     try:
         with httpx.Client(timeout=20.0, follow_redirects=False) as client:
             response = client.post(
@@ -922,8 +934,7 @@ def dispatch_alerts(db: Session, account: XAccount, previous_status: HealthStatu
 
 def settings_payload(row: AppSetting) -> dict[str, Any]:
     return {
-        "telegram_token_set": bool(row.telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")),
-        "telegram_chat_id": row.telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID") or "",
+        "telegram_ready": all(telegram_creds(None)),
         "impression_goal": row.impression_goal,
         "xai_key_set": bool(row.xai_api_key or os.getenv("XAI_API_KEY")),
     }

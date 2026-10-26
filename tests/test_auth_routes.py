@@ -25,6 +25,9 @@ PROTECTED = [
     ("post", "/api/collectors", {"handle": "burner1"}),
     ("patch", "/api/collectors/1", {"is_active": False}),
     ("delete", "/api/collectors/1", None),
+    ("get", "/api/robo", None),
+    ("put", "/api/robo", {"enabled": False}),
+    ("post", "/api/robo/run", None),
 ]
 
 PUBLIC = ["/", "/health", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]

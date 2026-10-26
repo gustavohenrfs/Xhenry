@@ -2,7 +2,7 @@ const fmt = new Intl.NumberFormat("pt-BR");
 const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores" };
 const TOKEN_KEY = "access_token";
 const state = {
-  tab: "dashboard", period: "today", folderId: null, data: null, openId: null, authMode: "login",
+  tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
   config: { allow_registration: false, password_reset: false }, resetToken: ""
 };
 const SESSION_EXPIRED = "Sua sessão expirou. Entre novamente.";
@@ -168,6 +168,7 @@ function setTab(tab) {
   document.getElementById("heading").textContent = titles[tab];
   const controls = document.getElementById("dashboard-controls");
   if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
+  if (tab === "ops") closeOpsFolder();
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
   if (tab === "collectors") loadCollectors();
@@ -328,45 +329,57 @@ function renderFolders(folders) {
     return;
   }
   host.replaceChildren(...folders.map((folder) => {
-    const card = document.createElement("div");
-    const on = state.folderId === folder.id;
-    card.className = "glow flex items-start justify-between gap-3 rounded-3xl border px-4 py-5 text-left " + (on ? "border-neon bg-neon/10 shadow-[0_0_28px_rgba(255,46,200,.18)]" : "border-neon/20 bg-card");
-    const info = document.createElement("button");
-    info.type = "button";
-    info.className = "min-w-0 flex-1 text-left";
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "glow flex w-full items-center justify-between gap-3 rounded-3xl border border-neon/20 bg-card px-5 py-6 text-left transition hover:border-neon hover:bg-neon/10";
+    const info = document.createElement("div");
+    info.className = "min-w-0 flex-1";
     const name = document.createElement("p");
-    name.className = "font-display text-2xl text-white";
+    name.className = "truncate font-display text-2xl text-white";
     name.textContent = folder.name;
     const meta = document.createElement("p");
     meta.className = "mt-2 text-xs uppercase tracking-[0.14em] text-mute";
-    meta.textContent = folder.accounts + " contas";
+    meta.textContent = folder.accounts + (folder.accounts === 1 ? " conta" : " contas");
     info.append(name, meta);
-    info.addEventListener("click", () => { state.folderId = folder.id; load(); });
-    const actions = document.createElement("div");
-    actions.className = "flex shrink-0 gap-2";
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
-    edit.textContent = "Editar";
-    edit.addEventListener("click", () => editFolder(folder));
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "rounded-full border border-neon/40 px-3 py-1 text-xs text-mute";
-    remove.textContent = "Excluir";
-    remove.addEventListener("click", () => deleteFolder(folder));
-    actions.append(edit, remove);
-    card.append(info, actions);
+    const arrow = document.createElement("span");
+    arrow.className = "shrink-0 text-2xl text-neon";
+    arrow.textContent = "\u203a";
+    card.append(info, arrow);
+    card.addEventListener("click", () => openOpsFolder(folder.id));
     return card;
   }));
 }
+// Operações: tela 1 lista as pastas; tela 2 (pasta aberta) mostra só as contas daquela pasta.
+function opsFolder() {
+  const folders = (state.data && state.data.folders) || [];
+  return folders.find((folder) => folder.id === state.opsFolderId) || null;
+}
+function renderOpsView() {
+  const folder = opsFolder();
+  if (state.opsFolderId && !folder && state.data) state.opsFolderId = null;  // pasta excluída
+  document.getElementById("ops-folders-view").classList.toggle("hidden", Boolean(folder));
+  document.getElementById("ops-folder-view").classList.toggle("hidden", !folder);
+  if (!folder) return;
+  document.getElementById("ops-folder-name").textContent = folder.name;
+  renderOpsAccounts((state.data && state.data.accounts) || []);
+}
+function openOpsFolder(folderId) {
+  state.opsFolderId = folderId;
+  renderOpsView();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function closeOpsFolder() {
+  state.opsFolderId = null;
+  renderOpsView();
+}
 function renderOpsAccounts(accounts) {
   const host = document.getElementById("ops-accounts");
-  if (!state.folderId) { host.replaceChildren(); return; }
-  const rows = accounts.filter((account) => account.folder_id === state.folderId && !account.is_archived);
+  if (!state.opsFolderId) { host.replaceChildren(); return; }
+  const rows = accounts.filter((account) => account.folder_id === state.opsFolderId && !account.is_archived);
   if (!rows.length) {
     const empty = document.createElement("p");
     empty.className = "text-sm text-mute";
-    empty.textContent = "Nenhuma conta ativa nesta pasta.";
+    empty.textContent = "Nenhuma conta ativa nesta pasta. Adicione a primeira acima.";
     host.replaceChildren(empty);
     return;
   }
@@ -378,7 +391,7 @@ function renderOpsAccounts(accounts) {
     name.textContent = account.display_name || "@" + account.username;
     const handle = document.createElement("p");
     handle.className = "text-sm text-mute";
-    handle.textContent = "@" + account.username + " · " + account.folder_name;
+    handle.textContent = "@" + account.username;
     const grid = document.createElement("dl");
     grid.className = "mt-3 grid grid-cols-2 gap-x-2 gap-y-3 text-sm sm:grid-cols-4";
     [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
@@ -450,7 +463,7 @@ async function load({ silent = false } = {}) {
     renderSuggestions(data.suggestions);
     renderAccounts(data.accounts);
     renderFolders(data.folders);
-    renderOpsAccounts(data.accounts);
+    renderOpsView();
   } catch (error) {
     if (!silent) toast(error.message || "Falha ao carregar.");
   } finally {
@@ -481,7 +494,7 @@ async function deleteFolder(folder) {
   if (!ok) return;
   try {
     await api("/api/folders/" + folder.id, { method: "DELETE" });
-    if (state.folderId === folder.id) state.folderId = null;
+    if (state.opsFolderId === folder.id) state.opsFolderId = null;
     await load();
   } catch (error) { toast(error.message || "Não excluiu a pasta."); }
 }
@@ -547,6 +560,9 @@ document.getElementById("period-wrap").addEventListener("click", (event) => {
   setPeriod(button.dataset.period);
   load();
 });
+document.getElementById("ops-back").addEventListener("click", closeOpsFolder);
+document.getElementById("ops-folder-edit").addEventListener("click", () => { const folder = opsFolder(); if (folder) editFolder(folder); });
+document.getElementById("ops-folder-delete").addEventListener("click", () => { const folder = opsFolder(); if (folder) deleteFolder(folder); });
 document.getElementById("folder-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
@@ -556,19 +572,19 @@ document.getElementById("folder-form").addEventListener("submit", async (event) 
       body: JSON.stringify({ name: document.getElementById("folder-name").value, color: "#FF2EC8" })
     });
     event.target.reset();
-    state.folderId = created.id;
+    state.opsFolderId = created.id;
     await load();
   } catch (error) { toast(error.message || "Não criou a pasta."); }
 });
 document.getElementById("account-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!state.folderId) { toast("Selecione uma pasta."); return; }
+  if (!state.opsFolderId) { toast("Abra uma pasta."); return; }
   try {
     const created = await api("/api/accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        folder_id: state.folderId,
+        folder_id: state.opsFolderId,
         username: document.getElementById("account-handle").value,
         display_name: document.getElementById("account-label").value
       })
@@ -916,9 +932,13 @@ syncCloakerControls();
 async function loadSettings() {
   try {
     const settings = await api("/api/settings");
-    document.getElementById("tg-chat").value = settings.telegram_chat_id || "";
     document.getElementById("goal").value = settings.impression_goal;
-    document.getElementById("tg-token").placeholder = settings.telegram_token_set ? "Token já salvo" : "123456:ABC...";
+    const tg = document.getElementById("tg-status");
+    tg.textContent = settings.telegram_ready
+      ? "Telegram: usa o bot do .env do VPS, o mesmo do robô."
+      : "Telegram: falta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS (os alertas e a recuperação de senha dependem dele).";
+    tg.classList.toggle("text-amber-300", !settings.telegram_ready);
+    loadRobo();
     document.getElementById("xai-key").placeholder = settings.xai_key_set ? "Chave já salva" : "xai-...";
     const me = await api("/api/me");
     document.getElementById("profile-name").value = me.nome_exibicao || "";
@@ -1290,17 +1310,11 @@ if (cropConfirm) {
 }
 document.getElementById("settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const payload = {
-    telegram_chat_id: document.getElementById("tg-chat").value,
-    impression_goal: Number(document.getElementById("goal").value)
-  };
-  const token = document.getElementById("tg-token").value.trim();
+  const payload = { impression_goal: Number(document.getElementById("goal").value) };
   const xai = document.getElementById("xai-key").value.trim();
-  if (token) payload.telegram_token = token;
   if (xai) payload.xai_api_key = xai;
   try {
     await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    document.getElementById("tg-token").value = "";
     document.getElementById("xai-key").value = "";
     toast("Configuração salva.");
     await loadSettings();
@@ -1371,14 +1385,84 @@ deleteConfirmBtn.addEventListener("click", async () => {
   }
 });
 
+// Robô: a aba Configurações liga/desliga a coleta automática e escolhe o intervalo; o robo.py lê isso
+// em app_settings a cada minuto (cron). "Atualizar Dados" grava um pedido e espera a rodada terminar.
+function intervalLabel(minutes) {
+  return minutes < 60 ? minutes + " min" : minutes / 60 + (minutes === 60 ? " hora" : " horas");
+}
+function stampBR(iso) {
+  return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function paintRobo(robo) {
+  const toggle = document.getElementById("robo-enabled");
+  const select = document.getElementById("robo-interval");
+  toggle.checked = robo.enabled;
+  select.replaceChildren(...robo.intervals.map((minutes) => {
+    const option = document.createElement("option");
+    option.value = String(minutes);
+    option.textContent = intervalLabel(minutes);
+    return option;
+  }));
+  select.value = String(robo.interval_min);
+  select.disabled = !robo.enabled;
+  const parts = [];
+  if (robo.last_run) {
+    const run = robo.last_run;
+    let text = "Última rodada: " + stampBR(run.finished_at);
+    if (run.contas !== null && run.contas !== undefined) text += " · " + run.contas + " contas, " + (run.tweets || 0) + " tweets";
+    if (run.status === "failed") text += " · falhou";
+    else if (run.status === "partial") text += " · com falhas";
+    parts.push(text);
+  } else parts.push("O robô ainda não rodou.");
+  if (robo.requested_at) parts.push("Coleta pedida às " + stampBR(robo.requested_at) + ", aguardando o robô.");
+  else if (!robo.enabled) parts.push("Coleta automática desligada.");
+  else if (robo.next_run_at) parts.push("Próxima: por volta de " + stampBR(robo.next_run_at) + ".");
+  document.getElementById("robo-status").textContent = parts.join(" ");
+}
+async function loadRobo() {
+  try { paintRobo(await api("/api/robo")); }
+  catch (error) { document.getElementById("robo-status").textContent = error.message || "Não leu o robô."; }
+}
+async function saveRobo(body) {
+  try {
+    const robo = await api("/api/robo", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    paintRobo(robo);
+    toast(body.enabled === false ? "Coleta automática desligada." : body.enabled ? "Coleta automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(robo.interval_min) + ".");
+  } catch (error) {
+    toast(error.message || "Não salvou o robô.");
+    loadRobo();
+  }
+}
+document.getElementById("robo-enabled").addEventListener("change", (event) => saveRobo({ enabled: event.target.checked }));
+document.getElementById("robo-interval").addEventListener("change", (event) => saveRobo({ interval_min: Number(event.target.value) }));
+
+const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô não está pegando os pedidos
+const ROBO_RUN_MS = 12 * 60000;     // uma rodada manual pode levar alguns minutos (um Chrome por coletor)
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 document.getElementById("refresh-all").addEventListener("click", async () => {
   const btn = document.getElementById("refresh-all");
   const orig = btn.textContent;
   btn.disabled = true;
-  btn.textContent = "Atualizando...";
+  btn.textContent = "Chamando os coletores...";
   try {
+    const asked = await api("/api/robo/run", { method: "POST" });
+    const askedAt = Date.parse(asked.requested_at);
+    const started = Date.now();
+    let robo = asked;
+    for (;;) {
+      await wait(5000);
+      robo = await api("/api/robo");
+      const finished = robo.last_run ? Date.parse(robo.last_run.finished_at) : 0;
+      if (!robo.requested_at && finished >= askedAt) break;
+      if (robo.requested_at) {
+        if (Date.now() - started > ROBO_PICKUP_MS) throw new Error("O robô não pegou o pedido. Confira no VPS se o cron roda o robo.py a cada minuto.");
+      } else btn.textContent = "Coletando...";
+      if (Date.now() - started > ROBO_RUN_MS) throw new Error("A coleta está demorando. Os dados aparecem sozinhos quando ela terminar.");
+    }
     await load();
-    toast("Dashboard relido do banco.");
+    const run = robo.last_run;
+    toast(run.status === "failed" ? "A coleta falhou. Veja o aviso no Telegram." : "Coleta feita: " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
+    if (state.tab === "settings") paintRobo(robo);
   } catch (error) { toast(error.message || "Falha ao atualizar."); }
   btn.disabled = false;
   btn.textContent = orig;
