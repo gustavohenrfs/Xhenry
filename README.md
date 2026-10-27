@@ -10,6 +10,8 @@ As métricas dos tweets são coletadas pelo `robo.py` (na raiz deste repositóri
 - **Interações:** a rosca mostra de onde vêm as interações e, no meio, a taxa (interações ÷ views).
 - **Melhor post:** o post com mais views no período, com o link para abrir no X.
 - **Saúde da coleta:** contas atrasadas (sem coleta além do ritmo esperado para o número de coletores e o intervalo), última rodada do robô e coletores livres, de castigo e desligados.
+- **Meta do dia:** barra no cartão de Views com as views de hoje contra a meta de Configurações (Meta de views do dia).
+- **Mapa de calor** em Melhor Horário (média de views por dia da semana e hora), **ranking** dos 10 posts do período com link, **alertas recentes** enviados ao Telegram e, em cada conta, a linha dos últimos 14 dias e a variação das views.
 - Salvamentos aparecem depois que o `robo.py` atualizado coletar (antes ele gravava sempre 0).
 
 ## Coletores

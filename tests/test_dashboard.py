@@ -192,3 +192,32 @@ def test_growth_past_day_has_all_hours():
 
     g = growth_payload([], [], DAY - timedelta(days=1), DAY - timedelta(days=1), datetime(2026, 10, 25, 9, tzinfo=BR))
     assert g["current"] == [0] * 24 and g["pace"]["until"] == "23h" and g["best"] is None
+
+
+def test_ranking_orders_posts_by_views(client, folder):
+    body = get(client, "7d", folder["id"])
+    assert [post["tweet_id"] for post in body["top_posts"]] == ["b1", "a1", "a2"]
+    assert body["top_post"] == body["top_posts"][0]
+    assert body["top_posts"][1]["url"] == "https://x.com/dash_a/status/a1"
+
+
+def test_goal_counts_todays_views(client, folder):
+    for period in ("today", "7d"):
+        goal = get(client, period, folder["id"])["goal"]
+        assert goal["today"] == 150 and goal["target"] >= 1
+
+
+def test_account_cards_carry_spark_and_previous_views(client, folder):
+    cards = {card["username"]: card for card in get(client, "today", folder["id"])["accounts"]}
+    assert len(cards["dash_a"]["spark"]) == 14 and cards["dash_a"]["spark"][-1] == 150
+    assert cards["dash_b"]["spark"][-2] == 1000
+    assert (cards["dash_a"]["views_prev"], cards["dash_b"]["views_prev"]) == (0, 1000)
+    assert get(client, "total", folder["id"])["accounts"][0]["views_prev"] is None
+
+
+def test_heatmap_averages_by_weekday_and_hour(client, folder):
+    grid = get(client, "7d", folder["id"])["suggestions"]["heatmap"]
+    now = datetime.now(BR)
+    assert len(grid) == 7 and all(len(row) == 24 for row in grid)
+    assert grid[now.weekday()][now.hour] == 75, "a1 e a2: (100 + 50) / 2"
+    assert sum(value is not None for row in grid for value in row) == 2

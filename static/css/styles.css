@@ -588,3 +588,44 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   text-align: left;
 }
 .growth-stat .delta-chip { margin-top: .25rem; }
+
+/* Extras do Dashboard: discretos, sem caixas internas */
+.goal-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .6rem; position: relative; z-index: 1; }
+.goal-track { height: .3rem; border-radius: 999px; background: rgba(162, 180, 255, .12); overflow: hidden; }
+.goal-fill { height: 100%; border-radius: inherit; background: var(--magenta); }
+.goal-fill.goal-done { background: #7cf0b5; }
+
+.mini-line { display: block; width: 100%; max-width: 12rem; height: 1.5rem; margin: .6rem auto 0; }
+.mini-line path { fill: none; stroke: var(--magenta); stroke-width: 1.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; opacity: .8; }
+/* Variação das views da conta, no canto do cartão */
+#accounts .account-card > .account-delta { position: absolute; top: .9rem; right: .9rem; margin: 0; }
+
+.heatmap { display: grid; grid-template-columns: 2rem repeat(24, minmax(0, 1fr)); gap: 3px; }
+.heat-hour { font-size: 10px; color: var(--muted); }
+.heat-day { font-size: 10px; color: var(--muted); align-self: center; }
+.heat-cell { height: .85rem; border-radius: 3px; background: rgba(162, 180, 255, .06); }
+
+.rank-list { display: grid; }
+.rank-row {
+  display: grid;
+  grid-template-columns: 1.5rem 7rem minmax(0, 1fr) auto 4rem;
+  align-items: center;
+  gap: .75rem;
+  padding: .5rem 0;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+.rank-row:first-child { border-top: 0; }
+.rank-text:hover, .rank-text:focus-visible { color: var(--magenta); }
+.rank-num, .rank-likes { text-align: right; }
+
+.alert-list { display: grid; }
+.alert-row { display: flex; align-items: center; gap: .65rem; padding: .5rem 0; border-top: 1px solid var(--line); text-align: left; }
+.alert-row:first-child { border-top: 0; }
+.alert-dot { width: .45rem; height: .45rem; border-radius: 999px; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .rank-row { grid-template-columns: 1.25rem minmax(0, 1fr) auto; }
+  .rank-who, .rank-likes { display: none; }
+  .heat-hour { font-size: 8px; }
+}

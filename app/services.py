@@ -699,9 +699,22 @@ def suggestion_payload(samples: list[TweetSample], basis: str) -> dict[str, Any]
     return {"basis": basis, "items": top, "note": note}
 
 
+def heatmap(samples: list[TweetSample]) -> list[list[int | None]]:
+    """Média de views por dia da semana (0 = segunda) e hora do post; None onde não houve post."""
+    sums = [[0] * 24 for _ in range(7)]
+    counts = [[0] * 24 for _ in range(7)]
+    for row in samples:
+        sums[row.weekday][row.hour_local] += int(row.view_count or 0)
+        counts[row.weekday][row.hour_local] += 1
+    return [
+        [round(sums[day][hour] / counts[day][hour]) if counts[day][hour] else None for hour in range(24)]
+        for day in range(7)
+    ]
+
+
 def build_suggestions(db: Session, accounts: list[XAccount], start: date, end: date) -> dict[str, Any]:
     if not accounts:
-        return suggestion_payload([], "period")
+        return suggestion_payload([], "period") | {"heatmap": heatmap([])}
     ids = [account.id for account in accounts]
     all_rows = list(db.scalars(select(TweetSample).where(TweetSample.account_id.in_(ids))).all())
     in_period = []
@@ -709,9 +722,8 @@ def build_suggestions(db: Session, accounts: list[XAccount], start: date, end: d
         local_day = as_utc(row.posted_at).astimezone(zone(row.timezone_used)).date()
         if start <= local_day <= end:
             in_period.append(row)
-    if len(in_period) >= 3:
-        return suggestion_payload(in_period, "period")
-    return suggestion_payload(all_rows, "all" if all_rows else "period")
+    rows, basis = (in_period, "period") if len(in_period) >= 3 else (all_rows, "all" if all_rows else "period")
+    return suggestion_payload(rows, basis) | {"heatmap": heatmap(rows)}
 
 
 def selected_accounts(db: Session, folder_id: int | None) -> list[XAccount]:
@@ -802,11 +814,13 @@ def followers_gained(db: Session, accounts: list[XAccount], start: date, end: da
     return total
 
 
-def top_post(pairs: list[tuple[XAccount, TweetSample]], total_views: int) -> dict[str, Any] | None:
-    """O post com mais views no período, com o link dele no X."""
-    if not pairs:
-        return None
-    account, row = max(pairs, key=lambda pair: (int(pair[1].view_count or 0), int(pair[1].like_count or 0)))
+def top_posts(pairs: list[tuple[XAccount, TweetSample]], total_views: int, limit: int = 10) -> list[dict[str, Any]]:
+    """Os posts com mais views no período, com o link de cada um no X."""
+    ranked = sorted(pairs, key=lambda pair: (int(pair[1].view_count or 0), int(pair[1].like_count or 0)), reverse=True)
+    return [post_payload(account, row, total_views) for account, row in ranked[:limit]]
+
+
+def post_payload(account: XAccount, row: TweetSample, total_views: int) -> dict[str, Any]:
     views = int(row.view_count or 0)
     return {
         "username": account.username,
@@ -958,17 +972,35 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     impression_values = [card["impressions"] for card in cards if card["impressions"] is not None]
     pairs = samples_in(db, accounts, start, end)
     current = window_totals(pairs)
+    ranking = top_posts(pairs, current["views"])
+    today = datetime.now(ZoneInfo(DEFAULT_TZ)).date()
+    today_views = sum(
+        int(row.view_count or 0)
+        for _, row in (pairs if start <= today <= end and start == end else samples_in(db, accounts, today, today))
+    )
     # Linha do cartão de Views: o período, ou os últimos 14 dias quando o período é curto demais.
     spark_start = min(start, end - timedelta(days=SPARK_DAYS - 1))
     spark = {spark_start + timedelta(days=offset): 0 for offset in range((end - spark_start).days + 1)}
+    # Cada conta: mini-linha dos últimos 14 dias.
+    mini_start = end - timedelta(days=SPARK_DAYS - 1)
+    mini = {account.id: [0] * SPARK_DAYS for account in accounts}
     for account, row in samples_in(db, accounts, spark_start, end) if spark_start < start else pairs:
-        spark[as_utc(row.posted_at).astimezone(zone(account.timezone)).date()] += int(row.view_count or 0)
+        day = local_posted(account, row).date()
+        spark[day] += int(row.view_count or 0)
+        if day >= mini_start:
+            mini[account.id][(day - mini_start).days] += int(row.view_count or 0)
     compare_label = COMPARE_LABELS.get(period.strip().lower())
     previous = prev_pairs = None
     if compare_label:
         span = (end - start).days + 1
         prev_pairs = samples_in(db, accounts, start - timedelta(days=span), start - timedelta(days=1))
         previous = window_totals(prev_pairs)
+    prev_views: dict[int, int] = {}
+    for account, row in prev_pairs or []:
+        prev_views[account.id] = prev_views.get(account.id, 0) + int(row.view_count or 0)
+    for card in cards:
+        card["spark"] = mini.get(card["id"], [])
+        card["views_prev"] = prev_views.get(card["id"], 0) if prev_pairs is not None else None
     return {
         "period": period,
         "last_collected_at": last_collected,
@@ -998,7 +1030,9 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         "compare_label": compare_label,
         "spark": [{"date": day.isoformat(), "views": views} for day, views in sorted(spark.items())],
         "previous": previous,
-        "top_post": top_post(pairs, current["views"]),
+        "top_posts": ranking,
+        "top_post": ranking[0] if ranking else None,
+        "goal": {"target": get_settings(db).impression_goal, "today": today_views},
         "growth": growth_payload(pairs, prev_pairs, start, end),
         "folders": folder_cards,
         "accounts": cards,

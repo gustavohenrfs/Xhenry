@@ -245,6 +245,20 @@ function sparkline(series) {
   svg.append(defs, area, stroke);
   return svg;
 }
+function miniLine(values) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 100 24");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("mini-line");
+  const max = Math.max(...values, 1);
+  const step = 100 / Math.max(1, values.length - 1);
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", values.map((v, i) => (i ? "L" : "M") + (i * step).toFixed(2) + " " + (22 - v / max * 20).toFixed(2)).join(" "));
+  svg.append(path);
+  return svg;
+}
 function heroCard(kpis, series) {
   const card = el("article", "kpi-card kpi-left kpi-hero col-span-2 rounded-3xl border bg-card p-5");
   const top = el("div", "flex items-center justify-between gap-3");
@@ -255,6 +269,17 @@ function heroCard(kpis, series) {
     el("p", "mt-1 font-mono text-5xl tracking-tight text-white", num(kpis.views)),
     el("p", "mt-1 text-xs text-mute", label ? label + ": " + num(prevOf("views")) + " views" : "Desde o primeiro post coletado")
   );
+  const goal = state.data.goal;
+  if (goal && goal.target) {
+    const share = Math.min(1, goal.today / goal.target);
+    const row = el("div", "goal-row mt-3");
+    const track = el("div", "goal-track");
+    const fill = el("div", "goal-fill" + (share >= 1 ? " goal-done" : ""));
+    fill.style.width = (share * 100).toFixed(1) + "%";
+    track.append(fill);
+    row.append(el("span", "text-[11px] text-mute", "Meta do dia"), track, el("span", "font-mono text-[11px] text-white", num(goal.today) + " / " + num(goal.target)));
+    card.append(row);
+  }
   if (series.length > 1) {
     const days = series.length;
     card.append(sparkline(series), el("p", "spark-caption text-[10px] text-mute", days <= 14 ? "últimos " + days + " dias" : "views por dia"));
@@ -406,6 +431,62 @@ function renderTopPost(post) {
   const foot = el("div", "mt-4 flex items-center justify-between gap-3");
   foot.append(el("p", "text-left text-xs text-mute", post.share === null ? "" : pctText(post.share, 1) + "% das views do período"), link);
   host.replaceChildren(head, el("p", "post-text mt-3 text-left text-sm text-white", post.text || "Post sem texto (só mídia)."), stats, foot);
+}
+function renderRanking(posts) {
+  const host = document.getElementById("post-ranking");
+  if (!posts || !posts.length) {
+    host.replaceChildren(el("li", "text-sm text-mute", "Nenhum post coletado no período."));
+    return;
+  }
+  host.replaceChildren(...posts.map((post, index) => {
+    const li = el("li", "rank-row");
+    const link = el("a", "rank-text truncate text-sm text-white", post.text || "Post sem texto (só mídia)");
+    link.href = post.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.title = "Abrir no X";
+    li.append(
+      el("span", "rank-pos font-mono text-xs text-mute", String(index + 1)),
+      el("span", "rank-who truncate text-xs text-mute", "@" + post.username),
+      link,
+      el("span", "rank-num font-mono text-sm text-white", num(post.views)),
+      el("span", "rank-likes font-mono text-xs text-mute", num(post.likes) + " ♥")
+    );
+    return li;
+  }));
+}
+const ALERT_KINDS = {
+  viral: ["Viral", "#7cf0b5"], queda: ["Queda", "#ffb4c4"], ban: ["Restrição", "#ffb4c4"],
+  coletor: ["Coletor", "#ffc46b"], erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"]
+};
+function renderAlerts(alerts) {
+  const host = document.getElementById("alert-list");
+  if (!alerts.length) {
+    host.replaceChildren(el("li", "text-sm text-mute", "Nenhum alerta enviado ainda."));
+    return;
+  }
+  host.replaceChildren(...alerts.map((alert) => {
+    const [label, color] = ALERT_KINDS[alert.kind] || [alert.kind, "#9b8cff"];
+    const lines = alert.text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const li = el("li", "alert-row");
+    const dot = el("span", "alert-dot");
+    dot.style.background = color;
+    const body = el("div", "min-w-0 flex-1");
+    const who = lines.find((line) => line.includes("Conta:"));
+    body.append(el("p", "truncate text-sm text-white", label + (who ? ": " + who.replace(/^.*Conta:\s*/, "") : "")));
+    if (lines[0]) body.append(el("p", "truncate text-xs text-mute", lines[0]));
+    li.title = alert.text;
+    li.append(dot, body, el("span", "shrink-0 text-[11px] text-mute", agoText(alert.sent_at)));
+    return li;
+  }));
+}
+async function loadAlerts() {
+  try {
+    renderAlerts(await api("/api/alerts?limit=8"));
+  } catch (error) {
+    if (error.message === SESSION_EXPIRED) return;
+    document.getElementById("alert-list").replaceChildren(el("li", "text-sm text-mute", "Não deu para ler os alertas: " + (error.message || "erro") + "."));
+  }
 }
 function agoText(iso) {
   if (!iso) return "nunca";
@@ -591,7 +672,30 @@ function renderCharts(data) {
   else barChart = new Chart(document.getElementById("bar-chart"), { type: "bar", data: barData, options: chartOptions() });
 }
 // Top 3 horários do build_suggestions (vem junto no /api/dashboard, com o mesmo período e pasta).
+const WEEK_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+// Grade dia da semana × hora: quanto mais forte, maior a média de views dos posts daquele horário.
+function renderHeatmap(grid) {
+  const host = document.getElementById("heatmap");
+  const values = (grid || []).flat().filter((v) => v !== null);
+  if (!values.length) { host.replaceChildren(); return; }
+  const max = Math.max(...values, 1);
+  const cells = [el("span")];
+  for (let hour = 0; hour < 24; hour++) cells.push(el("span", "heat-hour", hour % 6 === 0 ? String(hour).padStart(2, "0") + "h" : ""));
+  grid.forEach((row, day) => {
+    cells.push(el("span", "heat-day", WEEK_SHORT[day]));
+    row.forEach((value, hour) => {
+      const cell = el("span", "heat-cell");
+      if (value !== null) {
+        cell.style.background = "rgba(255,99,195," + (0.12 + 0.88 * value / max).toFixed(2) + ")";
+        cell.title = WEEK_SHORT[day] + " " + String(hour).padStart(2, "0") + "h: " + num(value) + " views em média";
+      }
+      cells.push(cell);
+    });
+  });
+  host.replaceChildren(...cells);
+}
 function renderSuggestions(suggestions) {
+  renderHeatmap(suggestions && suggestions.heatmap);
   const host = document.getElementById("best-times");
   const items = (suggestions && suggestions.items) || [];
   document.getElementById("best-times-note").textContent = (suggestions && suggestions.note) || "";
@@ -651,6 +755,7 @@ function renderAccounts(accounts) {
       wrap.append(dt, dd);
       grid.append(wrap);
     });
+    const trend = account.spark && account.spark.some((v) => v > 0) ? miniLine(account.spark) : null;
     const reveal = document.createElement("div");
     reveal.className = "status-reveal mt-4 flex items-center gap-2";
     const badge = document.createElement("span");
@@ -665,7 +770,12 @@ function renderAccounts(accounts) {
     const note = document.createElement("p");
     note.className = "status-reveal mt-2 text-[11px] text-mute";
     note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
-    card.append(name, handle, grid, reveal, note);
+    card.append(name, handle);
+    if (trend) card.append(trend);
+    const viewsChip = deltaChip(account.views, account.views_prev);
+    viewsChip.classList.add("account-delta");
+    card.append(viewsChip);
+    card.append(grid, reveal, note);
     return card;
   }));
 }
@@ -801,7 +911,8 @@ async function load({ silent = false } = {}) {
   try {
     const data = await api("/api/dashboard?" + query.toString());
     if (seq !== loadSeq) return;            // chegou uma resposta mais nova: descarta esta
-    loadHealth();                           // rota com login, fora da assinatura do dashboard
+    loadHealth();                           // rotas com login, fora da assinatura do dashboard
+    loadAlerts();
     renderLastCollect(data.last_collected_at);
     const sig = JSON.stringify(data);
     if (silent && sig === lastSig) return;  // nada mudou: não mexe no DOM (zero flicker)
@@ -811,6 +922,7 @@ async function load({ silent = false } = {}) {
     document.getElementById("range-label").textContent = data.start + " → " + data.end;
     renderKpis(data.kpis);
     renderTopPost(data.top_post);
+    renderRanking(data.top_posts);
     renderCharts(data);
     renderSuggestions(data.suggestions);
     renderAccounts(data.accounts);

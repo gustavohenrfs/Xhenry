@@ -7,15 +7,17 @@ import secrets
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import ROOT
 from app.database import get_db
-from app.models import DEFAULT_TZ
+from app.models import DEFAULT_TZ, AlertSent
 from app.routers.auth import current_user
 from app.services import (
+    as_utc,
     ask_grok,
     get_settings,
     send_telegram,
@@ -48,6 +50,16 @@ def write_settings(payload: SettingsIn, db: Session = Depends(get_db)) -> dict[s
         row.xai_api_key = payload.xai_api_key.strip()
     db.commit()
     return settings_payload(row)
+
+
+@router.get("/api/alerts", dependencies=[Depends(current_user)])
+def recent_alerts(limit: int = Query(default=8, ge=1, le=50), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Últimos alertas enviados ao Telegram (painel, robô e vigia), do mais novo para o mais antigo."""
+    rows = db.scalars(select(AlertSent).order_by(AlertSent.sent_at.desc(), AlertSent.id.desc()).limit(limit)).all()
+    return [
+        {"kind": row.kind, "sent_at": as_utc(row.sent_at).isoformat(), "text": row.detail or ""}
+        for row in rows
+    ]
 
 
 @router.post("/api/telegram/test", dependencies=[Depends(current_user)])

@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css?v=4">
+  <link rel="stylesheet" href="/static/css/styles.css?v=5">
   <script>
     tailwind.config = {
       theme: {
@@ -229,7 +229,20 @@
             <h2 class="font-display text-xl text-white">Melhor Horário para Postar</h2>
             <p id="best-times-note" class="mb-3 text-xs text-mute">Média de views por horário dos posts coletados</p>
             <ol id="best-times" class="grid gap-3 sm:grid-cols-3"></ol>
+            <div id="heatmap" class="heatmap mt-5" aria-label="Média de views por dia da semana e hora"></div>
           </article>
+          <div class="grid gap-4 xl:grid-cols-3">
+            <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-2">
+              <h2 class="font-display text-xl text-white">Ranking de posts</h2>
+              <p class="mb-3 text-xs text-mute">Os 10 posts com mais views no período</p>
+              <ol id="post-ranking" class="rank-list"></ol>
+            </article>
+            <article class="glow rounded-3xl border border-neon/20 bg-card p-4">
+              <h2 class="font-display text-xl text-white">Alertas recentes</h2>
+              <p class="mb-3 text-xs text-mute">O que foi enviado ao Telegram</p>
+              <ul id="alert-list" class="alert-list"></ul>
+            </article>
+          </div>
           <section>
             <div class="mb-3 flex items-baseline justify-between">
               <h2 class="font-display text-2xl text-white">Contas</h2>
@@ -370,7 +383,7 @@
             <p id="tg-status" class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="xai-key">Chave da xAI (análise do post)</label>
             <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de views</label>
+            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de views do dia (todas as contas)</label>
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
@@ -459,6 +472,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=19"></script>
+  <script src="/static/js/app.js?v=20"></script>
 </body>
 </html>

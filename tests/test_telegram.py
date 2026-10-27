@@ -153,3 +153,32 @@ def test_test_notification_sends_viral_sample(logged_in, monkeypatch):
     token, chat, text = sent[0]
     assert (token, chat) == ("bot", "chat")
     assert "Post viralizando" in text and "Curtidas" in text and "Retweets" in text
+
+
+def test_recent_alerts_newest_first():
+    from datetime import timedelta
+    from uuid import uuid4
+
+    from fastapi.testclient import TestClient
+
+    from app.database import SessionLocal
+    from app.models import AlertSent
+    from app.routers.auth import current_user
+    from app.services import now_utc
+    from main import app
+
+    tag = uuid4().hex[:8]
+    with SessionLocal() as db:
+        db.add_all([
+            AlertSent(dedupe_key=f"velho:{tag}", kind="queda", detail="velho", sent_at=now_utc() + timedelta(days=1)),
+            AlertSent(dedupe_key=f"novo:{tag}", kind="viral", detail="🚀 Post viralizando!", sent_at=now_utc() + timedelta(days=2)),
+        ])
+        db.commit()
+    app.dependency_overrides[current_user] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            rows = client.get("/api/alerts?limit=2").json()
+    finally:
+        app.dependency_overrides.clear()
+    assert [row["kind"] for row in rows] == ["viral", "queda"]
+    assert rows[0]["text"] == "🚀 Post viralizando!" and rows[0]["sent_at"]
