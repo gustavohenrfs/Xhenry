@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -25,6 +25,9 @@ def client():
         with TestClient(app) as c:
             with SessionLocal() as db:
                 db.query(PushSubscription).delete()
+                # Começa sem alertas pendentes de outros testes.
+                newest = db.query(AlertSent.id).order_by(AlertSent.id.desc()).limit(1).scalar()
+                get_settings(db).push_last_alert_id = newest or 0
                 db.commit()
             yield c
     finally:
@@ -106,6 +109,43 @@ def test_watchdog_pushes_only_new_alerts_with_level(client, sent):
     assert good["title"] == "💯 Passou de 100K views"
     assert "123.456 views" in good["body"] and good["url"].endswith("/status/42")
     assert good["tag"] == f"viral-{row_id}" and good["icon"].endswith(".png")
+
+
+def test_backlog_goes_out_next_minute_and_stale_is_skipped(client, sent):
+    subscribed = PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22)
+    with SessionLocal() as db:
+        db.add(subscribed)
+        db.commit()
+        old = make_alert(db)
+        old.sent_at = datetime.now(timezone.utc) - timedelta(hours=7)
+        get_settings(db).push_last_alert_id = old.id - 1
+        db.commit()
+        ids = [make_alert(db).id for _ in range(7)]
+        assert push.push_new_alerts(db) == 5, "velho fica de fora, 5 por rodada"
+        assert get_settings(db).push_last_alert_id == ids[4]
+        assert push.push_new_alerts(db) == 2, "o resto sai no minuto seguinte"
+        assert get_settings(db).push_last_alert_id == ids[-1]
+        assert push.push_new_alerts(db) == 0
+    assert [p["tag"] for _, p in sent] == [f"viral-{i}" for i in ids]
+
+
+def test_renew_swaps_subscription_without_login(client):
+    app.dependency_overrides.clear()  # o service worker chama sem token
+    new = {"endpoint": "https://push.example/nova", "keys": {"p256dh": "C" * 87, "auth": "c" * 22}}
+    assert client.post("/api/push/renew", json=dict(new, old_endpoint=SUB["endpoint"])).status_code == 404
+    with SessionLocal() as db:
+        db.add(PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22))
+        db.commit()
+    assert client.post("/api/push/renew", json=dict(new, old_endpoint=SUB["endpoint"])).json() == {"ok": True}
+    with SessionLocal() as db:
+        rows = db.query(PushSubscription).all()
+        assert [(r.endpoint, r.auth) for r in rows] == [(new["endpoint"], "c" * 22)]
+        # A página já tinha reinscrito: a antiga some e não duplica.
+        db.add(PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22))
+        db.commit()
+    assert client.post("/api/push/renew", json=dict(new, old_endpoint=SUB["endpoint"])).status_code == 200
+    with SessionLocal() as db:
+        assert [r.endpoint for r in db.query(PushSubscription).all()] == [new["endpoint"]]
 
 
 def test_viral_feed_reports_level(client):

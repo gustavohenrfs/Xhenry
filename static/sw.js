@@ -24,6 +24,26 @@ self.addEventListener("push", (event) => {
   }));
 });
 
+// O navegador trocou a inscrição sozinho (expirou, renovou): inscreve de novo com a mesma chave e
+// avisa o servidor, sem esperar o painel ser aberto. Sem a inscrição antiga não dá para provar quem é;
+// aí fica para a próxima vez que o painel abrir (enablePush no app.js).
+self.addEventListener("pushsubscriptionchange", (event) => {
+  const old = event.oldSubscription;
+  if (!old) return;
+  event.waitUntil((async () => {
+    const key = old.options && old.options.applicationServerKey;
+    const sub = event.newSubscription
+      || (key && await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+    if (!sub) return;
+    const json = sub.toJSON();
+    await fetch("/api/push/renew", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ old_endpoint: old.endpoint, endpoint: json.endpoint, keys: json.keys })
+    });
+  })().catch(() => {}));
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || "/";

@@ -2220,7 +2220,7 @@ async function testNotification() {
   }
   button.disabled = true;
   try {
-    if (!pushEndpoint()) await enablePush();
+    await enablePush();  // garante que o servidor tem a inscrição atual (o navegador pode ter trocado)
     if (pushEndpoint()) {
       try {
         await api("/api/push/test", {

@@ -14,18 +14,20 @@ import base64
 import json
 import logging
 import os
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import AlertSent, PushSubscription
-from app.services import fmt_int, get_settings, viral_item
+from app.services import as_utc, fmt_int, get_settings, now_utc, viral_item
 
 log = logging.getLogger("xhenry")
 ICON = "/static/img/icon-192.png"
 BADGE = "/static/img/badge-96.png"
-# Alertas acumulados (vigia parado, deploy): só os mais novos saem, o resto só avança o cursor.
+# Até 5 alertas por rodada; o que passar disso fica para o minuto seguinte (o cursor só anda até o
+# último enviado). Alerta mais velho que o TTL (vigia parado, deploy) é pulado em vez de chegar atrasado.
 MAX_PER_TICK = 5
 TTL_SECONDS = 6 * 3600
 
@@ -135,14 +137,17 @@ def push_new_alerts(db: Session) -> int:
             settings.push_last_alert_id = newest
             db.commit()
         return 0
-    rows = db.scalars(
+    oldest_ok = now_utc() - timedelta(seconds=TTL_SECONDS)
+    pending = db.scalars(
         select(AlertSent)
         .where(AlertSent.kind == "viral", AlertSent.id > cursor)
-        .order_by(AlertSent.id.desc())
-        .limit(MAX_PER_TICK)
+        .order_by(AlertSent.id)
     ).all()
-    payloads = [viral_payload(viral_item(db, row)) for row in reversed(rows)]
-    settings.push_last_alert_id = newest
+    fresh = [row for row in pending if as_utc(row.sent_at) >= oldest_ok]
+    rows = fresh[:MAX_PER_TICK]
+    payloads = [viral_payload(viral_item(db, row)) for row in rows]
+    # Sem nada recente, pula os velhos de uma vez; senão para no último enviado e o resto sai depois.
+    settings.push_last_alert_id = rows[-1].id if len(fresh) > MAX_PER_TICK else newest
     db.commit()
     sent = 0
     for sub in subs:

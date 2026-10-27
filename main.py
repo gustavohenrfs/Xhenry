@@ -56,6 +56,7 @@ app.include_router(cloaker.router)
 app.include_router(collectors.router)
 app.include_router(robo.router)
 app.include_router(push.router)
+app.include_router(push.public_router)
 app.include_router(pages.router)
 
 

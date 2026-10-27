@@ -13,6 +13,8 @@ from app.push import PushUnavailable, public_key, send_one, test_payload
 from app.routers.auth import current_user
 
 router = APIRouter(dependencies=[Depends(current_user)])
+# Sem login: o service worker não enxerga o token do localStorage. Ver renew().
+public_router = APIRouter()
 
 
 class PushKeys(BaseModel):
@@ -28,6 +30,10 @@ class SubscriptionIn(BaseModel):
 
 class EndpointIn(BaseModel):
     endpoint: str = Field(min_length=12, max_length=2048)
+
+
+class RenewIn(SubscriptionIn):
+    old_endpoint: str = Field(min_length=12, max_length=2048)
 
 
 def find(db: Session, endpoint: str) -> PushSubscription | None:
@@ -47,6 +53,32 @@ def subscribe(payload: SubscriptionIn, db: Session = Depends(get_db)) -> dict[st
     row.p256dh, row.auth = payload.keys.p256dh, payload.keys.auth
     row.user_agent = payload.user_agent
     db.add(row)
+    db.commit()
+    return {"ok": True}
+
+
+@public_router.post("/api/push/renew")
+def renew(payload: RenewIn, db: Session = Depends(get_db)) -> dict[str, bool]:
+    """O navegador trocou a inscrição sozinho (pushsubscriptionchange no sw.js): põe a nova no lugar.
+
+    Não pede login, mas só troca uma inscrição que já existe: o endereço antigo é uma URL secreta do
+    serviço de push que só aquele navegador conhece, então serve de prova.
+    """
+    old = find(db, payload.old_endpoint)
+    if old is None:
+        raise HTTPException(404, "Inscrição antiga não encontrada.")
+    if not payload.endpoint.startswith("https://"):
+        raise HTTPException(400, "Endereço de push inválido.")
+    current = find(db, payload.endpoint)
+    if current is not None and current is not old:
+        db.delete(old)  # a página já reinscreveu este navegador; só some com a antiga
+        row = current
+    else:
+        row = old
+        row.endpoint = payload.endpoint
+    row.p256dh, row.auth = payload.keys.p256dh, payload.keys.auth
+    if payload.user_agent:
+        row.user_agent = payload.user_agent
     db.commit()
     return {"ok": True}
 
