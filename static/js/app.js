@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar Post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores" };
+const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
@@ -44,12 +44,30 @@ if (window.Chart) {
   if (document.fonts) document.fonts.ready.then(() => [lineChart, barChart, mixChart].forEach((chart) => chart && chart.update("none")));
 }
 function num(value) { return value === null || value === undefined ? "—" : fmt.format(value); }
-function toast(message) {
+// Avisos com tipo: ícone e cor de sucesso, erro, coletor (🛡️) ou informação, e uma barrinha que mostra
+// quanto falta para sumir. O tipo vem do próprio texto quando quem chama não diz.
+const TOAST_ICONS = { ok: "✓", error: "!", shield: "🛡️", info: "i" };
+const TOAST_MS = 4200;
+function toastKind(message) {
+  if (/^🛡/.test(message)) return "shield";
+  if (/^(✅|Salv|Pronto|Teste (enviado|mostrado|pedido)|Criad|Removid|Excluíd|Atualizad|Arquivad|Desarquivad|Senha (alterada|atualizada)|XHenry instalado|Notificações ligadas|Coletor (adicionado|salvo))/i.test(message)) return "ok";
+  if (/^(❌|⛔|Falha|Erro|Não |Sem |Sua sessão|Notificações bloqueadas)|não (foi|deu|carregou)|inválid|recus/i.test(message)) return "error";
+  return "info";
+}
+function toast(message, kind) {
   const box = document.getElementById("toast");
-  box.textContent = message;
+  const text = String(message || "");
+  const type = kind || toastKind(text);
+  box.dataset.kind = type;
+  box.replaceChildren(
+    el("span", "toast-icon", TOAST_ICONS[type]),
+    el("span", "toast-text", text.replace(/^(✅|❌|⛔|🛡️?)\s*/u, "")),
+    el("span", "toast-bar")
+  );
+  box.style.setProperty("--toast-ms", TOAST_MS + "ms");
   box.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => box.classList.add("hidden"), 4200);
+  toastTimer = setTimeout(() => box.classList.add("hidden"), TOAST_MS);
 }
 function detailOf(body, fallback) {
   if (!body) return fallback;
@@ -190,7 +208,12 @@ function setPeriod(period) {
 }
 function setTab(tab) {
   state.tab = tab;
-  document.querySelectorAll(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+  document.querySelectorAll(".nav-btn, .tab-btn[data-tab], .more-item").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+  const moreBtn = document.getElementById("more-btn");
+  if (moreBtn) {
+    moreBtn.classList.toggle("active", MORE_TABS.includes(tab));
+    setMoreOpen(false);
+  }
   document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("on", pane.id === "pane-" + tab));
   document.getElementById("heading").textContent = titles[tab];
   const controls = document.getElementById("dashboard-controls");
@@ -285,6 +308,26 @@ function miniLine(values) {
   svg.append(path);
   return svg;
 }
+// Números que contam: ao trocar de período, o valor desliza do que estava na tela até o novo (só
+// depois do primeiro desenho; com "reduzir movimento", troca direto).
+const shownNumbers = new Map();
+function countTo(node, key, value, format) {
+  const to = typeof value === "number" && Number.isFinite(value) ? value : null;
+  const from = shownNumbers.has(key) ? shownNumbers.get(key) : null;
+  shownNumbers.set(key, to);
+  node.textContent = format(value);
+  if (from === null || to === null || from === to || matchMedia("(prefers-reduced-motion: reduce)").matches) return node;
+  const start = performance.now();
+  const step = (now) => {
+    if (!node.isConnected) return;
+    const t = Math.min(1, (now - start) / 650);
+    const eased = 1 - Math.pow(1 - t, 3);
+    node.textContent = format(Math.round(from + (to - from) * eased));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  return node;
+}
 function heroCard(kpis, series) {
   const card = el("article", "kpi-card kpi-left kpi-hero col-span-2 rounded-3xl border bg-card p-5");
   const top = el("div", "flex items-center justify-between gap-3");
@@ -292,7 +335,7 @@ function heroCard(kpis, series) {
   const label = state.data.compare_label;
   card.append(
     top,
-    el("p", "mt-1 font-mono text-5xl tracking-tight text-white", num(kpis.views)),
+    countTo(el("p", "mt-1 font-mono text-5xl tracking-tight text-white"), "views", kpis.views, num),
     el("p", "mt-1 text-xs text-mute", label ? label + ": " + num(prevOf("views")) + " views" : "Desde o primeiro post coletado")
   );
   const goal = state.data.goal;
@@ -319,7 +362,7 @@ function perPostCard(kpis) {
   const posts = kpis.posts || 0;
   card.append(
     top,
-    el("p", "mt-1 font-mono text-4xl tracking-tight text-white", num(kpis.views_per_post)),
+    countTo(el("p", "mt-1 font-mono text-4xl tracking-tight text-white"), "views_per_post", kpis.views_per_post, num),
     el("p", "mt-1 text-xs text-mute", "Média de " + posts + (posts === 1 ? " post" : " posts"))
   );
   if (state.data.previous) {
@@ -345,14 +388,16 @@ function followersCard(kpis) {
   const tone = gained > 0 ? "gain-up" : gained < 0 ? "gain-down" : "text-white";
   card.append(
     el("p", "text-sm text-mute", "Seguidores no período"),
-    el("p", "mt-1 font-mono text-4xl tracking-tight " + tone, signed(gained)),
+    countTo(el("p", "mt-1 font-mono text-4xl tracking-tight " + tone), "followers_gained", gained, signed),
     el("p", "mt-1 text-xs text-mute", "Total agora: " + num(kpis.followers))
   );
   return card;
 }
 function tile(label, value, current, previous, hint) {
   const card = el("article", "kpi-card flex min-h-24 flex-col items-center justify-center rounded-3xl border bg-card px-4 py-4 text-center");
-  card.append(el("p", "text-xs text-mute", label), el("p", "mt-1 font-mono text-2xl tracking-tight text-white", value));
+  const big = el("p", "mt-1 font-mono text-2xl tracking-tight text-white", value);
+  if (typeof current === "number") countTo(big, "tile:" + label, current, num);
+  card.append(el("p", "text-xs text-mute", label), big);
   card.append(hint ? el("p", "mt-1 text-[11px] text-mute", hint) : deltaChip(current, previous));
   return card;
 }
@@ -424,7 +469,7 @@ function renderMix(kpis) {
 function renderTopPost(post) {
   const host = document.getElementById("top-post-body");
   if (!post) {
-    host.replaceChildren(el("p", "text-sm text-mute", "Nenhum post coletado no período. Clique em Atualizar Dados para ler as contas agora."));
+    host.replaceChildren(el("p", "text-sm text-mute", "Nenhum post coletado no período. Clique em Atualizar dados para ler as contas agora."));
     return;
   }
   const initial = post.username.slice(0, 1).toUpperCase();
@@ -552,7 +597,7 @@ function renderHealth(health) {
   const late = health.late_after_min >= 120 ? Math.round(health.late_after_min / 60) + " h" : health.late_after_min + " min";
   note.textContent = health.enabled
     ? "Atrasada é a conta sem coleta há mais de " + late + "."
-    : "Coleta automática desligada: só coleta quando você clica em Atualizar Dados.";
+    : "Coleta automática desligada: só coleta quando você clica em Atualizar dados.";
   const gauge = el("div", "gauge-wrap");
   gauge.append(ring(health.fresh, health.accounts), el("p", "gauge-label font-mono text-lg text-white", health.fresh + "/" + health.accounts));
   const behind = health.stale.length;
@@ -595,6 +640,7 @@ async function loadHealth() {
   } catch (error) {
     if (error.message === SESSION_EXPIRED) return;
     document.getElementById("health-note").textContent = "Não deu para ler a saúde da coleta: " + (error.message || "erro") + ".";
+    document.getElementById("health-body").replaceChildren();  // tira o esqueleto de carregamento
   }
 }
 function chartOptions() {
@@ -695,17 +741,44 @@ function renderGrowth(data) {
 }
 function renderCharts(data) {
   if (!window.Chart) return;
+  document.querySelectorAll(".chart-skel").forEach((node) => node.classList.remove("chart-skel"));
   renderGrowth(data);
-  const names = data.by_account.map((row) => "@" + row.username);
+  // Melhor conta: barras deitadas, da maior para a menor. O @ fica legível com muitas contas e no
+  // celular (em pé, os nomes ficavam inclinados e espremidos); a altura cresce com o nº de contas.
+  const rows = [...data.by_account].sort((a, b) => (b.views || 0) - (a.views || 0));
+  const canvas = document.getElementById("bar-chart");
+  canvas.parentElement.style.height = Math.max(256, rows.length * 34 + 48) + "px";
   const barData = {
-    labels: names.length ? names : ["—"],
-    datasets: [
-      { label: "Views", data: names.length ? data.by_account.map((row) => row.views) : [0], backgroundColor: "#ff2ec8", borderRadius: 8, maxBarThickness: 28 }
-    ]
+    labels: rows.length ? rows.map((row) => "@" + row.username) : ["—"],
+    datasets: [{
+      label: "Views",
+      data: rows.length ? rows.map((row) => row.views) : [0],
+      backgroundColor: (ctx) => {
+        const area = ctx.chart.chartArea;
+        if (!area) return "#ff2ec8";
+        const fill = ctx.chart.ctx.createLinearGradient(area.left, 0, area.right, 0);
+        fill.addColorStop(0, "#8b6cff");
+        fill.addColorStop(1, "#ff2ec8");
+        return fill;
+      },
+      borderRadius: 8,
+      borderSkipped: false,
+      maxBarThickness: 22
+    }]
+  };
+  const barOptions = {
+    indexAxis: "y",
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 6 } },
+      y: { grid: { display: false }, ticks: { autoSkip: false } }
+    }
   };
   // Atualiza os gráficos no lugar (sem destruir/recriar), para não piscar no auto-refresh.
-  if (barChart) { barChart.data = barData; barChart.update(); }
-  else barChart = new Chart(document.getElementById("bar-chart"), { type: "bar", data: barData, options: chartOptions() });
+  if (barChart) { barChart.data = barData; barChart.options = barOptions; barChart.update(); }
+  else barChart = new Chart(canvas, { type: "bar", data: barData, options: barOptions });
 }
 // Top 3 horários do build_suggestions (vem junto no /api/dashboard, com o mesmo período e pasta).
 const WEEK_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -713,6 +786,7 @@ const WEEK_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 function renderHeatmap(grid) {
   const host = document.getElementById("heatmap");
   const values = (grid || []).flat().filter((v) => v !== null);
+  document.getElementById("heat-legend").classList.toggle("hidden", !values.length);
   if (!values.length) { host.replaceChildren(); return; }
   const max = Math.max(...values, 1);
   const cells = [el("span")];
@@ -739,7 +813,7 @@ function renderSuggestions(suggestions) {
     const li = document.createElement("li");
     li.className = "rounded-2xl border px-4 py-4 text-center " + (index === 0 ? "border-neon/50 bg-neon/10" : "border-neon/20 bg-ink");
     const rank = document.createElement("p");
-    rank.className = "text-[11px] uppercase tracking-[0.16em] " + (index === 0 ? "text-neon" : "text-mute");
+    rank.className = "text-xs " + (index === 0 ? "text-neon" : "text-mute");
     rank.textContent = index + 1 + "º lugar";
     const hour = document.createElement("p");
     hour.className = "mt-2 font-mono text-2xl text-white tracking-tight";
@@ -783,7 +857,7 @@ function renderAccounts(accounts) {
     [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
-      dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+      dt.className = "text-[11px] text-mute";
       dt.textContent = label;
       const dd = document.createElement("dd");
       dd.className = "mt-1 text-white";
@@ -792,26 +866,24 @@ function renderAccounts(accounts) {
       grid.append(wrap);
     });
     const trend = account.spark && account.spark.some((v) => v > 0) ? miniLine(account.spark) : null;
+    // Status sempre à vista no canto (no celular não existe "passar o mouse"); o botão Verificar e o
+    // detalhe da última verificação aparecem ao passar o mouse ou tocar no cartão.
+    const badge = el("span", "account-status rounded-full border px-2.5 py-0.5 text-xs font-medium st-" + (account.status || "none"), account.status_label);
     const reveal = document.createElement("div");
-    reveal.className = "status-reveal mt-4 flex items-center gap-2";
-    const badge = document.createElement("span");
-    badge.className = "rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] st-" + (account.status || "none");
-    badge.textContent = account.status_label;
+    reveal.className = "status-reveal mt-4 flex flex-col items-center gap-2";
     const check = document.createElement("button");
     check.type = "button";
     check.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
-    check.textContent = "Verificar";
+    check.textContent = "Verificar agora";
     check.addEventListener("click", () => verify(account));
-    reveal.append(badge, check);
-    const note = document.createElement("p");
-    note.className = "status-reveal mt-2 text-[11px] text-mute";
-    note.textContent = account.detail || "Passe o mouse ou clique para ver o status.";
-    card.append(name, handle);
+    reveal.append(check);
+    if (account.detail) reveal.append(el("p", "text-[11px] text-mute", account.detail));
+    card.append(badge, name, handle);
     if (trend) card.append(trend);
     const viewsChip = deltaChip(account.views, account.views_prev);
     viewsChip.classList.add("account-delta");
     card.append(viewsChip);
-    card.append(grid, reveal, note);
+    card.append(grid, reveal);
     return card;
   }));
 }
@@ -834,7 +906,7 @@ function renderFolders(folders) {
     name.className = "truncate font-display text-2xl text-white";
     name.textContent = folder.name;
     const meta = document.createElement("p");
-    meta.className = "mt-2 text-xs uppercase tracking-[0.14em] text-mute";
+    meta.className = "mt-2 text-sm text-mute";
     meta.textContent = folder.accounts + (folder.accounts === 1 ? " conta" : " contas");
     info.append(name, meta);
     const arrow = document.createElement("span");
@@ -893,7 +965,7 @@ function renderOpsAccounts(accounts) {
     [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
       const wrap = document.createElement("div");
       const dt = document.createElement("dt");
-      dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+      dt.className = "text-[11px] text-mute";
       dt.textContent = label;
       const dd = document.createElement("dd");
       dd.className = "mt-1 text-white";
@@ -966,6 +1038,7 @@ function renderDashboard(data, sig, swap) {
   renderLastCollect(data.last_collected_at);
   document.getElementById("banner").classList.add("hidden");
   document.getElementById("range-label").textContent = data.start + " → " + data.end;
+  document.getElementById("kpis").removeAttribute("aria-busy");
   renderKpis(data.kpis);
   renderTopPost(data.top_post);
   renderRanking(data.top_posts);
@@ -1115,9 +1188,26 @@ document.getElementById("nav").addEventListener("click", (event) => {
   const button = event.target.closest("[data-tab]");
   if (button) setTab(button.dataset.tab);
 });
-document.getElementById("mobile-nav").addEventListener("click", (event) => {
+// Celular: abas embaixo; "Mais" abre as que não cabem (MORE_TABS).
+const MORE_TABS = ["post", "cloaker", "settings"];
+function setMoreOpen(open) {
+  document.getElementById("more-sheet").classList.toggle("open", open);
+  document.getElementById("more-btn").setAttribute("aria-expanded", String(open));
+}
+document.getElementById("bottom-nav").addEventListener("click", (event) => {
+  if (event.target.closest("#more-btn")) {
+    setMoreOpen(!document.getElementById("more-sheet").classList.contains("open"));
+    return;
+  }
   const button = event.target.closest("[data-tab]");
   if (button) setTab(button.dataset.tab);
+});
+document.getElementById("more-sheet").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-tab]");
+  if (button) setTab(button.dataset.tab);
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#more-sheet, #more-btn")) setMoreOpen(false);
 });
 document.getElementById("period-wrap").addEventListener("click", (event) => {
   const button = event.target.closest("[data-period]");
@@ -1530,7 +1620,7 @@ function archivedCard(account) {
   handle.textContent = "@" + account.username + " · " + account.folder_name;
   who.append(name, handle);
   const badge = document.createElement("span");
-  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] st-" + (account.status || "none");
+  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium st-" + (account.status || "none");
   badge.textContent = account.status_label;
   head.append(who, badge);
 
@@ -1544,7 +1634,7 @@ function archivedCard(account) {
   [["Views", account.views], ["Curtidas", account.likes], ["Retweets", account.retweets], ["Replies", account.replies], ["Seguidores", account.followers]].forEach(([label, value]) => {
     const wrap = document.createElement("div");
     const dt = document.createElement("dt");
-    dt.className = "text-[10px] uppercase tracking-[0.12em] text-mute";
+    dt.className = "text-[11px] text-mute";
     dt.textContent = label;
     const dd = document.createElement("dd");
     dd.className = "mt-1 text-white";
@@ -1650,7 +1740,7 @@ function collectorCard(collector) {
   name.textContent = "@" + collector.handle;
   const [label, style] = COLLECTOR_STATES[collector.state] || COLLECTOR_STATES.off;
   const badge = document.createElement("span");
-  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] " + style;
+  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium " + style;
   const pausedAs = collector.last_status === "verificacao" ? "🛡️ Verificação" : label;
   badge.textContent = collector.state === "paused" ? pausedAs + " até " + timeBR(collector.paused_until) : label;
   head.append(name, badge);
@@ -2024,7 +2114,7 @@ deleteConfirmBtn.addEventListener("click", async () => {
 });
 
 // Robô: a aba Configurações liga/desliga a coleta automática e escolhe o intervalo; o robo.py lê isso
-// em app_settings a cada minuto (cron). "Atualizar Dados" grava um pedido e espera a rodada terminar.
+// em app_settings a cada minuto (cron). "Atualizar dados" grava um pedido e espera a rodada terminar.
 function intervalLabel(minutes) {
   return minutes < 60 ? minutes + " min" : minutes / 60 + (minutes === 60 ? " hora" : " horas");
 }
@@ -2537,6 +2627,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setBellOpen(false);
+    setMoreOpen(false);
     document.getElementById("install-help").classList.add("off");
   }
 });

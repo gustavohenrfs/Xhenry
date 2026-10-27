@@ -20,10 +20,10 @@
   <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
-  <link rel="stylesheet" href="/static/css/tailwind.css?v=2">
-  <link rel="stylesheet" href="/static/css/styles.css?v=10">
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=3">
+  <link rel="stylesheet" href="/static/css/styles.css?v=11">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=27"></script>
+  <script defer src="/static/js/app.js?v=28"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -38,18 +38,18 @@
         <p class="mt-2 text-[11px] uppercase tracking-[0.22em] text-neon">Monitoramento Real</p>
       </div>
       <nav id="nav" class="mt-8 space-y-2">
-        <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Dashboard</button>
-        <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Operações</button>
-        <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Arquivadas</button>
-        <button type="button" data-tab="collectors" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Coletores</button>
-        <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Verificar Post</button>
-        <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Metadados</button>
-        <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm">Configurações</button>
+        <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><span>Dashboard</span></button>
+        <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
+        <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
+        <button type="button" data-tab="collectors" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><span>Coletores</span></button>
+        <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg><span>Verificar post</span></button>
+        <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
+        <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
       </nav>
       <div id="user-foot" class="mt-auto flex items-center gap-3 px-2">
         <div data-user-avatar class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
         <p data-user-name class="min-w-0 flex-1 truncate text-sm text-white">—</p>
-        <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
+        <button type="button" data-logout class="text-xs text-mute hover:text-white">Sair</button>
       </div>
     </aside>
     <main class="min-w-0 flex-1 relative z-10">
@@ -65,7 +65,7 @@
           <img src="/static/img/logo-256.webp" width="256" height="256" decoding="async" alt="XHenry" class="top-logo brand-logo h-11 w-11 md:hidden">
           <h1 id="heading" class="top-title font-display text-3xl text-white">Dashboard</h1>
           <div id="dashboard-controls" class="top-controls flex min-w-0 max-w-full items-center gap-2 md:gap-3">
-            <button id="refresh-all" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
+            <button id="refresh-all" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar dados</button>
             <div id="period-wrap" class="flex min-w-0 max-w-full overflow-x-auto rounded-full border border-neon/30 p-1 text-sm">
               <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
               <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
@@ -102,15 +102,6 @@
           </div>
           </div>
         </div>
-        <div id="mobile-nav" class="mobile-nav mt-3 flex gap-2 overflow-x-auto md:hidden">
-          <button type="button" data-tab="dashboard" class="nav-btn active shrink-0 rounded-full px-3 py-2 text-xs">Dashboard</button>
-          <button type="button" data-tab="ops" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Operações</button>
-          <button type="button" data-tab="archived" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Arquivadas</button>
-          <button type="button" data-tab="collectors" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Coletores</button>
-          <button type="button" data-tab="post" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Verificar Post</button>
-          <button type="button" data-tab="cloaker" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Metadados</button>
-          <button type="button" data-tab="settings" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Configurações</button>
-        </div>
         <p id="banner" class="mt-3 hidden rounded-2xl border border-neon/40 bg-neon/10 px-3 py-2 text-sm text-neon"></p>
       </header>
 
@@ -128,9 +119,9 @@
       <div class="px-4 py-6 md:px-8">
         <section id="pane-dashboard" class="pane on space-y-6">
           <div class="text-center mb-6">
-            <p class="text-lg tracking-wide text-mute">Bem vindo <span id="welcome-name" class="metallic-pink glow-slow"></span></p>
+            <p class="text-lg tracking-wide text-mute">Bem-vindo <span id="welcome-name" class="metallic-pink glow-slow"></span></p>
           </div>
-          <div id="kpis" class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6"></div>
+          <div id="kpis" class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6" aria-busy="true"><div class="skel skel-kpi col-span-2"></div><div class="skel skel-kpi col-span-2"></div><div class="skel skel-kpi col-span-2"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div>
           <div class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             <article id="mix-card" class="glow rounded-3xl border border-neon/20 bg-card p-4">
               <h2 class="font-display text-xl text-white">Interações</h2>
@@ -144,49 +135,50 @@
                     <p id="mix-rate-delta"></p>
                   </div>
                 </div>
-                <ul id="mix-legend" class="mix-legend"></ul>
+                <ul id="mix-legend" class="mix-legend"><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li></ul>
               </div>
             </article>
             <article id="top-post" class="glow rounded-3xl border border-neon/20 bg-card p-4">
               <h2 class="font-display text-xl text-white">Melhor post</h2>
               <p class="mb-3 text-xs text-mute">O post com mais views no período</p>
-              <div id="top-post-body"></div>
+              <div id="top-post-body"><div class="skel-stack"><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i></div></div>
             </article>
             <article id="health-card" class="glow rounded-3xl border border-neon/20 bg-card p-4 lg:col-span-2 xl:col-span-1">
               <h2 class="font-display text-xl text-white">Saúde da coleta</h2>
               <p id="health-note" class="mb-3 text-xs text-mute">Contas lidas pelos coletores no ritmo esperado</p>
-              <div id="health-body"></div>
+              <div id="health-body"><div class="skel-stack"><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i></div></div>
             </article>
           </div>
           <div class="grid gap-4 xl:grid-cols-5">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
-              <h2 class="font-display text-xl text-white">Potencial de Crescimento</h2>
+              <h2 class="font-display text-xl text-white">Potencial de crescimento</h2>
               <p id="growth-note" class="text-xs text-mute">Views por dia dos posts coletados</p>
               <div id="growth-stats" class="mb-3 mt-3 flex flex-wrap gap-2"></div>
-              <div class="h-64"><canvas id="line-chart"></canvas></div>
+              <div class="chart-skel h-64"><canvas id="line-chart"></canvas></div>
             </article>
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-2">
-              <h2 class="font-display text-xl text-white">Melhor Conta</h2>
+              <h2 class="font-display text-xl text-white">Melhor conta</h2>
               <p class="mb-3 text-xs text-mute">Views por conta no período</p>
-              <div class="h-64"><canvas id="bar-chart"></canvas></div>
+              <div class="chart-skel h-64"><canvas id="bar-chart"></canvas></div>
             </article>
           </div>
           <article class="glow rounded-3xl border border-neon/20 bg-card p-4">
-            <h2 class="font-display text-xl text-white">Melhor Horário para Postar</h2>
+            <h2 class="font-display text-xl text-white">Melhor horário para postar</h2>
             <p id="best-times-note" class="mb-3 text-xs text-mute">Média de views por horário dos posts coletados</p>
-            <ol id="best-times" class="grid gap-3 sm:grid-cols-3"></ol>
+            <ol id="best-times" class="grid gap-3 sm:grid-cols-3"><li class="skel skel-tile"></li><li class="skel skel-tile"></li><li class="skel skel-tile"></li></ol>
             <div id="heatmap" class="heatmap mt-5" aria-label="Média de views por dia da semana e hora"></div>
+            <div id="heat-legend" class="heat-legend hidden" aria-hidden="true"><span>Menos views</span><span class="heat-scale"></span><span>Mais views</span><span class="heat-hint">média por dia da semana e hora do post</span></div>
           </article>
           <div class="grid gap-4 xl:grid-cols-3">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-2">
               <h2 class="font-display text-xl text-white">Ranking de posts</h2>
               <p class="mb-3 text-xs text-mute">Os 10 posts com mais views no período</p>
-              <ol id="post-ranking" class="rank-list"></ol>
+              <ol id="post-ranking" class="rank-list"><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li></ol>
             </article>
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4">
               <h2 class="font-display text-xl text-white">Alertas recentes</h2>
               <p class="mb-3 text-xs text-mute">O que foi enviado ao Telegram</p>
-              <ul id="alert-list" class="alert-list"></ul>
+              <ul id="alert-list" class="alert-list"><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li></ul>
             </article>
           </div>
           <section>
@@ -197,7 +189,7 @@
                 <p id="last-collect" class="mt-1 text-[11px] text-mute"></p>
               </div>
             </div>
-            <div id="accounts" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+            <div id="accounts" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"><div class="skel skel-account"></div><div class="skel skel-account"></div><div class="skel skel-account"></div></div>
           </section>
         </section>
         <section id="pane-ops" class="pane">
@@ -251,12 +243,12 @@
         <section id="pane-post" class="pane">
           <form id="post-form" class="glow mx-auto max-w-2xl space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
             <div>
-              <h2 class="font-display text-2xl text-white">Verificar Post</h2>
+              <h2 class="font-display text-2xl text-white">Verificar post</h2>
               <p class="mt-1 text-sm text-mute">Legenda obrigatória. Mídia é opcional.</p>
             </div>
             <textarea id="post-caption" required rows="5" placeholder="Legenda do post" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></textarea>
             <input id="post-media" type="file" accept="image/jpeg,image/png" class="block w-full text-sm text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
-            <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Verificar Post</button>
+            <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Verificar post</button>
             <article id="verdict" class="hidden rounded-2xl border border-neon/20 bg-ink p-4 text-sm leading-6"></article>
           </form>
         </section>
@@ -315,54 +307,54 @@
             <h2 class="font-display text-2xl text-white">Perfil</h2>
             <div class="flex items-center gap-4">
               <div id="profile-avatar" data-user-avatar class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-neon/40 text-lg text-neon"></div>
-              <label class="min-w-0 flex-1 text-xs uppercase tracking-[0.14em] text-mute">
+              <label class="min-w-0 flex-1 text-sm text-mute">
                 Foto
                 <input id="profile-photo" type="file" accept="image/jpeg,image/png" class="mt-2 block w-full max-w-full text-sm normal-case tracking-normal text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
               </label>
             </div>
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="profile-name">Nome de exibição</label>
+            <label class="block text-sm text-mute" for="profile-name">Nome de exibição</label>
             <input id="profile-name" required maxlength="120" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar perfil</button>
           </form>
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
             <p id="tg-status" class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="xai-key">Chave da xAI (análise do post)</label>
+            <label class="block text-sm text-mute" for="xai-key">Chave da xAI (análise do post)</label>
             <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="goal">Meta de views do dia (todas as contas)</label>
+            <label class="block text-sm text-mute" for="goal">Meta de views do dia (todas as contas)</label>
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
-              <button id="test-note" class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar Notificação</button>
+              <button id="test-note" class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar notificação</button>
             </div>          </form>
           <article id="robo-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Robô</h2>
             <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
               <span>
                 <span class="block text-sm text-white">Coleta automática</span>
-                <span class="block text-xs text-mute">Desligada, o robô só coleta quando você clica em Atualizar Dados.</span>
+                <span class="block text-xs text-mute">Desligada, o robô só coleta quando você clica em Atualizar dados.</span>
               </span>
               <input id="robo-enabled" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
             </label>
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="robo-interval">Coletar a cada</label>
+            <label class="block text-sm text-mute" for="robo-interval">Coletar a cada</label>
             <select id="robo-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
             <p id="robo-status" class="text-xs text-mute">—</p>
-            <p class="text-xs text-mute">O botão Atualizar Dados (no topo do Dashboard) manda os coletores lerem as contas na hora, mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto.</p>
+            <p class="text-xs text-mute">O botão Atualizar dados (no topo do Dashboard) manda os coletores lerem as contas na hora, mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto.</p>
           </article>
 
           <!-- Change Password Form -->
           <form id="password-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
-            <h2 class="font-display text-2xl text-white">Trocar Senha</h2>
-            <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
+            <h2 class="font-display text-2xl text-white">Trocar senha</h2>
+            <label class="block text-sm text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
             <input id="new-password" type="password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
             <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Atualizar senha</button>
           </form>
 
           <!-- Delete Account -->
           <div class="glow rounded-3xl border border-red-500/40 bg-card p-6">
-            <h2 class="font-display text-2xl text-white">Excluir Conta</h2>
+            <h2 class="font-display text-2xl text-white">Excluir conta</h2>
             <p class="mt-2 text-sm text-mute">Esta ação é irreversível. Todos os seus dados serão apagados permanentemente.</p>
-            <button id="delete-account-btn" type="button" class="mt-4 rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir Minha Conta</button>
+            <button id="delete-account-btn" type="button" class="mt-4 rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir minha conta</button>
           </div>
           </div>
         </section>
@@ -381,6 +373,19 @@
         </div>
       </div>
     </main>
+  </div>
+  <!-- Celular: abas embaixo, no alcance do polegar; "Mais" abre as outras. -->
+  <nav id="bottom-nav" class="bottom-nav md:hidden" aria-label="Abas">
+    <button type="button" data-tab="dashboard" class="tab-btn active"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><span>Dashboard</span></button>
+    <button type="button" data-tab="ops" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
+    <button type="button" data-tab="collectors" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><span>Coletores</span></button>
+    <button type="button" data-tab="archived" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
+    <button type="button" id="more-btn" class="tab-btn" aria-haspopup="menu" aria-expanded="false"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18.5" cy="12" r="1.4"/></svg><span>Mais</span></button>
+  </nav>
+  <div id="more-sheet" class="more-sheet md:hidden" role="menu" aria-label="Outras abas">
+    <button type="button" data-tab="post" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg><span>Verificar post</span></button>
+    <button type="button" data-tab="cloaker" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
+    <button type="button" data-tab="settings" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
   </div>
   <div id="toast" class="toast pointer-events-none fixed bottom-4 right-4 z-[60] hidden max-w-sm rounded-2xl border border-neon/40 bg-panel px-4 py-3 text-sm"></div>
   <div id="install-help" class="auth-modal off" role="dialog" aria-labelledby="install-help-title">
@@ -403,13 +408,13 @@
         <p class="mt-2 text-[11px] uppercase tracking-[0.2em] text-neon">Monitoramento Real</p>
       </div>
       <h2 id="auth-title" class="mt-6 text-sm text-white">Entrar</h2>
-      <label id="auth-name-label" class="mt-4 hidden text-xs uppercase tracking-[0.14em] text-mute" for="auth-name">Nome</label>
+      <label id="auth-name-label" class="mt-4 hidden text-sm text-mute" for="auth-name">Nome</label>
       <input id="auth-name" maxlength="120" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Seu nome">
-      <label id="auth-email-label" class="mt-4 block text-xs uppercase tracking-[0.14em] text-mute" for="auth-email">Email</label>
+      <label id="auth-email-label" class="mt-4 block text-sm text-mute" for="auth-email">Email</label>
       <input id="auth-email" type="email" required maxlength="320" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="voce@email.com">
-      <label id="auth-password-label" class="mt-4 block text-xs uppercase tracking-[0.14em] text-mute" for="auth-password">Senha</label>
+      <label id="auth-password-label" class="mt-4 block text-sm text-mute" for="auth-password">Senha</label>
       <input id="auth-password" type="password" required minlength="8" maxlength="128" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
-      <label id="auth-password2-label" class="mt-4 block hidden text-xs uppercase tracking-[0.14em] text-mute" for="auth-password2">Repita a nova senha</label>
+      <label id="auth-password2-label" class="mt-4 block hidden text-sm text-mute" for="auth-password2">Repita a nova senha</label>
       <input id="auth-password2" type="password" minlength="8" maxlength="128" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
       <button type="button" id="forgot-link" class="mt-1 hidden text-xs text-neon hover:underline">Esqueceu a senha?</button>
       <p id="auth-info" class="mt-3 hidden text-sm text-white"></p>

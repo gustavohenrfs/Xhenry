@@ -22,7 +22,7 @@ O `robo.py` nunca entra logado nas contas monitoradas. Ele lê as timelines com 
 
 - Cada rodada automática lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo. Com 3 coletores, são 3 contas por rodada, cada uma saindo pelo IP do seu coletor. Seguidores, no máximo 1 vez por hora por conta.
 - **Configurações → Robô:** liga ou desliga a coleta automática e escolhe o intervalo (5 min a 24 h). O robô lê isso a cada minuto.
-- **Atualizar Dados** (topo do Dashboard) manda os coletores lerem todas as contas na hora, revezando os coletores (até 3 contas por coletor), mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto e o botão espera a rodada terminar.
+- **Atualizar dados** (topo do Dashboard) manda os coletores lerem todas as contas na hora, revezando os coletores (até 3 contas por coletor), mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto e o botão espera a rodada terminar.
 - Proxy: `ip:porta:usuario:senha` (o formato dos vendedores) ou `http://usuario:senha@ip:porta` (também `https://` e `socks5://`). Cookies: arraste para a aba o arquivo `.json` exportado por uma extensão (Cookie-Editor, EditThisCookie) com a conta logada no x.com; o painel confere se tem o `auth_token`. Sem cookies, o robô usa o login que já estiver no `anyx` do VPS.
 - Proxy e cookies ficam em texto puro no banco (o robô precisa deles) e só aparecem mascarados no painel, para quem está logado.
 - Uma conta monitorada não pode ser coletor, e vice-versa.
