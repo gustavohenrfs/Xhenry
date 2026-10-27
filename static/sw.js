@@ -10,6 +10,9 @@ self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data ? event.data.text() : "" }; }
   const title = data.title || "XHenry";
+  // Marca o ícone do app instalado (barra de tarefas, tela de início) mesmo com o app fechado; ao
+  // abrir, a página troca a marca pelo número de alertas não vistos.
+  if (self.navigator && self.navigator.setAppBadge) self.navigator.setAppBadge().catch(() => {});
   event.waitUntil(self.registration.showNotification(title, {
     body: data.body || "",
     icon: data.icon || ICON,

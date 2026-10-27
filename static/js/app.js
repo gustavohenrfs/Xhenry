@@ -619,13 +619,23 @@ function ring(done, total) {
   });
   return svg;
 }
-// Selo vermelho nos ícones de Coletores: quantos coletores ligados estão de castigo ou com erro.
-function paintCollectorBadge(count) {
-  document.querySelectorAll('[data-badge="collectors"]').forEach((badge) => {
+// Selos vermelhos nos ícones das abas: Dashboard = alertas de views não vistos (como o sininho);
+// Coletores = ligados de castigo ou com erro. A soma vai também para o ícone do app instalado
+// (barra de tarefas do Windows, tela de início do celular).
+const tabBadges = { alerts: 0, collectors: 0 };
+function paintTabBadge(name, count) {
+  tabBadges[name] = count || 0;
+  document.querySelectorAll('[data-badge="' + name + '"]').forEach((badge) => {
     badge.textContent = count > 9 ? "9+" : String(count || "");
     badge.classList.toggle("hidden", !count);
   });
+  const total = tabBadges.alerts + tabBadges.collectors;
+  try {
+    if (total && navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
+    else if (!total && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+  } catch { /* navegador sem selo no ícone */ }
 }
+function paintCollectorBadge(count) { paintTabBadge("collectors", count); }
 function renderHealth(health) {
   paintCollectorBadge((health.collectors && health.collectors.attention) || 0);
   const host = document.getElementById("health-body");
@@ -2603,6 +2613,7 @@ function renderBell() {
   badge.textContent = unread > 9 ? "9+" : String(unread);
   badge.classList.toggle("hidden", !unread);
   document.getElementById("bell").classList.toggle("has-new", unread > 0);
+  paintTabBadge("alerts", unread);
   const host = document.getElementById("bell-list");
   if (!viralItems.length) {
     host.replaceChildren(el("li", "bell-empty text-sm text-mute", "Nenhum post viralizou ainda. Quando um passar do limite, ele aparece aqui."));
@@ -2692,6 +2703,7 @@ function setBellOpen(open) {
     if (viralItems.length) storeId(VIRAL_SEEN_KEY, Math.max(storedId(VIRAL_SEEN_KEY), viralItems[0].id));
     // Abriu: o selo some na hora; o destaque dos novos fica até fechar.
     document.getElementById("bell-badge").classList.add("hidden");
+    paintTabBadge("alerts", 0);
     document.getElementById("bell").classList.remove("has-new");
   } else renderBell();
 }
@@ -2717,6 +2729,7 @@ document.addEventListener("keydown", (event) => {
     setBellOpen(false);
     setMoreOpen(false);
     closePalette();
+    document.getElementById("keep-help").classList.add("off");
     closeDrawer();
     document.getElementById("install-help").classList.add("off");
   }
@@ -2757,6 +2770,88 @@ paintInstall();
 // Troca de tema: o tema novo se abre num círculo a partir do botão (View Transitions). Sem suporte ou
 // com "reduzir movimento", troca na hora. As transições de cor ficam desligadas durante a troca, senão
 // o retrato do tema novo sairia com as cores do antigo.
+// Notificações depois de reiniciar: o aviso chega por push, mas no computador só com o navegador
+// rodando (nem que seja escondido). Nenhum site liga isso sozinho, então o guia mostra o caminho certo
+// para o navegador e o sistema de quem está abrindo.
+function keepHelpContent() {
+  const ua = navigator.userAgent;
+  if (isIos()) return {
+    intro: "No iPhone, com o app instalado, os avisos chegam mesmo com o celular recém-ligado, sem abrir nada.",
+    steps: [
+      ["Use o XHenry pelo ícone da Tela de Início, não pelo Safari (no Safari o iPhone não manda avisos)."],
+      ["Ajustes → Notificações → XHenry: deixe Permitir Notificações ligado."],
+      ["Se um dia parar de chegar, abra o app uma vez: ele se inscreve de novo sozinho."]
+    ],
+    note: "O modo Foco ou Não Perturbe segura os avisos até ser desligado."
+  };
+  if (/Android/i.test(ua)) return {
+    intro: "No Android os avisos chegam mesmo com o celular recém-ligado, sem abrir o app.",
+    steps: [
+      ["Configurações → Apps → Chrome (e o app XHenry, se aparecer) → Notificações: ligadas."],
+      ["Configurações → Apps → Chrome → Bateria: Sem restrições. A economia de bateria agressiva atrasa ou corta os avisos."],
+      ["Se um dia parar de chegar, abra o app uma vez: ele se inscreve de novo sozinho."]
+    ],
+    note: "Avisos que chegarem com o celular desligado ficam guardados por até 6 horas."
+  };
+  const windows = /Windows/i.test(ua);
+  const system = windows ? "Windows" : "computador";
+  const notifySteps = windows ? [["No Windows: Configurações → Sistema → Notificações: deixe o navegador ligado e o Não Incomodar desligado."]] : [];
+  const done = "Pronto: depois de reiniciar, os avisos chegam sem abrir nada. Os que chegarem com o PC desligado ficam guardados por até 6 horas.";
+  if (/Edg\//.test(ua)) return {
+    intro: "No computador o aviso só chega com o Edge rodando, nem que seja escondido. Estes dois ajustes fazem o Edge ligar junto com o " + system + ", em segundo plano:",
+    steps: [
+      ["Abra esta página do Edge e ligue Aumento de inicialização:", "edge://settings/system"],
+      ["Na mesma página, ligue Continuar executando extensões e aplicativos em segundo plano quando o Microsoft Edge estiver fechado."],
+      ...notifySteps
+    ],
+    note: done
+  };
+  if (/Chrome\//.test(ua)) return {
+    intro: "No computador o aviso só chega com o Chrome rodando, nem que seja escondido. Com o app instalado, estes ajustes fazem ele abrir junto com o " + system + ":",
+    steps: [
+      ["Abra esta página do Chrome e ligue Continuar executando apps em segundo plano quando o Google Chrome estiver fechado:", "chrome://settings/system"],
+      ["Abra a lista de apps, clique com o botão direito no XHenry e marque Iniciar app ao fazer login (se ele não aparecer, instale pelo botão Instalar do topo):", "chrome://apps"],
+      ...notifySteps
+    ],
+    note: done
+  };
+  return {
+    intro: "Os avisos só chegam com o navegador aberto ou rodando em segundo plano.",
+    steps: [["Deixe o navegador abrir junto com o computador, nas opções de inicialização do sistema ou do navegador."], ...notifySteps],
+    note: "No Edge e no Chrome há opções próprias para isso: abra este guia por eles para ver os passos."
+  };
+}
+function openKeepHelp() {
+  const content = keepHelpContent();
+  document.getElementById("keep-help-intro").textContent = content.intro;
+  document.getElementById("keep-help-note").textContent = content.note;
+  document.getElementById("keep-help-steps").replaceChildren(...content.steps.map(([text, address], index) => {
+    const li = el("li", "keep-step");
+    li.append(el("span", "keep-num", String(index + 1)));
+    const body = el("div", "min-w-0 flex-1");
+    body.append(el("p", "text-sm text-white", text));
+    if (address) {
+      // edge:// e chrome:// não abrem por link de site: copia para colar na barra de endereço.
+      const row = el("div", "keep-copy");
+      const copy = el("button", "rounded-full border border-neon/40 px-3 py-1 text-xs", "Copiar");
+      copy.type = "button";
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(address); toast("✅ Copiado. Cole na barra de endereço e aperte Enter."); }
+        catch { toast("Não deu para copiar. Digite " + address + " na barra de endereço.", "error"); }
+      });
+      row.append(el("code", "", address), copy);
+      body.append(row);
+    }
+    li.append(body);
+    return li;
+  }));
+  setBellOpen(false);
+  document.getElementById("keep-help").classList.remove("off");
+}
+document.getElementById("keep-link").addEventListener("click", openKeepHelp);
+document.getElementById("keep-help-close").addEventListener("click", () => document.getElementById("keep-help").classList.add("off"));
+document.getElementById("keep-help").addEventListener("click", (event) => { if (event.target.id === "keep-help") event.target.classList.add("off"); });
+
 document.getElementById("theme-btn").addEventListener("click", (event) => {
   const next = currentTheme() === "light" ? "dark" : "light";
   const root = document.documentElement;

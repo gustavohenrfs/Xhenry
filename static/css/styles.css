@@ -1176,22 +1176,42 @@ body.drawer-lock { overflow: hidden; }
 /* ---------- selo de atenção nos ícones das abas (coletores de castigo ou com erro) ---------- */
 .tab-badge {
   position: absolute;
-  top: .2rem;
-  left: calc(50% + .35rem);
+  top: -.15rem;
+  left: calc(50% + .25rem);
   z-index: 2;
-  min-width: 1.1rem;
-  height: 1.1rem;
-  padding: 0 .28rem;
+  min-width: 1.45rem;
+  height: 1.45rem;
+  padding: 0 .35rem;
   border-radius: 999px;
   background: #ff3b6b;
   color: #fff;
-  font: 700 .62rem/1.1rem "Space Grotesk", sans-serif;
+  font: 700 .74rem/1.45rem "Space Grotesk", sans-serif;
   text-align: center;
-  box-shadow: 0 0 0 2px var(--bg), 0 0 12px rgba(255, 59, 107, .75);
+  box-shadow: 0 0 0 2.5px var(--bg), 0 0 14px rgba(255, 59, 107, .8);
 }
 .tab-badge.hidden { display: none; }
 .tab-badge::after { position: absolute; inset: 0; border: 2px solid #ff3b6b; border-radius: inherit; content: ""; animation: bell-pulse 1.8s ease-out infinite; }
-#nav .tab-badge { top: .3rem; left: 1.45rem; }
+/* Barra lateral: menor, no canto do ícone. */
+#nav .tab-badge { top: .25rem; left: 1.35rem; min-width: 1.15rem; height: 1.15rem; padding: 0 .25rem; font-size: .62rem; line-height: 1.15rem; }
+
+/* Guia "Continuar recebendo depois de reiniciar" (sininho). */
+.keep-link { padding: .35rem .5rem; border-radius: 999px; color: var(--accent-2); font-size: .72rem; text-align: center; }
+.keep-link:hover { background: rgb(79 227 255 / .08); text-decoration: underline; }
+.keep-steps { display: grid; gap: .85rem; }
+.keep-step { display: flex; gap: .75rem; }
+.keep-num {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: linear-gradient(120deg, #e3159f, #6b47ff);
+  color: #fff;
+  font: 600 .78rem "Space Grotesk", sans-serif;
+}
+.keep-copy { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .45rem; }
+.keep-copy code { padding: .25rem .55rem; border: 1px solid var(--line-strong); border-radius: .5rem; background: rgb(var(--c-ink) / .5); color: var(--accent-2); font: 500 .8rem "Space Grotesk", monospace; }
 
 /* ---------- celular e acessibilidade ---------- */
 @media (max-width: 480px) {
