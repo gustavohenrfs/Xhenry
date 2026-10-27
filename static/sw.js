@@ -16,6 +16,9 @@ self.addEventListener("push", (event) => {
     badge: data.badge || BADGE,
     tag: data.tag || undefined,
     renotify: Boolean(data.tag),
+    // Fica na tela (Windows) até ser fechada, em vez de sumir para a central; cada alerta tem tag
+    // própria, então eles se acumulam.
+    requireInteraction: true,
     vibrate: [120, 60, 120],
     data: { url: data.url || "/" }
   }));

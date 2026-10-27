@@ -2131,7 +2131,7 @@ function registerWorker() {
 }
 // Mostra uma notificação pelo service worker (o Android só aceita assim) ou, sem ele, direto pela aba.
 async function showNotice(title, body, url, tag) {
-  const options = { body, icon: NOTIFY_ICON, badge: NOTIFY_BADGE, tag, data: { url: url || "/" } };
+  const options = { body, icon: NOTIFY_ICON, badge: NOTIFY_BADGE, tag, requireInteraction: true, data: { url: url || "/" } };
   const reg = await registerWorker();
   if (reg) return reg.showNotification(title, options);
   const note = new Notification(title, options);
