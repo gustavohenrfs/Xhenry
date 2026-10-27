@@ -39,7 +39,7 @@ PROTECTED = [
     ("post", "/api/push/test", {"endpoint": "https://push.example/abc"}),
 ]
 
-PUBLIC = ["/", "/health", "/sw.js", "/manifest.webmanifest", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
+PUBLIC = ["/", "/health", "/sw.js", "/manifest.webmanifest", "/api/live?once=1", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
 
 
 @pytest.fixture(scope="module")

@@ -117,6 +117,8 @@ def collection_health(db: Session) -> dict[str, Any]:
             )
     stale.sort(key=lambda item: item["collected_at"] or "")
     next_free = min((as_utc(row.paused_until) for row in benched), default=None)
+    # Selo vermelho da aba Coletores: ligados que estão de castigo ou cuja última leitura deu erro.
+    attention = sum(1 for row in collectors if row.is_active and (row in benched or (row.last_status or "ok") != "ok"))
     payload.update(
         {
             "accounts": len(accounts),
@@ -129,6 +131,7 @@ def collection_health(db: Session) -> dict[str, Any]:
                 "benched": len(benched),
                 "off": len(collectors) - len(free) - len(benched),
                 "next_free_at": next_free.isoformat() if next_free else None,
+                "attention": attention,
             },
         }
     )

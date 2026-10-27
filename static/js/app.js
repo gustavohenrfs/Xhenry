@@ -45,6 +45,17 @@ if (window.Chart) {
   const legendLabels = Chart.defaults.plugins.legend.labels;
   const baseLabels = legendLabels.generateLabels;
   Object.assign(legendLabels, { usePointStyle: true, pointStyle: "circle", boxWidth: 8, boxHeight: 8, padding: 14 });
+  // Tooltip (a caixinha ao passar o mouse) também com bolinha, na mesma cor sólida da legenda.
+  Object.assign(Chart.defaults.plugins.tooltip, { usePointStyle: true, boxWidth: 8, boxHeight: 8, boxPadding: 4 });
+  Chart.defaults.plugins.tooltip.callbacks.labelPointStyle = () => ({ pointStyle: "circle", rotation: 0 });
+  Chart.defaults.plugins.tooltip.callbacks.labelColor = (ctx) => {
+    const dataset = ctx.dataset || {};
+    // Gráfico com uma cor por item (o anel de Interações): a cor da fatia, não a borda (que é a fresta).
+    const perItem = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[ctx.dataIndex] : null;
+    const color = perItem || dataset.legendColor
+      || (typeof dataset.borderColor === "string" ? dataset.borderColor : typeof dataset.backgroundColor === "string" ? dataset.backgroundColor : "#ff2ec8");
+    return { borderColor: color, backgroundColor: color, borderWidth: 0 };
+  };
   legendLabels.generateLabels = (chart) => baseLabels(chart).map((item) => {
     const dataset = chart.data.datasets[item.datasetIndex] || {};
     const color = dataset.legendColor || (typeof dataset.borderColor === "string" ? dataset.borderColor : item.fillStyle);
@@ -228,6 +239,7 @@ function setTab(tab) {
   document.getElementById("heading").textContent = titles[tab];
   const controls = document.getElementById("dashboard-controls");
   if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
+  if (tab === "dashboard" && dashboardDirty) { dashboardDirty = false; load({ silent: true }); }
   if (tab === "ops") closeOpsFolder();
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
@@ -607,7 +619,15 @@ function ring(done, total) {
   });
   return svg;
 }
+// Selo vermelho nos ícones de Coletores: quantos coletores ligados estão de castigo ou com erro.
+function paintCollectorBadge(count) {
+  document.querySelectorAll('[data-badge="collectors"]').forEach((badge) => {
+    badge.textContent = count > 9 ? "9+" : String(count || "");
+    badge.classList.toggle("hidden", !count);
+  });
+}
 function renderHealth(health) {
+  paintCollectorBadge((health.collectors && health.collectors.attention) || 0);
   const host = document.getElementById("health-body");
   const note = document.getElementById("health-note");
   const late = health.late_after_min >= 120 ? Math.round(health.late_after_min / 60) + " h" : health.late_after_min + " min";
@@ -769,6 +789,7 @@ function renderCharts(data) {
     labels: rows.length ? rows.map((row) => "@" + row.username) : ["—"],
     datasets: [{
       label: "Views",
+      legendColor: "#ff2ec8",
       data: rows.length ? rows.map((row) => row.views) : [0],
       backgroundColor: (ctx) => {
         const area = ctx.chart.chartArea;
@@ -1164,6 +1185,7 @@ async function load({ silent = false } = {}) {
     renderLastCollect(data.last_collected_at);
     renderDashboard(data, sig, !silent && !cached && lastSig !== "", silent);
     markLive(true);
+    startLive();
     if (!silent) prefetchPeriods();
   } catch (error) {
     if (!silent) toast(error.message || "Falha ao carregar.");
@@ -1864,6 +1886,7 @@ async function loadCollectors({ silent = false } = {}) {
       }
     });
     collectorsPending = pending;
+    paintCollectorBadge(collectors.filter((c) => c.is_active && (c.state === "paused" || (c.last_status && c.last_status !== "ok"))).length);
     const sig = JSON.stringify(collectors);
     if (silent && sig === collectorsSig) return;  // nada mudou: não mexe no DOM
     collectorsSig = sig;
@@ -2861,9 +2884,12 @@ function paintLive() {
   if (!pill || !liveAt) return;
   const secs = Math.max(0, Math.round((Date.now() - liveAt) / 1000));
   const ago = secs < 15 ? "agora" : secs < 60 ? "há " + secs + " s" : "há " + Math.round(secs / 60) + " min";
-  pill.classList.toggle("is-off", !liveOk);
-  pill.classList.toggle("is-stale", liveOk && secs > 180);
-  document.getElementById("live-text").textContent = liveOk ? "atualizado " + ago : "sem conexão";
+  const streaming = liveSource && liveSource.readyState === 1;
+  pill.classList.toggle("is-off", !liveOk && !streaming);
+  pill.classList.toggle("is-stale", !streaming && liveOk && secs > 180);
+  // Canal aberto: tudo chega na hora, então "ao vivo"; sem ele, quanto tempo faz a última leitura.
+  document.getElementById("live-text").textContent = streaming ? "ao vivo" : liveOk ? "atualizado " + ago : "reconectando…";
+  pill.title = "Última atualização " + ago;
 }
 function markLive(ok) {
   liveOk = ok;
@@ -2871,6 +2897,36 @@ function markLive(ok) {
   paintLive();
 }
 setInterval(paintLive, 10000);
+// Painel ao vivo: o servidor avisa (/api/live, app/live.py) quando o robô grava dados, chega um alerta
+// ou um coletor muda, e só a parte que mudou é recarregada, sem F5. O EventSource reconecta sozinho;
+// o auto-refresh de 60 s continua como reserva.
+let liveSource = null;
+let liveStamp = null;
+let dashboardDirty = false;
+function startLive() {
+  if (liveSource || !window.EventSource) return;
+  liveSource = new EventSource("/api/live");
+  liveSource.onopen = () => markLive(true);
+  liveSource.onerror = () => { liveOk = false; paintLive(); };
+  liveSource.onmessage = (event) => {
+    let stamp;
+    try { stamp = JSON.parse(event.data); } catch { return; }
+    const before = liveStamp;
+    liveStamp = stamp;
+    markLive(true);
+    if (!before || !token()) return;
+    if (stamp.data !== before.data) {
+      loadHealth();
+      if (state.tab === "dashboard" && !document.hidden) load({ silent: true });
+      else dashboardDirty = true;  // recarrega quando o Dashboard voltar à tela
+    }
+    if (stamp.alerts !== before.alerts) { checkViral(); loadAlerts(); }
+    if (stamp.collectors !== before.collectors) {
+      loadHealth();
+      if (state.tab === "collectors") loadCollectors({ silent: true });
+    }
+  };
+}
 function flash(node) {
   if (!node) return;
   node.classList.remove("just-changed");

@@ -720,7 +720,8 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 /* ---------- barra lateral recolhida (computador com mouse) ----------
    Só os ícones; ao passar o mouse (ou com o teclado dentro) ela abre por cima do conteúdo e os nomes
    deslizam para dentro. Flutua em vez de empurrar a página: os gráficos não se redesenham a cada
-   passada. Sem mouse (tablet) fica aberta como sempre. */
+   passada. Sem mouse (tablet) fica aberta como sempre. Pelo teclado abre com :has(:focus-visible):
+   o clique do mouse deixa o botão em foco, e com :focus-within ela ficava presa aberta. */
 @media (min-width: 768px) and (hover: hover) and (pointer: fine) {
   #sidebar {
     position: fixed;
@@ -734,7 +735,7 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
     overflow: hidden;
     transition: width .5s cubic-bezier(.2, .8, .2, 1), box-shadow .5s ease;
   }
-  #sidebar:hover, #sidebar:focus-within {
+  #sidebar:hover, #sidebar:has(:focus-visible) {
     width: 16rem;
     box-shadow: 40px 0 90px -40px rgba(0, 0, 0, .65), 0 0 50px -24px var(--laser-a);
   }
@@ -752,10 +753,10 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
   #sidebar:hover .brand-tag,
   #sidebar:hover [data-user-name],
   #sidebar:hover [data-logout],
-  #sidebar:focus-within .nav-btn > span,
-  #sidebar:focus-within .brand-tag,
-  #sidebar:focus-within [data-user-name],
-  #sidebar:focus-within [data-logout] {
+  #sidebar:has(:focus-visible) .nav-btn > span,
+  #sidebar:has(:focus-visible) .brand-tag,
+  #sidebar:has(:focus-visible) [data-user-name],
+  #sidebar:has(:focus-visible) [data-logout] {
     opacity: 1;
     transform: none;
     transition-delay: .12s;
@@ -768,9 +769,9 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
   #sidebar:hover .nav-btn:nth-child(6) > span { transition-delay: .27s; }
   #sidebar:hover .nav-btn:nth-child(7) > span { transition-delay: .3s; }
   #sidebar .brand-logo { width: 2.9rem; height: 2.9rem; transition: width .5s cubic-bezier(.2, .8, .2, 1), height .5s cubic-bezier(.2, .8, .2, 1); }
-  #sidebar:hover .brand-logo, #sidebar:focus-within .brand-logo { width: 4rem; height: 4rem; }
+  #sidebar:hover .brand-logo, #sidebar:has(:focus-visible) .brand-logo { width: 4rem; height: 4rem; }
   #sidebar .brand-tag { max-height: 0; margin-top: 0; overflow: hidden; transition: opacity .2s ease, transform .35s ease, max-height .5s ease, margin .5s ease; }
-  #sidebar:hover .brand-tag, #sidebar:focus-within .brand-tag { max-height: 2rem; margin-top: .5rem; }
+  #sidebar:hover .brand-tag, #sidebar:has(:focus-visible) .brand-tag { max-height: 2rem; margin-top: .5rem; }
   #sidebar #user-foot { padding-left: .1rem; }
   #sidebar #nav .nav-btn:hover { transform: none; }
 }
@@ -800,15 +801,15 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: .2rem;
-  padding: .45rem 0 .35rem;
+  gap: .25rem;
+  padding: .55rem 0 .45rem;
   border-radius: 1.05rem;
   color: var(--muted);
-  font-size: .66rem;
+  font-size: .7rem;
   line-height: 1;
   transition: color .2s ease, background .25s ease;
 }
-.tab-btn .nav-ico { width: 1.3rem; height: 1.3rem; }
+.tab-btn .nav-ico { width: 1.6rem; height: 1.6rem; }
 .tab-btn.active { color: var(--fg); background: rgb(var(--c-neon) / .12); }
 .tab-btn.active .nav-ico { color: var(--accent); opacity: 1; filter: drop-shadow(0 0 6px rgb(var(--c-neon) / .55)); }
 /* Feixe de laser sobre a aba ativa. */
@@ -826,7 +827,7 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 .more-sheet {
   position: fixed;
   right: .75rem;
-  bottom: calc(5.2rem + env(safe-area-inset-bottom));
+  bottom: calc(5.8rem + env(safe-area-inset-bottom));
   z-index: 41;
   display: grid;
   min-width: 13rem;
@@ -849,7 +850,7 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 .more-item.active .nav-ico { color: var(--accent); }
 }
 @media (max-width: 767px) {
-  main { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+  main { padding-bottom: calc(6.2rem + env(safe-area-inset-bottom)); }
 }
 
 /* ---------- cartão da conta: status sempre à vista ---------- */
@@ -1172,6 +1173,26 @@ body.drawer-lock { overflow: hidden; }
 .ptr.spin svg { animation: ptr-spin .8s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
 
+/* ---------- selo de atenção nos ícones das abas (coletores de castigo ou com erro) ---------- */
+.tab-badge {
+  position: absolute;
+  top: .2rem;
+  left: calc(50% + .35rem);
+  z-index: 2;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 .28rem;
+  border-radius: 999px;
+  background: #ff3b6b;
+  color: #fff;
+  font: 700 .62rem/1.1rem "Space Grotesk", sans-serif;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 12px rgba(255, 59, 107, .75);
+}
+.tab-badge.hidden { display: none; }
+.tab-badge::after { position: absolute; inset: 0; border: 2px solid #ff3b6b; border-radius: inherit; content: ""; animation: bell-pulse 1.8s ease-out infinite; }
+#nav .tab-badge { top: .3rem; left: 1.45rem; }
+
 /* ---------- celular e acessibilidade ---------- */
 @media (max-width: 480px) {
   .mix-body { flex-direction: column; }
@@ -1193,7 +1214,7 @@ body.drawer-lock { overflow: hidden; }
   #period-wrap .period { padding: .35rem .7rem; font-size: .8rem; }
   #refresh-all { padding: .4rem .85rem; font-size: .8rem; }
   .theme-btn, .bell-btn { width: 2.4rem; height: 2.4rem; }
-  .toast { left: .75rem; right: .75rem; bottom: calc(5.6rem + env(safe-area-inset-bottom)); max-width: none; }
+  .toast { left: .75rem; right: .75rem; bottom: calc(6.2rem + env(safe-area-inset-bottom)); max-width: none; }
   body { background-attachment: scroll; }
 }
 /* Troca de tema (app.js): o círculo é animado pelo JS; o retrato antigo fica parado embaixo. */

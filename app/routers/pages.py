@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.config import INDEX, ROOT
+from app.live import hub, snapshot
 from app.services import token_configured
 
 router = APIRouter()
@@ -52,6 +54,22 @@ def manifest() -> FileResponse:
         ROOT / "static" / "manifest.webmanifest",
         media_type="application/manifest+json",
         headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/api/live")
+async def live(request: Request, once: bool = False) -> Response:
+    """Painel ao vivo (app/live.py): eventos com os carimbos de dados, alertas e coletores.
+
+    ?once=1 devolve só o carimbo atual em JSON (testes e diagnóstico).
+    """
+    if once:
+        return JSONResponse(await run_in_threadpool(snapshot))
+    return StreamingResponse(
+        hub.stream(request.is_disconnected),
+        media_type="text/event-stream",
+        # X-Accel-Buffering: o nginx entrega cada evento na hora em vez de juntar num buffer.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
