@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css?v=2">
+  <link rel="stylesheet" href="/static/css/styles.css?v=4">
   <script>
     tailwind.config = {
       theme: {
@@ -154,7 +154,6 @@
               <button type="button" data-period="1y" class="period rounded-full px-3 py-1.5 text-mute">1 ano</button>
               <button type="button" data-period="total" class="period rounded-full px-3 py-1.5 text-mute">Total</button>
             </div>
-            <input type="date" id="specific-date" class="cursor-pointer rounded-full border border-neon/30 bg-ink px-4 py-1.5 text-sm text-white font-mono text-center" onclick="if(this.showPicker){this.showPicker()}" />
           </div>
         </div>
         <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
@@ -216,7 +215,8 @@
           <div class="grid gap-4 xl:grid-cols-5">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
               <h2 class="font-display text-xl text-white">Potencial de Crescimento</h2>
-              <p class="mb-3 text-xs text-mute">Views por dia dos posts coletados</p>
+              <p id="growth-note" class="text-xs text-mute">Views por dia dos posts coletados</p>
+              <div id="growth-stats" class="mb-3 mt-3 flex flex-wrap gap-2"></div>
               <div class="h-64"><canvas id="line-chart"></canvas></div>
             </article>
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-2">
@@ -459,6 +459,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=17"></script>
+  <script src="/static/js/app.js?v=19"></script>
 </body>
 </html>

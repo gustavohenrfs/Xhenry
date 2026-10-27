@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date, datetime, timedelta, timezone
+from itertools import accumulate
 from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -824,6 +825,76 @@ def top_post(pairs: list[tuple[XAccount, TweetSample]], total_views: int) -> dic
     }
 
 
+def local_posted(account: XAccount, row: TweetSample) -> datetime:
+    return as_utc(row.posted_at).astimezone(zone(account.timezone))
+
+
+def growth_payload(
+    pairs: list[tuple[XAccount, TweetSample]],
+    prev_pairs: list[tuple[XAccount, TweetSample]] | None,
+    start: date,
+    end: date,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Cartão "Potencial de Crescimento".
+
+    Um dia só: views acumuladas pela hora do post, com o dia anterior na mesma escala, e o
+    ritmo "até agora" (hoje até a hora atual contra o dia anterior até a mesma hora).
+    Vários dias: views por dia, com o período anterior alinhado dia a dia.
+    """
+    now = now or datetime.now(ZoneInfo(DEFAULT_TZ))
+    span = (end - start).days + 1
+    if span == 1:
+        size, labels = 24, [f"{hour:02d}h" for hour in range(24)]
+
+        def slot(account: XAccount, row: TweetSample, base: date) -> int:
+            return local_posted(account, row).hour
+    else:
+        size = span
+        labels = [(start + timedelta(days=offset)).isoformat() for offset in range(span)]
+
+        def slot(account: XAccount, row: TweetSample, base: date) -> int:
+            return (local_posted(account, row).date() - base).days
+
+    def buckets(rows, base):
+        views, posts = [0] * size, [0] * size
+        for account, row in rows:
+            index = slot(account, row, base)
+            if 0 <= index < size:
+                views[index] += int(row.view_count or 0)
+                posts[index] += 1
+        return views, posts
+
+    views, posts = buckets(pairs, start)
+    previous = buckets(prev_pairs, start - timedelta(days=span))[0] if prev_pairs is not None else None
+    best = max(range(size), key=lambda index: views[index]) if any(views) else None
+    payload: dict[str, Any] = {
+        "mode": "hour" if span == 1 else "day",
+        "labels": labels,
+        "posts": posts,
+        "best": {"label": labels[best], "views": views[best]} if best is not None else None,
+        "pace": None,
+    }
+    if span == 1:
+        last = now.hour if end == now.date() else 23
+        current = list(accumulate(views))
+        payload["current"] = [value if hour <= last else None for hour, value in enumerate(current)]
+        payload["previous"] = list(accumulate(previous)) if previous is not None else None
+        payload["avg"] = round(current[last] / (last + 1))
+        if previous is not None:
+            payload["pace"] = {
+                "until": labels[last],
+                "current": current[last],
+                "previous": payload["previous"][last],
+            }
+    else:
+        elapsed = min(span, (now.date() - start).days + 1) if end == now.date() else span
+        payload["current"] = views
+        payload["previous"] = previous
+        payload["avg"] = round(sum(views) / max(1, elapsed))
+    return payload
+
+
 def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]:
     start, end = period_window(period)
     folders = list(db.scalars(select(Folder).where(Folder.is_archived.is_(False)).order_by(Folder.name)).all())
@@ -893,10 +964,11 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     for account, row in samples_in(db, accounts, spark_start, end) if spark_start < start else pairs:
         spark[as_utc(row.posted_at).astimezone(zone(account.timezone)).date()] += int(row.view_count or 0)
     compare_label = COMPARE_LABELS.get(period.strip().lower())
-    previous = None
+    previous = prev_pairs = None
     if compare_label:
         span = (end - start).days + 1
-        previous = window_totals(samples_in(db, accounts, start - timedelta(days=span), start - timedelta(days=1)))
+        prev_pairs = samples_in(db, accounts, start - timedelta(days=span), start - timedelta(days=1))
+        previous = window_totals(prev_pairs)
     return {
         "period": period,
         "last_collected_at": last_collected,
@@ -927,6 +999,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         "spark": [{"date": day.isoformat(), "views": views} for day, views in sorted(spark.items())],
         "previous": previous,
         "top_post": top_post(pairs, current["views"]),
+        "growth": growth_payload(pairs, prev_pairs, start, end),
         "folders": folder_cards,
         "accounts": cards,
         "series": series,

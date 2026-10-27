@@ -167,3 +167,28 @@ def test_spark_covers_two_weeks_for_short_periods(client, folder):
     assert len(spark) == 14
     assert (spark[-1]["views"], spark[-2]["views"]) == (150, 1000)
     assert len(get(client, "30d", folder["id"])["spark"]) == 30
+
+
+def test_growth_today_is_cumulative_by_hour(client, folder):
+    g = get(client, "today", folder["id"])["growth"]
+    hour = datetime.now(BR).hour
+    assert g["mode"] == "hour" and len(g["current"]) == 24
+    assert g["current"][hour] == 150 and all(v is None for v in g["current"][hour + 1:])
+    assert g["previous"][hour] == 1000, "ontem até a mesma hora"
+    assert g["pace"] == {"until": f"{hour:02d}h", "current": 150, "previous": 1000}
+    assert g["posts"][hour] == 2 and g["best"] == {"label": f"{hour:02d}h", "views": 150}
+
+
+def test_growth_days_align_previous_period(client, folder):
+    g = get(client, "7d", folder["id"])["growth"]
+    assert g["mode"] == "day" and len(g["labels"]) == 7
+    assert (g["current"][-1], g["current"][-2]) == (150, 1000)
+    assert g["previous"] == [0] * 7 and g["pace"] is None
+    assert get(client, "total", folder["id"])["growth"]["previous"] is None
+
+
+def test_growth_past_day_has_all_hours():
+    from app.services import growth_payload
+
+    g = growth_payload([], [], DAY - timedelta(days=1), DAY - timedelta(days=1), datetime(2026, 10, 25, 9, tzinfo=BR))
+    assert g["current"] == [0] * 24 and g["pace"]["until"] == "23h" and g["best"] is None

@@ -359,8 +359,7 @@ button.bg-white:hover {
   transform: translateY(-1px);
 }
 
-#period-wrap,
-#specific-date {
+#period-wrap {
   border-color: rgba(103,220,255,.24) !important;
   background: rgba(7, 12, 24, .58) !important;
 }
@@ -579,3 +578,13 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* Celular: os períodos rolam de lado em vez de alargar a página. */
 #period-wrap { scrollbar-width: none; }
 #period-wrap .period { flex-shrink: 0; white-space: nowrap; }
+
+/* Potencial de Crescimento: números do período acima do gráfico */
+.growth-stat {
+  min-width: 6.5rem;
+  border: 1px solid var(--line);
+  border-radius: .9rem;
+  padding: .4rem .75rem;
+  text-align: left;
+}
+.growth-stat .delta-chip { margin-top: .25rem; }

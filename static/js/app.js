@@ -492,21 +492,93 @@ function chartOptions() {
     }
   };
 }
+function growthStat(label, value, extra) {
+  const box = el("div", "growth-stat");
+  box.append(el("p", "text-[11px] text-mute", label), el("p", "mt-0.5 font-mono text-base text-white", value));
+  if (extra) box.append(extra);
+  return box;
+}
+// Potencial de Crescimento: um dia mostra as views acumuladas hora a hora (o dia anterior tracejado);
+// vários dias mostram views por dia com o período anterior por baixo. Os posts entram como barras.
+function renderGrowth(data) {
+  const g = data.growth;
+  const hourly = g.mode === "hour";
+  const label = data.compare_label || "";
+  document.getElementById("growth-note").textContent = hourly
+    ? "Views acumuladas ao longo do dia, pela hora do post"
+    : "Views por dia dos posts coletados";
+  const total = hourly ? g.current.filter((v) => v !== null).pop() || 0 : g.current.reduce((a, b) => a + b, 0);
+  const stats = [growthStat("Total", num(total))];
+  if (g.best) stats.push(growthStat(hourly ? "Melhor hora" : "Melhor dia", (hourly ? g.best.label : g.best.label.slice(8, 10) + "/" + g.best.label.slice(5, 7)) + ", " + num(g.best.views)));
+  if (g.pace) stats.push(growthStat("Até as " + g.pace.until, num(g.pace.current), deltaChip(g.pace.current, g.pace.previous)));
+  if (!hourly) stats.push(growthStat("Média por dia", num(g.avg)));
+  const postsTotal = g.posts.reduce((a, b) => a + b, 0);
+  stats.push(growthStat("Posts", num(postsTotal)));
+  document.getElementById("growth-stats").replaceChildren(...stats);
+  const labels = hourly ? g.labels : g.labels.map((day) => day.slice(8, 10) + "/" + day.slice(5, 7));
+  const dense = g.labels.length > 40;
+  const datasets = [{
+    type: "line",
+    label: hourly ? "Views (acumulado)" : "Views",
+    data: g.current,
+    borderColor: "#ff2ec8",
+    backgroundColor: (ctx) => {
+      const area = ctx.chart.chartArea;
+      if (!area) return "rgba(255,46,200,.16)";
+      const fill = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+      fill.addColorStop(0, "rgba(255,46,200,.32)");
+      fill.addColorStop(1, "rgba(103,220,255,0)");
+      return fill;
+    },
+    fill: true,
+    cubicInterpolationMode: "monotone",  // a curva acumulada nunca desce entre dois pontos
+    pointRadius: dense ? 0 : 2.5,
+    pointHoverRadius: 5,
+    borderWidth: 2.5,
+    yAxisID: "y",
+    order: 1
+  }];
+  if (g.previous) datasets.push({
+    type: "line",
+    label: label ? label.replace("vs ", "") : "Anterior",
+    data: g.previous,
+    borderColor: "rgba(155,140,255,.75)",
+    borderDash: [6, 5],
+    borderWidth: 1.5,
+    pointRadius: 0,
+    fill: false,
+    cubicInterpolationMode: "monotone",
+    yAxisID: "y",
+    order: 2
+  });
+  datasets.push({
+    type: "bar",
+    label: "Posts",
+    data: g.posts,
+    backgroundColor: "rgba(103,220,255,.22)",
+    hoverBackgroundColor: "rgba(103,220,255,.45)",
+    borderRadius: 4,
+    maxBarThickness: 14,
+    yAxisID: "y1",
+    order: 3
+  });
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { boxWidth: 10 } } },
+    scales: {
+      x: { grid: { display: false }, ticks: { maxTicksLimit: hourly ? 12 : 8 } },
+      y: { beginAtZero: true, ticks: { precision: 0 } },
+      y1: { beginAtZero: true, position: "right", grid: { display: false }, ticks: { precision: 0 }, suggestedMax: Math.max(...g.posts, 1) * 3, display: false }
+    }
+  };
+  if (lineChart) { lineChart.data = { labels, datasets }; lineChart.options = options; lineChart.update("none"); }
+  else lineChart = new Chart(document.getElementById("line-chart"), { type: "line", data: { labels, datasets }, options });
+}
 function renderCharts(data) {
   if (!window.Chart) return;
-  const lineData = {
-    labels: data.series.map((row) => row.date.slice(5)),
-    datasets: [{
-      label: "Views",
-      data: data.series.map((row) => row.views),
-      borderColor: "#ff2ec8",
-      backgroundColor: "rgba(255,46,200,.16)",
-      fill: true,
-      tension: 0.35,
-      pointRadius: data.series.length > 40 ? 0 : 3,
-      borderWidth: 2
-    }]
-  };
+  renderGrowth(data);
   const names = data.by_account.map((row) => "@" + row.username);
   const barData = {
     labels: names.length ? names : ["—"],
@@ -515,8 +587,6 @@ function renderCharts(data) {
     ]
   };
   // Atualiza os gráficos no lugar (sem destruir/recriar), para não piscar no auto-refresh.
-  if (lineChart) { lineChart.data = lineData; lineChart.update("none"); }
-  else lineChart = new Chart(document.getElementById("line-chart"), { type: "line", data: lineData, options: chartOptions() });
   if (barChart) { barChart.data = barData; barChart.update("none"); }
   else barChart = new Chart(document.getElementById("bar-chart"), { type: "bar", data: barData, options: chartOptions() });
 }
@@ -1892,42 +1962,6 @@ async function boot() {
     showAuth(true);
   }
 }
-// Date display + native picker
-const dateDisplay = document.getElementById("date-display");
-const dateInput = document.getElementById("specific-date");
-if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().split('T')[0];
-
-function formatBR(d) {
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, "/");
-}
-
-function updateDateDisplay() {
-  if (!dateDisplay || !dateInput) return;
-  const val = dateInput.value;
-  if (val) {
-    const [y, m, d] = val.split("-").map(Number);
-    const dt = new Date(y, m - 1, d);
-    dateDisplay.textContent = formatBR(dt);
-  } else {
-    const today = new Date();
-    dateDisplay.textContent = formatBR(today);
-    dateInput.value = today.toISOString().slice(0, 10);
-  }
-}
-
-if (dateDisplay && dateInput) {
-  dateDisplay.addEventListener("click", () => {
-    if (dateInput.showPicker) dateInput.showPicker();
-    else dateInput.click();
-  });
-  dateInput.addEventListener("change", () => {
-    updateDateDisplay();
-    // optional: trigger load with new date if needed
-    if (state.tab === "dashboard") load();
-  });
-  updateDateDisplay();
-}
-
 setPeriod("today");
 setAuthMode("login");
 // Auto-refresh: a cada 60s, só na aba Dashboard, com a página visível e logado.
