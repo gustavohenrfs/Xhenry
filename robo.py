@@ -32,8 +32,12 @@ Alertas no Telegram:
   nível sai uma vez por post; se o post pular níveis, só o maior é avisado.
 - Queda de views: a partir de QUEDA_HORA, se as views de hoje ficarem mais de
   QUEDA_LIMITE abaixo das de ontem. Uma vez por conta por dia.
-- Coletor limitado (429), bloqueado, deslogado ou com proxy fora: uma vez por
-  hora por coletor e motivo.
+- Coletor limitado (429), bloqueado, com verificação de humanidade (Cloudflare),
+  deslogado ou com proxy fora: uma vez por hora por coletor e motivo.
+
+Botão Testar da aba Coletores: o painel grava collectors.test_requested_at e o
+robô, no minuto seguinte (mesmo com a coleta desligada), lê uma conta com
+aquele coletor e grava o resultado em test_status/test_detail.
 - Nenhum coletor disponível: no máximo a cada 6 horas.
 - Erro na coleta de uma conta (suspensa, não encontrada, banco): no máximo uma
   mensagem por hora para o mesmo conjunto de falhas.
@@ -111,8 +115,14 @@ PAUSE_FOR = {
     "limite": timedelta(hours=1),
     "bloqueio": timedelta(minutes=30),
     "proxy": timedelta(minutes=15),
+    # X/Cloudflare pediu "Verify you are human": insistir piora; alguém resolve no navegador e aperta Testar.
+    "verificacao": timedelta(hours=6),
     "sessao": timedelta(hours=24),
 }
+# O X manda o coletor para o desafio do Cloudflare (__cf_chl_rt_tk na URL) ou para a trava de
+# conta (account/access). O anyx chama isso de SessionExpired ("is locked by X"), mas os cookies
+# continuam bons: é verificação de humanidade, não sessão caída.
+HUMAN_CHALLENGE_MARKS = ("account/access", "__cf_chl")
 QUEDA_LIMITE = 0.30
 QUEDA_HORA = 23
 QUEDA_MIN_ONTEM = 100
@@ -842,9 +852,11 @@ def reader(anyx: Any, collector: dict[str, Any]) -> Iterator[tuple[Any, ProxyRel
 
 
 def classify(exc: BaseException, relay: ProxyRelay | None = None) -> str:
-    """limite, sessao, proxy, bloqueio (culpa do coletor), conta (da conta lida) ou erro."""
+    """limite, verificacao, sessao, proxy, bloqueio (culpa do coletor), conta (da conta lida) ou erro."""
     kind = type(exc).__name__
     text = str(exc)
+    if any(mark in text for mark in HUMAN_CHALLENGE_MARKS):
+        return "verificacao"
     if kind == "ProxyError" or "ERR_PROXY" in text or "ERR_TUNNEL" in text:
         return "proxy"
     if kind == "RateLimited":
@@ -879,6 +891,12 @@ def collector_alert(kind: str, collector: dict[str, Any], account: dict[str, Any
             f"🚫 X bloqueou o coletor {who} ao ler {target}.\n"
             f"Motivo: {block_reason(exc)}\n"
             f"{who} pausado até {back}. Se repetir, troque o proxy ou o coletor."
+        )
+    if kind == "verificacao":
+        return (
+            f"🛡️ X pediu verificação de humanidade ao coletor {who} ao ler {target} (Cloudflare).\n"
+            f"{who} pausado até {back}. Para liberar: entre no x.com com {who} (de preferência pelo "
+            f"mesmo proxy), resolva a verificação e aperte Testar na aba Coletores."
         )
     if kind == "sessao":
         return (
@@ -1129,6 +1147,67 @@ def collect(conn, anyx: Any, midnight: datetime, manual: bool = False) -> dict[s
     return stats
 
 
+def pending_tests(conn) -> list[dict[str, Any]]:
+    """Coletores com o botão Testar apertado, o pedido mais antigo primeiro. Painel antigo: nenhum."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.id, c.handle, c.proxy, c.cookies, c.is_active, c.paused_until,
+                       EXISTS (SELECT 1 FROM x_accounts a WHERE lower(a.username) = lower(c.handle)) AS monitored
+                FROM collectors c
+                WHERE c.test_requested_at IS NOT NULL
+                ORDER BY c.test_requested_at, c.id
+                """
+            )
+            rows = list(cur.fetchall())
+        conn.commit()
+        return rows
+    except Exception as exc:
+        conn.rollback()
+        log.warning("collectors sem as colunas do teste (%s); atualize o painel", type(exc).__name__)
+        return []
+
+
+def record_test(conn, collector_id: int, status: str, detail: str | None) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE collectors
+            SET test_requested_at = NULL, test_status = %s, test_detail = %s, test_at = NOW()
+            WHERE id = %s
+            """,
+            (status, (detail or "")[:500] or None, collector_id),
+        )
+    conn.commit()
+
+
+def run_tests(conn, anyx: Any, midnight: datetime, tests: list[dict[str, Any]]) -> None:
+    """Botão Testar: cada coletor pedido lê a próxima conta da fila na hora (é uma leitura normal,
+    grava os posts e pode dar castigo e alerta como qualquer outra)."""
+    for index, collector in enumerate(tests):
+        if collector["monitored"]:
+            # Segunda trava: nunca entrar logado numa conta que gera dinheiro.
+            record_test(conn, collector["id"], "erro", "este @ é uma conta monitorada; o robô não entra nele")
+            continue
+        with conn.cursor() as cur:
+            accounts = load_accounts(cur, 1)
+        conn.commit()
+        if not accounts:
+            record_test(conn, collector["id"], "erro", "nenhuma conta monitorada para ler")
+            continue
+        if index:
+            pause()
+        account = accounts[0]
+        log.info("teste do coletor @%s lendo @%s", collector["handle"], account["username"])
+        kind, saved, detail = run_pair(conn, anyx, collector, account, midnight)
+        if kind == "ok":
+            text = f"leu @{account['username']}: {saved} posts de hoje"
+        else:
+            text = f"ao ler @{account['username']}: {detail or kind}"
+        record_test(conn, collector["id"], kind, text)
+
+
 @contextmanager
 def single_run() -> Iterator[bool]:
     """True se esta é a única rodada rodando (flock); no Windows não trava."""
@@ -1187,20 +1266,40 @@ def run_round() -> int:
 
     with conn:
         try:
+            tests = pending_tests(conn)
             run, manual = round_plan(conn)
         except Exception as exc:
             log.exception("não leu as opções do robô")
             alert_offline("banco", exc)
             return 1
-        if not run:
+        if not run and not tests:
             return 0  # desligado ou dentro do intervalo: sai quieto (o cron chama de novo em 1 min)
-        log.info("início%s — tweets depois de %s", " (Atualizar Dados)" if manual else "", midnight.isoformat())
         try:
             import anyx
         except ImportError:
             log.error("Instale anyx no VPS: pip install anyx && playwright install chromium")
             return 1
         tune_anyx()
+        if tests:
+            # Testes primeiro e mesmo com a coleta desligada: quem apertou está olhando a tela.
+            try:
+                run_tests(conn, anyx, midnight, tests)
+            except Exception as exc:
+                log.exception("teste de coletor falhou")
+                conn.rollback()
+                try:  # fecha os pedidos que sobraram, senão eles voltariam a cada minuto
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE collectors SET test_requested_at = NULL, test_status = 'erro', test_detail = %s,"
+                            " test_at = NOW() WHERE test_requested_at IS NOT NULL",
+                            (f"o teste falhou no robô: {type(exc).__name__}: {exc}"[:500],),
+                        )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+        if not run:
+            return 0  # só testes: sem batimento, para não mexer no intervalo da coleta
+        log.info("início%s — tweets depois de %s", " (Atualizar Dados)" if manual else "", midnight.isoformat())
         try:
             stats = collect(conn, anyx, midnight, manual)
         except Exception as exc:

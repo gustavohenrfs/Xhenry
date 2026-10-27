@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.collectors import dump_cookies, mask_cookies, mask_proxy, parse_cookies, parse_proxy
+from app.collectors import dump_cookies, mask_cookies, mask_proxy, parse_cookies, parse_proxy, probe_proxy
 from app.database import get_db
 from app.models import Collector, XAccount
 from app.routers.auth import current_user
@@ -54,6 +54,10 @@ def collector_payload(row: Collector) -> dict[str, Any]:
         "last_used_at": _iso(row.last_used_at),
         "last_status": row.last_status,
         "last_error": (row.last_error or "")[:300] or None,
+        # Botão Testar: "pending" enquanto o robô não leu; depois o mesmo vocabulário de last_status.
+        "test_status": "pending" if row.test_requested_at else row.test_status,
+        "test_detail": (row.test_detail or "")[:300] or None,
+        "test_at": _iso(row.test_at),
     }
 
 
@@ -120,6 +124,36 @@ def update_collector(collector_id: int, payload: CollectorUpdate, db: Session = 
         row.paused_until = None
         row.last_status = None
         row.last_error = None
+    db.commit()
+    db.refresh(row)
+    return collector_payload(row)
+
+
+@router.post("/api/collectors/{collector_id}/test")
+def test_collector(collector_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Botão Testar: tira o castigo, testa o proxy na hora e pede ao robô uma leitura com este coletor.
+
+    O painel não abre navegador (o anyx e o cofre de cookies são do usuário do robô): a leitura de
+    verdade sai no próximo minuto do cron, que grava test_status/test_detail; a aba faz polling.
+    """
+    row = _get(db, collector_id)
+    if db.scalar(select(func.count()).select_from(XAccount).where(func.lower(XAccount.username) == row.handle.lower())):
+        raise HTTPException(400, f"@{row.handle} é uma conta monitorada. O robô nunca entra logado nela.")
+    problem = probe_proxy(row.proxy) if row.proxy else None
+    now = now_utc()
+    row.paused_until = None
+    row.test_at = now
+    if problem:
+        # Proxy fora: não adianta o robô abrir o navegador.
+        row.test_requested_at = None
+        row.test_status = "proxy"
+        row.test_detail = problem[:500]
+    else:
+        row.test_requested_at = now
+        row.test_status = None
+        row.test_detail = ("Proxy funcionando. " if row.proxy else "Sem proxy (sai pelo IP do VPS). ") + (
+            "O robô lê uma conta com este coletor no próximo minuto."
+        )
     db.commit()
     db.refresh(row)
     return collector_payload(row)

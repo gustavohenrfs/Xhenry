@@ -174,3 +174,53 @@ def test_startup_adds_rotation_columns(tmp_path, monkeypatch):
     services.ensure_user_auth_columns()
     cols = {col["name"] for col in inspect(engine).get_columns("x_accounts")}
     assert {"archived_at", "collected_at", "followers_at"} <= cols
+
+
+def test_probe_proxy_reports_dead_proxy():
+    import socket
+
+    from app.collectors import probe_proxy
+
+    with socket.socket() as sock:  # porta livre e fechada: ninguém escuta
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    assert "não conectou" in probe_proxy(f"http://u:p@127.0.0.1:{port}", timeout=2)
+
+
+def test_test_button_unpauses_and_queues_robot(logged, monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.routers.collectors.probe_proxy", lambda proxy: calls.append(proxy))
+    created = logged.post("/api/collectors", json={"handle": handle(), "proxy": "http://u:p@1.1.1.1:1", "cookies": TOKEN}).json()
+    with SessionLocal() as db:
+        row = db.get(Collector, created["id"])
+        row.paused_until = services.now_utc().replace(year=2099)
+        db.commit()
+    body = logged.post(f"/api/collectors/{created['id']}/test").json()
+    assert calls == ["http://u:p@1.1.1.1:1"]
+    assert body["state"] == "ready" and body["test_status"] == "pending"
+    assert body["test_detail"].startswith("Proxy funcionando") and SECRET not in json.dumps(body)
+    with SessionLocal() as db:
+        assert db.get(Collector, created["id"]).test_requested_at is not None
+
+
+def test_test_button_dead_proxy_answers_now(logged, monkeypatch):
+    monkeypatch.setattr("app.routers.collectors.probe_proxy", lambda proxy: "o proxy recusou usuário/senha (407)")
+    created = logged.post("/api/collectors", json={"handle": handle(), "proxy": "http://u:p@1.1.1.1:1"}).json()
+    body = logged.post(f"/api/collectors/{created['id']}/test").json()
+    assert body["test_status"] == "proxy" and "407" in body["test_detail"]
+    with SessionLocal() as db:
+        assert db.get(Collector, created["id"]).test_requested_at is None, "proxy fora: o robô nem abre o navegador"
+
+
+def test_test_button_refuses_monitored_handle(logged, monkeypatch):
+    monkeypatch.setattr("app.routers.collectors.probe_proxy", lambda proxy: None)
+    burner = handle()
+    created = logged.post("/api/collectors", json={"handle": burner}).json()
+    with SessionLocal() as db:  # alguém cadastrou o mesmo @ como monitorada direto no banco
+        folder = Folder(owner_id=ensure_owner(db).id, name=f"Mon {uuid4().hex[:6]}")
+        db.add(folder)
+        db.flush()
+        db.add(XAccount(folder_id=folder.id, username=burner))
+        db.commit()
+    resp = logged.post(f"/api/collectors/{created['id']}/test")
+    assert resp.status_code == 400 and "monitorada" in resp.json()["detail"]

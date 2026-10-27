@@ -188,6 +188,10 @@ def _exc(name, message=""):
 @pytest.mark.parametrize(("exc", "kind"), [
     (_exc("RateLimited", "429"), "limite"),
     (_exc("SessionExpired", "login wall"), "sessao"),
+    # Desafio do Cloudflare / trava do X: o anyx diz SessionExpired, mas é verificação de humanidade.
+    (_exc("SessionExpired", "@burner is locked by X (https://x.com/home?__cf_chl_rt_tk=abc123)"), "verificacao"),
+    (_exc("SessionExpired", "redirected to https://x.com/account/access"), "verificacao"),
+    (_exc("UIChanged", "unexpected page https://x.com/account/access"), "verificacao"),
     (_exc("NoLogin"), "sessao"),
     (_exc("ProxyError", "recusada"), "proxy"),
     (_exc("Error", "net::ERR_TUNNEL_CONNECTION_FAILED"), "proxy"),
@@ -206,6 +210,67 @@ def test_pause_until_uses_x_reset_on_429():
     exc.reset = int((now + timedelta(minutes=20)).timestamp())
     assert robo.pause_until("limite", exc, now) == now + timedelta(minutes=20, seconds=60)
     assert robo.pause_until("bloqueio", _exc("NotFound"), now) == now + timedelta(minutes=30)
+    assert robo.pause_until("verificacao", _exc("SessionExpired"), now) == now + timedelta(hours=6)
+
+
+def test_human_challenge_alert_says_how_to_unlock():
+    until = datetime(2026, 10, 26, 18, tzinfo=timezone.utc)
+    text = robo.collector_alert("verificacao", {"handle": "burner"}, {"username": "conta"},
+                                _exc("SessionExpired", "__cf_chl"), until, None)
+    assert text.startswith("🛡️ X pediu verificação de humanidade ao coletor @burner")
+    assert "Testar" in text and "cookies" not in text
+
+
+class FakeCursor:
+    def __init__(self, log):
+        self.log = log
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self.log.append((" ".join(sql.split()), params))
+
+
+class FakeConn:
+    def __init__(self):
+        self.log = []
+
+    def cursor(self):
+        return FakeCursor(self.log)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+def test_run_tests_reads_one_account_and_records_result(monkeypatch):
+    conn = FakeConn()
+    read = []
+    monkeypatch.setattr(robo, "load_accounts", lambda cur, limit: [{"id": 7, "username": "conta"}])
+    monkeypatch.setattr(robo, "pause", lambda: None)
+
+    def fake_pair(conn_, anyx, collector, account, midnight):
+        read.append((collector["handle"], account["username"]))
+        return ("verificacao", 0, "SessionExpired: __cf_chl") if collector["id"] == 2 else ("ok", 3, None)
+
+    monkeypatch.setattr(robo, "run_pair", fake_pair)
+    tests = [
+        {"id": 1, "handle": "b1", "monitored": False},
+        {"id": 2, "handle": "b2", "monitored": False},
+        {"id": 3, "handle": "conta_real", "monitored": True},
+    ]
+    robo.run_tests(conn, None, None, tests)
+    assert read == [("b1", "conta"), ("b2", "conta")], "a conta monitorada nunca é aberta"
+    results = [params for sql, params in conn.log if sql.startswith("UPDATE collectors SET test_requested_at = NULL")]
+    assert results[0] == ("ok", "leu @conta: 3 posts de hoje", 1)
+    assert results[1][0] == "verificacao" and "__cf_chl" in results[1][1]
+    assert results[2][0] == "erro" and results[2][2] == 3
 
 
 def test_pairs_for():

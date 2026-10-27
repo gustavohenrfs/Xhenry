@@ -801,3 +801,6 @@ body { -webkit-tap-highlight-color: transparent; }
 @media (hover: none) {
   body .glow:hover { transform: none; box-shadow: none; }
 }
+
+/* Botão Testar do coletor enquanto o robô ainda não leu. */
+.collector-test:disabled { opacity: .55; cursor: progress; }

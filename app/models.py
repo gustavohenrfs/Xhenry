@@ -184,9 +184,15 @@ class Collector(IntPK, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # ok, limite, bloqueio, sessao, proxy, erro (gravado pelo robô)
+    # ok, limite, bloqueio, verificacao, sessao, proxy, erro (gravado pelo robô)
     last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Botão Testar: o painel grava o pedido (e o resultado do proxy); o robô lê uma conta com este
+    # coletor no próximo minuto e grava test_status (os mesmos valores de last_status) e test_detail.
+    test_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    test_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    test_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class HealthCheck(IntPK, Base):

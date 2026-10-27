@@ -1585,8 +1585,18 @@ async function loadArchived() {
 const COLLECTOR_STATES = { ready: ["Pronto", "st-healthy"], paused: ["Pausado", "st-search_ban"], off: ["Desligado", "st-none"] };
 const COLLECTOR_RESULTS = {
   ok: "Última leitura ok", limite: "X limitou (429)", bloqueio: "X bloqueou a leitura",
+  verificacao: "🛡️ X pediu verificação de humanidade (Cloudflare): entre no x.com com este coletor, resolva e aperte Testar",
   sessao: "Sessão caiu: cole cookies novos", proxy: "Proxy não respondeu", erro: "Erro na última leitura"
 };
+// Resultado do botão Testar (pending = o robô ainda vai ler; o resto é o que ele gravou).
+const COLLECTOR_TESTS = {
+  pending: ["⏳ Testando", false], ok: ["✅ Funcionando", false], conta: ["✅ Coletor ok, a conta lida deu erro", false],
+  proxy: ["❌ Proxy fora do ar", true], verificacao: ["🛡️ X pediu verificação", true], sessao: ["🔑 Sessão caiu", true],
+  limite: ["⛔ X limitou (429)", true], bloqueio: ["🚫 X bloqueou a leitura", true], erro: ["⚠️ Erro no teste", true]
+};
+let collectorsPolledAt = 0;
+let collectorsSig = "";
+let collectorsPending = new Set();
 let collectorEditing = null;
 function timeBR(iso) {
   return iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -1619,7 +1629,8 @@ function collectorCard(collector) {
   const [label, style] = COLLECTOR_STATES[collector.state] || COLLECTOR_STATES.off;
   const badge = document.createElement("span");
   badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-[11px] uppercase tracking-[0.12em] " + style;
-  badge.textContent = collector.state === "paused" ? label + " até " + timeBR(collector.paused_until) : label;
+  const pausedAs = collector.last_status === "verificacao" ? "🛡️ Verificação" : label;
+  badge.textContent = collector.state === "paused" ? pausedAs + " até " + timeBR(collector.paused_until) : label;
   head.append(name, badge);
 
   card.append(
@@ -1632,10 +1643,20 @@ function collectorCard(collector) {
     const detail = COLLECTOR_RESULTS[collector.last_status] || collector.last_status;
     card.append(collectorLine("Aviso", collector.last_error ? detail + " — " + collector.last_error : detail, true));
   }
+  if (collector.test_status || collector.test_detail) {
+    const [title, warn] = COLLECTOR_TESTS[collector.test_status || "pending"] || [collector.test_status, true];
+    const when = collector.test_at ? " (" + timeBR(collector.test_at) + ")" : "";
+    card.append(collectorLine("Teste" + when, title + (collector.test_detail ? ": " + collector.test_detail : ""), warn));
+  }
 
   const actions = document.createElement("div");
   actions.className = "mt-4 flex flex-wrap gap-2";
+  const testing = collector.test_status === "pending";
+  const test = collectorButton(testing ? "Testando…" : "Testar", (event) => testCollector(collector, event.currentTarget));
+  test.disabled = testing;
+  test.classList.add("collector-test");
   actions.append(
+    test,
     collectorButton("Editar", () => editCollector(collector)),
     collectorButton(collector.is_active ? "Desligar" : "Ligar", () => saveCollector(collector.id, { is_active: !collector.is_active })),
   );
@@ -1644,7 +1665,7 @@ function collectorCard(collector) {
   card.append(actions);
   return card;
 }
-async function loadCollectors() {
+async function loadCollectors({ silent = false } = {}) {
   const host = document.getElementById("collector-list");
   if (!host) return;
   const message = (text) => {
@@ -1653,13 +1674,45 @@ async function loadCollectors() {
     p.textContent = text;
     return p;
   };
+  collectorsPolledAt = Date.now();
   try {
     const collectors = await api("/api/collectors");
+    // Teste que acabou de sair do "pending": avisa o resultado sem precisar olhar o card.
+    const pending = new Set();
+    collectors.forEach((collector) => {
+      if (collector.test_status === "pending") pending.add(collector.id);
+      else if (collectorsPending.has(collector.id)) {
+        const [title] = COLLECTOR_TESTS[collector.test_status] || ["Teste concluído"];
+        toast("@" + collector.handle + ": " + title + (collector.test_detail ? " — " + collector.test_detail : ""));
+      }
+    });
+    collectorsPending = pending;
+    const sig = JSON.stringify(collectors);
+    if (silent && sig === collectorsSig) return;  // nada mudou: não mexe no DOM
+    collectorsSig = sig;
     host.replaceChildren(...(collectors.length ? collectors.map(collectorCard) : [message("Nenhum coletor. Sem coletores o robô não lê nenhuma timeline.")]));
   } catch (error) {
-    host.replaceChildren(message(error.message || "Erro ao carregar."));
+    if (!silent) host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
 }
+async function testCollector(collector, button) {
+  button.disabled = true;
+  button.textContent = "Testando…";
+  try {
+    const result = await api("/api/collectors/" + collector.id + "/test", { method: "POST" });
+    toast(result.test_status === "proxy"
+      ? "❌ Proxy de @" + collector.handle + " fora do ar: " + (result.test_detail || "")
+      : "✅ " + (result.test_detail || "Teste pedido."));
+  } catch (error) {
+    toast(error.message || "Não foi possível testar.");
+  }
+  await loadCollectors();
+}
+// Aba Coletores aberta: atualiza sozinha a cada 30 s, ou a cada 5 s enquanto um teste está na fila.
+setInterval(() => {
+  if (state.tab !== "collectors" || document.hidden || !token()) return;
+  if (Date.now() - collectorsPolledAt >= (collectorsPending.size ? 5000 : 30000)) loadCollectors({ silent: true });
+}, 5000);
 function resetCollectorForm() {
   collectorEditing = null;
   const handle = document.getElementById("collector-handle");

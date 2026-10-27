@@ -124,3 +124,24 @@ def mask_cookies(stored: str | None) -> str | None:
     if others:
         text += " + " + ", ".join(others)
     return f"{text} ({len(cookies)} cookies)"
+
+
+def probe_proxy(proxy: str, timeout: float = 12.0) -> str | None:
+    """Abre e fecha um túnel até o x.com:443 pelo proxy, sem cookies e sem página do X.
+
+    É o mesmo teste que o robo.py faz antes de abrir o navegador (reaproveita o repassador dele).
+    None quando o proxy funcionou; senão o motivo, em português.
+    """
+    from robo import ProxyError, ProxyRelay
+
+    try:
+        relay = ProxyRelay(proxy, timeout=timeout)
+    except ProxyError as exc:
+        return str(exc)
+    try:
+        relay.probe()
+        return None
+    except ProxyError as exc:
+        return str(exc)
+    finally:
+        relay.close()

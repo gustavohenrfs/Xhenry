@@ -84,6 +84,14 @@ def ensure_user_auth_columns() -> None:
             if column not in setting_cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE app_settings ADD COLUMN {column} {ddl}"))
+    if "collectors" in tables:
+        collector_cols = {col["name"] for col in insp.get_columns("collectors")}
+        kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
+        added = {"test_requested_at": kind, "test_status": "VARCHAR(16)", "test_detail": "TEXT", "test_at": kind}
+        for column, ddl in added.items():
+            if column not in collector_cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE collectors ADD COLUMN {column} {ddl}"))
     # Índices novos em tabelas que já existem (create_all também não cria esses).
     indexes = {
         "ix_tweet_samples_collected": "tweet_samples (collected_at)",
