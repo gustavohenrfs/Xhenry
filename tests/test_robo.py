@@ -181,6 +181,12 @@ def test_plain_http_is_refused(net):
         relay.close()
 
 
+@pytest.fixture(autouse=True)
+def _reads_file(tmp_path, monkeypatch):
+    """O contador de leituras do dia vai para uma pasta descartável, nunca para ~/.xhenry-robo."""
+    monkeypatch.setattr(robo, "READS_FILE", tmp_path / "leituras.json")
+
+
 def _exc(name, message=""):
     return type(name, (Exception,), {})(message)
 

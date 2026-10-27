@@ -15,13 +15,22 @@ do painel (app_settings):
   revezando os coletores).
 
 Cada rodada automática:
-- pega os coletores livres (ligados, fora de castigo) e lê uma conta monitorada
-  por coletor: as coletadas há mais tempo primeiro (x_accounts.collected_at);
+- pega os coletores livres (ligados, fora de castigo, descansados e abaixo do
+  limite do dia) e lê uma conta monitorada por coletor: as coletadas há mais
+  tempo primeiro (x_accounts.collected_at);
 - para cada par abre o anyx logado no coletor, saindo pelo proxy dele, lê a
-  conta, fecha o navegador e passa para o próximo (só 1 Chrome por vez na RAM);
+  conta e fecha o navegador. Até ROBO_WORKERS pares ao mesmo tempo (padrão 4),
+  sempre com coletores diferentes: para o X são contas e IPs diferentes, e um
+  coletor nunca abre dois navegadores juntos;
 - seguidores no máximo 1x por hora por conta (x_accounts.followers_at);
 - pausa aleatória de 0,3 a 2 s entre páginas e entre contas;
-- 429 num coletor: para a rodada inteira, deixa o coletor de castigo e avisa.
+- 429 num coletor: nenhum par novo começa, deixa o coletor de castigo e avisa.
+
+Proteção dos coletores (rodada automática): o mesmo coletor só lê de novo
+depois de ROBO_COLLECTOR_REST_MIN minutos (padrão 10) e no máximo
+ROBO_COLLECTOR_DAILY_MAX leituras por dia (padrão 150; contagem em
+ROBO_STATE_DIR/leituras.json). Com coletores de menos, as contas esperam mais
+em vez de o coletor ler mais rápido.
 
 O Chrome não aceita proxy com usuário e senha, então cada coletor ganha um
 repassador local (ProxyRelay): o Chrome fala com 127.0.0.1 sem senha e o
@@ -34,13 +43,14 @@ Alertas no Telegram:
   QUEDA_LIMITE abaixo das de ontem. Uma vez por conta por dia.
 - Coletor limitado (429), bloqueado, com verificação de humanidade (Cloudflare),
   deslogado ou com proxy fora: uma vez por hora por coletor e motivo.
+- Nenhum coletor disponível: no máximo a cada 6 horas.
+- Todos os coletores no limite de leituras do dia: uma vez por dia.
+- Erro na coleta de uma conta (suspensa, não encontrada, banco): no máximo uma
+  mensagem por hora para o mesmo conjunto de falhas.
 
 Botão Testar da aba Coletores: o painel grava collectors.test_requested_at e o
 robô, no minuto seguinte (mesmo com a coleta desligada), lê uma conta com
 aquele coletor e grava o resultado em test_status/test_detail.
-- Nenhum coletor disponível: no máximo a cada 6 horas.
-- Erro na coleta de uma conta (suspensa, não encontrada, banco): no máximo uma
-  mensagem por hora para o mesmo conjunto de falhas.
 
 Cada rodada grava um batimento em sync_runs (kind=tweets, account_id NULL).
 O vigia do painel usa esse batimento para avisar quando o robô fica parado.
@@ -73,7 +83,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -133,8 +144,63 @@ STATE_DIR = Path(os.getenv("ROBO_STATE_DIR") or Path.home() / ".xhenry-robo")
 OFFLINE_STAMP = STATE_DIR / "alerta_banco"
 # O cron não empilha rodadas: se a anterior ainda roda, esta sai quieta.
 LOCK_FILE = STATE_DIR / "robo.lock"
+# Leituras de hoje por coletor (limite diário); só o robô lê e grava.
+READS_FILE = STATE_DIR / "leituras.json"
+# Padrões das variáveis do .env (ROBO_WORKERS, ROBO_COLLECTOR_REST_MIN, ROBO_COLLECTOR_DAILY_MAX).
+# Cada Chrome usa uns 300 a 500 MB: 4 ao mesmo tempo cabem com folga num VPS com 6 GB livres.
+WORKERS_DEFAULT = 4
+COLLECTOR_REST_MIN_DEFAULT = 10
+COLLECTOR_DAILY_MAX_DEFAULT = 150
+# O config.json do anyx é um arquivo só, e é nele que fica o proxy de cada coletor. Gravar a entrada
+# e abrir o Chrome acontece sob esta trava: em paralelo, uma leitura podia apagar a entrada da outra
+# e aquele Chrome sair sem proxy, pelo IP do VPS. As leituras em si correm soltas.
+LAUNCH_LOCK = threading.Lock()
+READS_LOCK = threading.Lock()
 
 log = logging.getLogger("robo")
+
+
+def env_int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        value = default
+    return max(low, min(high, value))
+
+
+def workers() -> int:
+    return env_int("ROBO_WORKERS", WORKERS_DEFAULT, 1, 12)
+
+
+def collector_rest() -> timedelta:
+    return timedelta(minutes=env_int("ROBO_COLLECTOR_REST_MIN", COLLECTOR_REST_MIN_DEFAULT, 0, 24 * 60))
+
+
+def daily_max() -> int:
+    return env_int("ROBO_COLLECTOR_DAILY_MAX", COLLECTOR_DAILY_MAX_DEFAULT, 1, 10_000)
+
+
+def reads_today() -> dict[str, int]:
+    """Leituras de hoje (fuso de São Paulo) por id de coletor; dia novo começa do zero."""
+    today = datetime.now(BR_TZ).date().isoformat()
+    try:
+        data = json.loads(READS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data.get("reads", {}) if data.get("date") == today else {}
+
+
+def count_read(collector_id: int) -> None:
+    with READS_LOCK:
+        reads = reads_today()
+        reads[str(collector_id)] = reads.get(str(collector_id), 0) + 1
+        try:
+            READS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = READS_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"date": datetime.now(BR_TZ).date().isoformat(), "reads": reads}), encoding="utf-8")
+            os.replace(tmp, READS_FILE)
+        except OSError:
+            log.warning("não gravou %s; o limite diário fica sem esta leitura", READS_FILE)
 
 
 class ProxyError(Exception):
@@ -830,19 +896,29 @@ def prepare_collector(collector: dict[str, Any], relay_url: str | None) -> None:
     else:
         entry.pop("proxy", None)
     anyx_config.save(cfg)
+    # Confere o que ficou gravado: um coletor com proxy nunca pode abrir o Chrome sem ele.
+    saved = (anyx_config.load().get("accounts") or {}).get(handle.lower(), {}).get("proxy")
+    if saved != relay_url:
+        raise ProxyError("o anyx não guardou o proxy do coletor; leitura cancelada para não sair pelo IP do VPS")
 
 
 @contextmanager
 def reader(anyx: Any, collector: dict[str, Any]) -> Iterator[tuple[Any, ProxyRelay | None]]:
-    """Sessão do anyx logada no coletor, saindo pelo proxy dele. Fecha tudo no fim."""
+    """Sessão do anyx logada no coletor, saindo pelo proxy dele. Fecha tudo no fim.
+
+    Gravar o proxy no config.json do anyx e abrir o Chrome (que lê esse arquivo) acontecem juntos sob
+    LAUNCH_LOCK; com o Chrome aberto, o proxy dele já está fixo e a leitura corre em paralelo.
+    """
     handle = collector["handle"]
     stop_browser(handle)  # sobra de uma rodada que caiu no meio
     relay = ProxyRelay(collector["proxy"]) if collector.get("proxy") else None
     try:
         if relay:
             relay.probe()
-        prepare_collector(collector, relay.url if relay else None)
-        with anyx.Session(handle) as session:
+        with ExitStack() as stack:
+            with LAUNCH_LOCK:
+                prepare_collector(collector, relay.url if relay else None)
+                session = stack.enter_context(anyx.Session(handle))
             slow_pages(session)
             yield session, relay
     finally:
@@ -906,15 +982,17 @@ def collector_alert(kind: str, collector: dict[str, Any], account: dict[str, Any
     return f"🔌 Proxy do coletor {who} não respondeu.\nDetalhe: {detail}\n{who} pausado até {back}."
 
 
-def load_collectors(cur) -> tuple[list[dict[str, Any]], int, datetime | None]:
-    """Coletores livres (os usados há mais tempo primeiro), total cadastrado e próximo fim de castigo.
+def load_collectors(cur, rest: timedelta | None = None) -> tuple[list[dict[str, Any]], int, datetime | None, dict[str, int]]:
+    """Coletores livres (os usados há mais tempo primeiro), total cadastrado, próximo fim de castigo e
+    quantos ficaram de fora por descanso ou pelo limite do dia.
 
-    Um coletor com o mesmo @ de uma conta monitorada nunca é usado: o painel já recusa, isto é a
-    segunda trava para o robô não entrar logado numa conta que gera dinheiro.
+    Livre = ligado, fora de castigo, abaixo de daily_max() leituras hoje e, com rest, sem ler há pelo
+    menos esse tempo. Um coletor com o mesmo @ de uma conta monitorada nunca é usado: o painel já
+    recusa, isto é a segunda trava para o robô não entrar logado numa conta que gera dinheiro.
     """
     cur.execute(
         """
-        SELECT c.id, c.handle, c.proxy, c.cookies, c.is_active, c.paused_until
+        SELECT c.id, c.handle, c.proxy, c.cookies, c.is_active, c.paused_until, c.last_used_at
         FROM collectors c
         WHERE NOT EXISTS (SELECT 1 FROM x_accounts a WHERE lower(a.username) = lower(c.handle))
         ORDER BY c.last_used_at NULLS FIRST, c.id
@@ -922,9 +1000,19 @@ def load_collectors(cur) -> tuple[list[dict[str, Any]], int, datetime | None]:
     )
     rows = list(cur.fetchall())
     now = datetime.now(timezone.utc)
-    free = [r for r in rows if r["is_active"] and (r["paused_until"] is None or r["paused_until"] <= now)]
+    reads, cap = reads_today(), daily_max()
+    free, held = [], {"descansando": 0, "no_limite": 0}
+    for row in rows:
+        if not row["is_active"] or (row["paused_until"] and row["paused_until"] > now):
+            continue
+        if reads.get(str(row["id"]), 0) >= cap:
+            held["no_limite"] += 1
+        elif rest and row["last_used_at"] and now - row["last_used_at"] < rest:
+            held["descansando"] += 1
+        else:
+            free.append(row)
     paused = [r["paused_until"] for r in rows if r["is_active"] and r["paused_until"] and r["paused_until"] > now]
-    return free, len(rows), min(paused) if paused else None
+    return free, len(rows), min(paused) if paused else None, held
 
 
 def load_accounts(cur, limit: int) -> list[dict[str, Any]]:
@@ -1101,44 +1189,116 @@ def pairs_for(collectors: list[dict[str, Any]], accounts: list[dict[str, Any]], 
     return [(collectors[i % len(collectors)], account) for i, account in enumerate(accounts)]
 
 
-def collect(conn, anyx: Any, midnight: datetime, manual: bool = False) -> dict[str, Any]:
-    """Uma rodada: pares coletor + conta em sequência (um Chrome por vez)."""
+def daily_limit_alert(cur, capped: int) -> None:
+    key = f"coletor_limite_dia:{datetime.now(BR_TZ).date().isoformat()}"
+    alert_once(cur, key, "coletor", (
+        f"🧯 Os {capped} coletores livres já fizeram {daily_max()} leituras hoje (limite por coletor).\n"
+        "A coleta volta amanhã. Para ler mais, cadastre mais coletores ou suba ROBO_COLLECTOR_DAILY_MAX."
+    ))
+
+
+def lanes_of(pairs: list[tuple[dict, dict]]) -> list[list[tuple[dict, dict]]]:
+    """Uma fila por coletor, na ordem dos pares: um coletor nunca abre dois navegadores ao mesmo tempo."""
+    lanes: dict[int, list[tuple[dict, dict]]] = {}
+    for collector, account in pairs:
+        lanes.setdefault(collector["id"], []).append((collector, account))
+    return list(lanes.values())
+
+
+def run_in_parallel(connect, anyx: Any, pairs: list[tuple[dict, dict]], midnight: datetime, deadline: float,
+                    size: int) -> list[tuple[dict, dict, str, int, str | None]]:
+    """Até `size` filas ao mesmo tempo, cada uma com a própria conexão com o banco.
+
+    Um 429 faz nenhum par novo começar (os que estão no meio terminam); castigo encerra só a fila do
+    coletor punido.
+    """
+    stop = threading.Event()
+    done: list[tuple[dict, dict, str, int, str | None]] = []
+    done_lock = threading.Lock()
+
+    def lane_job(lane: list[tuple[dict, dict]], first: bool) -> None:
+        if not first:
+            pause()  # as filas não começam todas no mesmo instante
+        with connect() as conn:
+            for index, (collector, account) in enumerate(lane):
+                if stop.is_set() or time.monotonic() > deadline:
+                    return
+                if index:
+                    pause()
+                kind, saved, detail = run_pair(conn, anyx, collector, account, midnight)
+                count_read(collector["id"])
+                with done_lock:
+                    done.append((collector, account, kind, saved, detail))
+                if kind == "limite":
+                    stop.set()
+                    return
+                if kind in PAUSE_FOR:
+                    return
+
+    lanes = lanes_of(pairs)
+    with ThreadPoolExecutor(max_workers=size, thread_name_prefix="leitura") as pool:
+        futures = [pool.submit(lane_job, lane, index < size) for index, lane in enumerate(lanes)]
+        for future in futures:
+            future.result()  # um erro inesperado numa fila aparece aqui (run_pair já trata os do X)
+    return done
+
+
+def collect(conn, anyx: Any, midnight: datetime, manual: bool = False, connect=None) -> dict[str, Any]:
+    """Uma rodada: pares coletor + conta, até workers() ao mesmo tempo (um só, sem `connect`)."""
     budget = MANUAL_BUDGET if manual else ROUND_BUDGET
     deadline = time.monotonic() + budget
     with conn.cursor() as cur:
-        collectors, total, next_free = load_collectors(cur)
+        # A manual (botão Atualizar dados) não espera o descanso: quem apertou quer tudo agora. O limite
+        # do dia vale sempre.
+        collectors, total, next_free, held = load_collectors(cur, None if manual else collector_rest())
         limit = len(collectors) * (MANUAL_PER_COLLECTOR if manual else 1)
         accounts = load_accounts(cur, limit) if collectors else []
         if not collectors:
-            no_collector_alert(cur, total, next_free)
+            if held["no_limite"] and not held["descansando"]:
+                daily_limit_alert(cur, held["no_limite"])
+            elif not held["descansando"]:
+                no_collector_alert(cur, total, next_free)
     conn.commit()
-    log.info("%s coletores livres de %s; %s contas nesta rodada%s", len(collectors), total, len(accounts),
+    size = min(workers(), len(collectors)) if connect else 1
+    log.info("%s coletores livres de %s (%s descansando, %s no limite do dia); %s contas nesta rodada, %s por vez%s",
+             len(collectors), total, held["descansando"], held["no_limite"], len(accounts), max(1, size),
              " (manual)" if manual else "")
     stats: dict[str, Any] = {"coletores": len(collectors), "contas": 0, "tweets": 0, "falhas": 0, "parada_429": False,
-                             "manual": manual}
+                             "manual": manual, "em_paralelo": max(1, size), **held}
     errors: list[tuple[str, str, str]] = []
-    benched: set[int] = set()  # coletores que tomaram castigo nesta rodada
-    for index, (collector, account) in enumerate(pairs_for(collectors, accounts, manual)):
-        if time.monotonic() > deadline:
-            log.warning("rodada passou de %ss; o resto fica para a próxima", budget)
-            break
-        if collector["id"] in benched:
-            continue
-        if index:
-            pause()
-        kind, saved, detail = run_pair(conn, anyx, collector, account, midnight)
+    pairs = pairs_for(collectors, accounts, manual)
+    if size > 1:
+        done = run_in_parallel(connect, anyx, pairs, midnight, deadline, size)
+    else:
+        done = []
+        benched: set[int] = set()  # coletores que tomaram castigo nesta rodada
+        for index, (collector, account) in enumerate(pairs):
+            if time.monotonic() > deadline:
+                log.warning("rodada passou de %ss; o resto fica para a próxima", budget)
+                break
+            if collector["id"] in benched:
+                continue
+            if index:
+                pause()
+            kind, saved, detail = run_pair(conn, anyx, collector, account, midnight)
+            count_read(collector["id"])
+            done.append((collector, account, kind, saved, detail))
+            if kind in PAUSE_FOR:
+                benched.add(collector["id"])
+            if kind == "limite":
+                break
+    if len(done) < len(pairs) and not any(kind == "limite" for _, _, kind, _, _ in done):
+        log.warning("rodada parou em %s de %s pares (tempo ou castigo); o resto fica para a próxima", len(done), len(pairs))
+    for collector, account, kind, saved, detail in done:
         stats["contas"] += 1
         stats["tweets"] += saved
         if kind != "ok":
             stats["falhas"] += 1
-        if kind in PAUSE_FOR:
-            benched.add(collector["id"])
         if kind in ("conta", "erro"):
             errors.append((f"@{account['username']}", f"lida por @{collector['handle']}", detail or kind))
         if kind == "limite":
             stats["parada_429"] = True
-            log.warning("429 no coletor @%s: rodada parada", collector["handle"])
-            break
+            log.warning("429 no coletor @%s: nenhum par novo nesta rodada", collector["handle"])
     if errors:
         with conn.cursor() as cur:
             alert_errors(cur, errors)
@@ -1201,6 +1361,7 @@ def run_tests(conn, anyx: Any, midnight: datetime, tests: list[dict[str, Any]]) 
         account = accounts[0]
         log.info("teste do coletor @%s lendo @%s", collector["handle"], account["username"])
         kind, saved, detail = run_pair(conn, anyx, collector, account, midnight)
+        count_read(collector["id"])
         if kind == "ok":
             text = f"leu @{account['username']}: {saved} posts de hoje"
         else:
@@ -1301,7 +1462,9 @@ def run_round() -> int:
             return 0  # só testes: sem batimento, para não mexer no intervalo da coleta
         log.info("início%s — tweets depois de %s", " (Atualizar Dados)" if manual else "", midnight.isoformat())
         try:
-            stats = collect(conn, anyx, midnight, manual)
+            # Cada leitura em paralelo usa a própria conexão com o banco (psycopg não é de várias threads).
+            connect = lambda: psycopg.connect(database_url(), row_factory=dict_row, connect_timeout=10)  # noqa: E731
+            stats = collect(conn, anyx, midnight, manual, connect)
         except Exception as exc:
             log.exception("rodada falhou")
             message = f"{type(exc).__name__}: {exc}"

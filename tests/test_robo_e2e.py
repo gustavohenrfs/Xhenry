@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -51,6 +52,14 @@ class World:
         self.pauses: list[int] = []
         self.proxy_dead = False
         self.ids: dict[str, int] = {}
+        # Modo paralelo: navegadores abertos agora, o máximo ao mesmo tempo e se um coletor abriu dois.
+        import threading
+        self.lock = threading.Lock()
+        self.live: set[str] = set()
+        self.max_live = 0
+        self.overlap = False
+        self.delay = 0.0          # segundos de "leitura" da timeline
+        self.config_delay = 0.0   # config.json lento: alarga a janela da corrida entre leituras
 
     def run(self):
         import robo
@@ -103,12 +112,19 @@ def fake_anyx(world: World) -> dict[str, types.ModuleType]:
             self.handle = handle
 
         def __enter__(self):
-            world.events.append(("open", self.handle, world.cfg["accounts"].get(self.handle, {}).get("proxy")))
+            # Como o anyx: o Chrome lê o proxy do config.json na hora de abrir.
+            world.events.append(("open", self.handle, config.load()["accounts"].get(self.handle, {}).get("proxy")))
             if world.behavior.get((self.handle, "*")) == "expired":
                 raise SessionExpired("X showed the login wall")
+            with world.lock:
+                world.overlap = world.overlap or self.handle in world.live
+                world.live.add(self.handle)
+                world.max_live = max(world.max_live, len(world.live))
             return self
 
         def __exit__(self, *exc):
+            with world.lock:
+                world.live.discard(self.handle)
             world.events.append(("exit", self.handle))
             return False
 
@@ -118,6 +134,8 @@ def fake_anyx(world: World) -> dict[str, types.ModuleType]:
 
         def timeline(self, username, limit=20):
             world.events.append(("timeline", self.handle, username))
+            if world.delay:
+                time.sleep(world.delay)
             what = world.behavior.get((self.handle, username))
             if what == "429":
                 raise RateLimited("429 on UserTweets", reset=int((NOW + timedelta(minutes=20)).timestamp()))
@@ -139,7 +157,14 @@ def fake_anyx(world: World) -> dict[str, types.ModuleType]:
     vault.save = lambda handle, cookies: world.vault.__setitem__(handle, cookies)
     vault.load = lambda handle: world.vault.get(handle)
     config = types.ModuleType("anyx.config")
-    config.load = lambda: json.loads(json.dumps(world.cfg))
+
+    def load_config():
+        snapshot = json.loads(json.dumps(world.cfg))
+        if world.config_delay:
+            time.sleep(world.config_delay)
+        return snapshot
+
+    config.load = load_config
     config.save = lambda cfg: (world.cfg.clear(), world.cfg.update(cfg))
     browsers = types.ModuleType("anyx.browsers")
     browsers.__path__ = []
@@ -182,12 +207,18 @@ def w(tmp_path_factory):
         ])
         db.commit()
 
+    import itertools
+
+    ports = itertools.count(40001)
+
     class FakeRelay:
-        """Proxy do burner1: sobe sem rede; probe falha com world.proxy_dead."""
+        """Proxy do burner1: sobe sem rede; probe falha com world.proxy_dead. Como o de verdade, cada
+        leitura ganha uma porta nova (uma cópia velha do config.json aponta para porta errada)."""
 
         def __init__(self, upstream, timeout=20.0):
-            self.upstream, self.failures, self.url = upstream, [], "http://127.0.0.1:40001"
+            self.upstream, self.failures, self.url = upstream, [], f"http://127.0.0.1:{next(ports)}"
             world.events.append(("relay", upstream))
+            world.events.append(("relay_url", self.url))
 
         def probe(self):
             if world.proxy_dead:
@@ -205,6 +236,11 @@ def w(tmp_path_factory):
         mp.setattr(robo, "send_telegram", lambda message: world.sent.append(message) or True)
         mp.setattr(robo, "OFFLINE_STAMP", state / "alerta_banco")
         mp.setattr(robo, "LOCK_FILE", state / "robo.lock")
+        mp.setattr(robo, "READS_FILE", state / "leituras.json")
+        # Os testes abaixo seguem a ordem exata de uma rodada em sequência e sem descanso; o modo
+        # paralelo, o descanso e o limite do dia têm testes próprios no fim do arquivo.
+        mp.setenv("ROBO_WORKERS", "1")
+        mp.setenv("ROBO_COLLECTOR_REST_MIN", "0")
         mp.setattr(robo, "TIMELINE_RETRY_PAUSE", 0)
         mp.setattr(robo, "pause", lambda: world.pauses.append(1))
         mp.setattr(robo, "ProxyRelay", FakeRelay)
@@ -351,3 +387,101 @@ def test_manual_round_skips_benched_collector(w):
     assert len(b1) == 2 and len(set(b1)) == 1, "depois do castigo, o 2º par do burner1 é pulado"
     assert {h for h, _ in tl} == {"burner1", "burner2", "burner3"}
     w.behavior.clear()
+
+
+# ---- leituras em paralelo e proteção dos coletores ----
+
+def relay_urls(w):
+    return [e[1] for e in w.events if e[0] == "relay_url"]
+
+
+def due_round(w):
+    """Coleta automática ligada, intervalo vencido e todos os coletores livres e descansados."""
+    w.behavior.clear()
+    w.proxy_dead = False
+    w.sql("update collectors set is_active = true, paused_until = null, last_used_at = null")
+    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+    w.settings(robo_enabled=True, robo_interval_min=5, robo_run_requested_at=None)
+    w.max_live, w.overlap = 0, False
+    import robo
+    robo.READS_FILE.unlink(missing_ok=True)
+
+
+def test_parallel_round_reads_at_once_with_distinct_collectors(w, monkeypatch):
+    monkeypatch.setenv("ROBO_WORKERS", "4")
+    due_round(w)
+    w.delay = 0.3
+    w.run()
+    w.delay = 0.0
+    tl = w.timelines()
+    assert len(tl) == 3 and {h for h, _ in tl} == {"burner1", "burner2", "burner3"}
+    assert len({u for _, u in tl}) == 3, "cada conta uma vez"
+    assert w.max_live >= 2, "as leituras correram juntas"
+    assert not w.overlap, "nenhum coletor com dois navegadores ao mesmo tempo"
+    assert [e[2] for e in w.opens() if e[1] == "burner1"] == relay_urls(w), "burner1 sempre pelo proxy da leitura"
+    status, stats = w.last_beat()
+    assert status == "ok" and stats["contas"] == 3 and stats["em_paralelo"] == 3
+
+
+def test_proxy_never_lost_when_opening_in_parallel(w, monkeypatch):
+    """O config.json do anyx é um só: sem a trava, a gravação de um coletor apagava o proxy de outro
+    e aquele Chrome abria pelo IP do VPS. Com o arquivo lento, a corrida apareceria aqui."""
+    monkeypatch.setenv("ROBO_WORKERS", "4")
+    for _ in range(3):
+        due_round(w)
+        w.config_delay = 0.05
+        w.run()
+        w.config_delay = 0.0
+        burner1 = [e[2] for e in w.opens() if e[1] == "burner1"]
+        assert burner1 == relay_urls(w) and len(burner1) == 1, (burner1, relay_urls(w))
+
+
+def test_rest_keeps_recent_collectors_out_without_alert(w, monkeypatch):
+    monkeypatch.setenv("ROBO_WORKERS", "4")
+    monkeypatch.setenv("ROBO_COLLECTOR_REST_MIN", "10")
+    due_round(w)
+    w.sql("update collectors set last_used_at = now() - interval '3 minutes' where handle in ('burner1', 'burner2')")
+    w.sql("update collectors set last_used_at = now() - interval '30 minutes' where handle = 'burner3'")
+    w.run()
+    assert [e[1] for e in w.opens()] == ["burner3"], "só quem descansou 10 min"
+    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+    w.sent.clear()
+    w.run()
+    assert not w.opens() and not w.sent, "todos descansando: espera quieto, sem alerta"
+    assert w.last_beat()[1]["descansando"] == 3
+
+
+def test_daily_limit_stops_collector_and_alerts_once(w, monkeypatch):
+    import robo
+
+    monkeypatch.setenv("ROBO_WORKERS", "4")
+    monkeypatch.setenv("ROBO_COLLECTOR_DAILY_MAX", "2")
+    due_round(w)
+    w.sent.clear()
+    w.run()
+    w.sql("update collectors set last_used_at = null")
+    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+    w.run()
+    reads = robo.reads_today()
+    assert sorted(reads.values()) == [2, 2, 2]
+    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+    w.run()
+    assert not w.opens(), "limite do dia: nenhum coletor abre"
+    assert [m for m in w.sent if m.startswith("🧯")], "avisa que todos bateram o limite"
+    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+    before = len(w.sent)
+    w.run()
+    assert len(w.sent) == before, "o aviso do limite sai uma vez por dia"
+
+
+def test_manual_round_in_parallel_reads_everything(w, monkeypatch):
+    monkeypatch.setenv("ROBO_WORKERS", "4")
+    due_round(w)
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.delay = 0.2
+    w.run()
+    w.delay = 0.0
+    tl = w.timelines()
+    assert sorted(u for _, u in tl) == ["conta1", "conta2", "conta3", "conta4"]
+    assert not w.overlap and w.max_live >= 2
+    assert w.last_beat()[1]["manual"] is True
