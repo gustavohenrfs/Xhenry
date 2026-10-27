@@ -220,6 +220,7 @@ class DailyMetric(IntPK, Base):
         UniqueConstraint("account_id", "metric_date", name="uq_daily_metrics_account_date"),
         CheckConstraint("posts_count >= 0", name="ck_daily_metrics_posts"),
         Index("ix_daily_metrics_date", "metric_date"),
+        Index("ix_daily_metrics_collected", "collected_at"),
     )
 
     account_id: Mapped[int] = mapped_column(ForeignKey("x_accounts.id", ondelete="CASCADE"), nullable=False)
@@ -284,6 +285,7 @@ class TweetSample(IntPK, Base):
         CheckConstraint("weekday >= 0 AND weekday <= 6", name="ck_tweet_weekday"),
         Index("ix_tweet_samples_account_posted", "account_id", "posted_at"),
         Index("ix_tweet_samples_account_hour", "account_id", "hour_local"),
+        Index("ix_tweet_samples_collected", "collected_at"),
     )
 
     account_id: Mapped[int] = mapped_column(ForeignKey("x_accounts.id", ondelete="CASCADE"), nullable=False)
@@ -310,7 +312,11 @@ class TweetSample(IntPK, Base):
 
 class SyncRun(IntPK, Base):
     __tablename__ = "sync_runs"
-    __table_args__ = (Index("ix_sync_runs_started", "started_at"),)
+    __table_args__ = (
+        Index("ix_sync_runs_started", "started_at"),
+        # Último sinal de vida do robô (kind=tweets, account_id NULL), lido a cada minuto.
+        Index("ix_sync_runs_heartbeat", "kind", "account_id", "finished_at"),
+    )
 
     account_id: Mapped[int | None] = mapped_column(
         ForeignKey("x_accounts.id", ondelete="SET NULL"), nullable=True, index=True
@@ -359,7 +365,10 @@ class PushSubscription(IntPK, Base):
 
 class AlertSent(IntPK, Base):
     __tablename__ = "alerts_sent"
-    __table_args__ = (UniqueConstraint("dedupe_key", name="uq_alerts_dedupe"),)
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_alerts_dedupe"),
+        Index("ix_alerts_sent_kind_id", "kind", "id"),
+    )
 
     dedupe_key: Mapped[str] = mapped_column(String(160), nullable=False)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)

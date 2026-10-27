@@ -221,3 +221,48 @@ def test_heatmap_averages_by_weekday_and_hour(client, folder):
     assert len(grid) == 7 and all(len(row) == 24 for row in grid)
     assert grid[now.weekday()][now.hour] == 75, "a1 e a2: (100 + 50) / 2"
     assert sum(value is not None for row in grid for value in row) == 2
+
+
+def get_raw(client, period, folder_id, headers=None):
+    return client.get(f"/api/dashboard?period={period}&folder_id={folder_id}", headers=headers or {})
+
+
+def test_cache_sees_robot_writes_and_answers_304(client, folder):
+    """O cache não segura dado velho: o robô grava direto no banco (collected_at novo) e já aparece."""
+    first = get_raw(client, "today", folder["id"])
+    etag = first.headers["etag"]
+    assert get_raw(client, "today", folder["id"], {"If-None-Match": etag}).status_code == 304
+    now = datetime.now(BR).replace(microsecond=0)
+    with SessionLocal() as db:  # como o robo.py: sem passar pela API
+        db.add(TweetSample(
+            account_id=folder["a"], tweet_id=f"cache{uuid4().hex[:6]}", posted_at=now.astimezone(timezone.utc),
+            timezone_used="America/Sao_Paulo", hour_local=now.hour, weekday=now.weekday(), view_count=7,
+            collected_at=datetime.now(timezone.utc) + timedelta(seconds=5),
+        ))
+        db.commit()
+    second = get_raw(client, "today", folder["id"], {"If-None-Match": etag})
+    assert second.status_code == 200
+    assert second.json()["kpis"]["views"] == first.json()["kpis"]["views"] + 7
+
+
+def test_cache_forgets_on_api_write(client, folder):
+    before = get_raw(client, "7d", folder["id"]).json()
+    with SessionLocal() as db:  # muda algo que a versão dos dados não enxerga (nem collected_at nem sync_runs)
+        db.get(XAccount, folder["b"]).last_health_status = HealthStatus.HEALTHY
+        db.commit()
+    assert get_raw(client, "7d", folder["id"]).json() == before, "sem escrita pela API, continua no cache"
+    client.post("/api/login", json={"email": "ninguem@x.com", "senha": "errada123"})  # qualquer escrita em /api/
+    after = get_raw(client, "7d", folder["id"]).json()
+    assert after["kpis"]["healthy"] == before["kpis"]["healthy"] + 1
+    with SessionLocal() as db:
+        db.get(XAccount, folder["b"]).last_health_status = HealthStatus.SEARCH_BAN
+        db.commit()
+    from app import cache
+    cache.forget()
+
+
+def test_total_charts_start_at_first_post(client, folder):
+    data = get_raw(client, "total", folder["id"]).json()
+    assert data["growth"]["mode"] == "day"
+    assert len(data["growth"]["labels"]) == 14, "posts de ontem e hoje: o mínimo de 14 dias, não 3650"
+    assert len(data["spark"]) == 14

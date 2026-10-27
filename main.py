@@ -15,8 +15,10 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 import app.models  # registra tabelas no metadata
+from app.cache import ForgetOnWrite
 from app.config import ROOT
 from app.database import Base, SessionLocal, engine, load_env_file
 from app.routers import accounts, auth, checks, cloaker, collectors, pages, push, robo
@@ -45,9 +47,26 @@ async def lifespan(_app: FastAPI):
             await watcher
 
 
+class CachedStatic(StaticFiles):
+    """/static com cache no navegador: com ?v= no link o arquivo nunca muda (troca o v para atualizar),
+    então fica guardado por um ano; sem ?v= (imagens), um dia."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            versioned = b"v=" in scope.get("query_string", b"")
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable" if versioned else "public, max-age=86400"
+            )
+        return response
+
+
 _docs = None if os.getenv("APP_ENV") == "production" else "/docs"
 app = FastAPI(title="XHenry", version="1.0.0", lifespan=lifespan, docs_url=_docs, redoc_url=None)
-app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+app.mount("/static", CachedStatic(directory=ROOT / "static"), name="static")
+# JSON, HTML, JS e CSS vão comprimidos (o zip do Cloaker e as imagens ficam de fora).
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(ForgetOnWrite)
 
 app.include_router(auth.router)
 app.include_router(accounts.router)

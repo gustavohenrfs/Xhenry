@@ -16,7 +16,10 @@ if (window.Chart) {
   Chart.defaults.color = "#b39ab4";
   Chart.defaults.borderColor = "rgba(255,46,200,.12)";
   Chart.defaults.font.family = "Outfit, sans-serif";
-  Chart.defaults.animation.duration = 700;
+  Chart.defaults.animation.duration = 450;
+  Chart.defaults.animation.easing = "easeOutCubic";
+  // As fontes chegam depois do primeiro desenho: mede os rótulos de novo (senão eles ficam inclinados).
+  if (document.fonts) document.fonts.ready.then(() => [lineChart, barChart, mixChart].forEach((chart) => chart && chart.update("none")));
 }
 function num(value) { return value === null || value === undefined ? "—" : fmt.format(value); }
 function toast(message) {
@@ -53,6 +56,7 @@ function sessionExpired() {
 }
 function logout() {
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem("dash_snapshot");
   location.reload();
 }
 function showAuth(on) {
@@ -392,7 +396,7 @@ function renderMix(kpis) {
     cutout: "72%",
     plugins: { legend: { display: false }, tooltip: { enabled: parts.length > 0 } }
   };
-  if (mixChart) { mixChart.data = mixData; mixChart.options = options; mixChart.update("none"); }
+  if (mixChart) { mixChart.data = mixData; mixChart.options = options; mixChart.update(); }
   else mixChart = new Chart(document.getElementById("mix-chart"), { type: "doughnut", data: mixData, options });
 }
 function renderTopPost(post) {
@@ -663,7 +667,8 @@ function renderGrowth(data) {
       y1: { beginAtZero: true, position: "right", grid: { display: false }, ticks: { precision: 0 }, suggestedMax: Math.max(...g.posts, 1) * 3, display: false }
     }
   };
-  if (lineChart) { lineChart.data = { labels, datasets }; lineChart.options = options; lineChart.update("none"); }
+  // Atualiza no lugar e anima do valor antigo para o novo (sem recriar o gráfico).
+  if (lineChart) { lineChart.data = { labels, datasets }; lineChart.options = options; lineChart.update(); }
   else lineChart = new Chart(document.getElementById("line-chart"), { type: "line", data: { labels, datasets }, options });
 }
 function renderCharts(data) {
@@ -677,7 +682,7 @@ function renderCharts(data) {
     ]
   };
   // Atualiza os gráficos no lugar (sem destruir/recriar), para não piscar no auto-refresh.
-  if (barChart) { barChart.data = barData; barChart.update("none"); }
+  if (barChart) { barChart.data = barData; barChart.update(); }
   else barChart = new Chart(document.getElementById("bar-chart"), { type: "bar", data: barData, options: chartOptions() });
 }
 // Top 3 horários do build_suggestions (vem junto no /api/dashboard, com o mesmo período e pasta).
@@ -908,36 +913,100 @@ function renderLastCollect(iso) {
   el.textContent = "Última coleta: " + stamp + " (" + ago + ")";
   if (mins > 90) el.classList.add("text-amber-300");
 }
+// Dashboard na hora: cada período já visto fica em memória (dashCache) e aparece assim que é
+// escolhido, enquanto a versão nova chega por trás; o de "Hoje" também fica salvo no aparelho
+// (DASH_SNAPSHOT_KEY) para o painel abrir já preenchido. Depois da primeira carga os outros
+// períodos são buscados com o navegador ocioso.
+const DASH_SNAPSHOT_KEY = "dash_snapshot";
+const PREFETCH_PERIODS = ["yesterday", "7d", "30d", "3m", "1y", "total"];
+const dashCache = new Map();
 let loadSeq = 0;
 let loadInflight = false;
 let lastSig = "";
+let prefetchedFor;                          // pasta já pré-carregada (null = todas; undefined = nenhuma ainda)
+let sideLoadedAt = 0;
+function dashKey(period, folderId) { return period + "|" + (folderId || ""); }
+function dashQuery(period, folderId) {
+  const query = new URLSearchParams({ period });
+  if (folderId) query.set("folder_id", String(folderId));
+  return "/api/dashboard?" + query.toString();
+}
+function renderDashboard(data, sig, swap) {
+  if (sig === lastSig) return;              // nada mudou: não mexe no DOM (zero flicker)
+  lastSig = sig;
+  state.data = data;
+  if (swap) {                               // troca de período/pasta: os números entram com um fade curto
+    const pane = document.getElementById("pane-dashboard");
+    pane.classList.remove("dash-swap");
+    void pane.offsetWidth;
+    pane.classList.add("dash-swap");
+  }
+  renderLastCollect(data.last_collected_at);
+  document.getElementById("banner").classList.add("hidden");
+  document.getElementById("range-label").textContent = data.start + " → " + data.end;
+  renderKpis(data.kpis);
+  renderTopPost(data.top_post);
+  renderRanking(data.top_posts);
+  renderCharts(data);
+  renderSuggestions(data.suggestions);
+  renderAccounts(data.accounts);
+  renderFolders(data.folders);
+  renderOpsView();
+}
+function rememberDash(period, folderId, data) {
+  const sig = JSON.stringify(data);
+  dashCache.set(dashKey(period, folderId), { data, sig });
+  if (period === "today" && !folderId) {
+    try { localStorage.setItem(DASH_SNAPSHOT_KEY, sig); } catch { /* cheio ou bloqueado: só não guarda */ }
+  }
+  return sig;
+}
+// Abre o painel com o último "Hoje" salvo, antes de qualquer resposta do servidor.
+function paintSnapshot() {
+  let raw = null;
+  try { raw = localStorage.getItem(DASH_SNAPSHOT_KEY); } catch { return; }
+  if (!raw || state.period !== "today" || state.folderId) return;
+  try {
+    const data = JSON.parse(raw);
+    dashCache.set(dashKey("today", null), { data, sig: raw });
+    renderDashboard(data, raw);
+  } catch { /* snapshot velho ou corrompido: espera o servidor */ }
+}
+function prefetchPeriods() {
+  const folder = state.folderId || null;
+  if (prefetchedFor === folder) return;
+  prefetchedFor = folder;
+  const idle = window.requestIdleCallback ? (fn) => requestIdleCallback(fn, { timeout: 2000 }) : (fn) => setTimeout(fn, 400);
+  idle(async () => {
+    for (const period of PREFETCH_PERIODS) {
+      if (document.hidden || (state.folderId || null) !== folder) return;
+      if (dashCache.has(dashKey(period, folder))) continue;
+      try { rememberDash(period, folder, await api(dashQuery(period, folder))); } catch { return; }
+    }
+  });
+}
 async function load({ silent = false } = {}) {
   if (silent && loadInflight) return;       // auto-refresh nunca empilha requisições
   const seq = ++loadSeq;
   loadInflight = true;
-  const query = new URLSearchParams({ period: state.period });
-  if (state.folderId) query.set("folder_id", String(state.folderId));
+  const period = state.period;
+  const folderId = state.folderId || null;
+  const cached = dashCache.get(dashKey(period, folderId));
+  if (cached && !silent) renderDashboard(cached.data, cached.sig, true);  // na hora; a versão nova vem já já
   try {
-    const data = await api("/api/dashboard?" + query.toString());
+    const data = await api(dashQuery(period, folderId));
+    const sig = rememberDash(period, folderId, data);
     if (seq !== loadSeq) return;            // chegou uma resposta mais nova: descarta esta
-    loadHealth();                           // rotas com login, fora da assinatura do dashboard
-    loadAlerts();
-    checkViral();
+    // Rotas com login que não dependem do período: no máximo uma vez a cada 30 s, não a cada clique.
+    if (Date.now() - sideLoadedAt > 30000) {
+      sideLoadedAt = Date.now();
+      loadHealth();
+      loadAlerts();
+      checkViral();
+    }
     renderLastCollect(data.last_collected_at);
-    const sig = JSON.stringify(data);
-    if (silent && sig === lastSig) return;  // nada mudou: não mexe no DOM (zero flicker)
-    lastSig = sig;
-    state.data = data;
-    document.getElementById("banner").classList.add("hidden");
-    document.getElementById("range-label").textContent = data.start + " → " + data.end;
-    renderKpis(data.kpis);
-    renderTopPost(data.top_post);
-    renderRanking(data.top_posts);
-    renderCharts(data);
-    renderSuggestions(data.suggestions);
-    renderAccounts(data.accounts);
-    renderFolders(data.folders);
-    renderOpsView();
+    renderDashboard(data, sig, !silent && !cached && lastSig !== "");
+    if (!silent) prefetchPeriods();
   } catch (error) {
     if (!silent) toast(error.message || "Falha ao carregar.");
   } finally {
@@ -1734,13 +1803,33 @@ const cropModal = document.getElementById("crop-modal");
 const cropImage = document.getElementById("crop-image");
 const cropCancel = document.getElementById("crop-cancel");
 const cropConfirm = document.getElementById("crop-confirm");
+// O Cropper só baixa quando alguém escolhe uma foto (fora da abertura do painel).
+const CROPPER_BASE = "https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/";
+let cropperReady = null;
+function loadCropper() {
+  if (window.Cropper) return Promise.resolve();
+  if (!cropperReady) {
+    cropperReady = new Promise((resolve, reject) => {
+      const css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = CROPPER_BASE + "cropper.min.css";
+      const js = document.createElement("script");
+      js.src = CROPPER_BASE + "cropper.min.js";
+      js.onload = resolve;
+      js.onerror = () => { cropperReady = null; reject(new Error("Não carregou o recorte da foto. Tente de novo.")); };
+      document.head.append(css, js);
+    });
+  }
+  return cropperReady;
+}
 
 if (profilePhotoInput) {
   profilePhotoInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
+      try { await loadCropper(); } catch (error) { toast(error.message); return; }
       cropImage.src = ev.target.result;
       cropModal.classList.remove("off");
       if (cropper) cropper.destroy();
@@ -2055,29 +2144,33 @@ document.addEventListener("click", (e) => {
 });
 
 async function boot() {
-  await loadConfig();
-  setAuthMode("login");
+  const configReady = loadConfig();
   // Link do Telegram: /#reset=<token>. No hash para o token não ir ao servidor nem aos logs.
   const reset = location.hash.match(/^#reset=([\w\-.]+)$/);
-  if (reset) {
-    state.resetToken = reset[1];
-    setAuthMode("reset");
-    showAuth(true);
-    return;
-  }
-  if (!token()) {
+  if (reset || !token()) {
+    await configReady;
+    setAuthMode("login");
+    if (reset) {
+      state.resetToken = reset[1];
+      setAuthMode("reset");
+    }
     showAuth(true);
     return;
   }
   if (tokenExpired()) {
+    await configReady;
     sessionExpired();
     return;
   }
+  // Logado: o painel aparece já com o último Dashboard salvo, e usuário, config e dados chegam em
+  // paralelo (antes eram três esperas em fila).
+  showAuth(false);
+  setTab("dashboard");
+  paintSnapshot();
+  configReady.then(() => { if (!state.resetToken) setAuthMode("login"); });
   try {
-    paintUser(await api("/api/me"));
-    showAuth(false);
-    setTab("dashboard");
-    await load();
+    const [user] = await Promise.all([api("/api/me"), load()]);
+    paintUser(user);
   } catch (err) {
     if (err.message === SESSION_EXPIRED) return;
     localStorage.removeItem(TOKEN_KEY);

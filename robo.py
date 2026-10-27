@@ -568,6 +568,9 @@ def recompute_today(cur, account_id: int, day) -> None:
         FROM tweet_samples
         WHERE account_id = %s
           AND (posted_at AT TIME ZONE 'America/Sao_Paulo')::date = %s
+          -- faixa larga em UTC só para o índice (account_id, posted_at) entrar; o filtro exato é o de cima
+          AND posted_at >= %s::date - INTERVAL '1 day'
+          AND posted_at < %s::date + INTERVAL '2 days'
         ON CONFLICT (account_id, metric_date) DO UPDATE SET
             posts_count = EXCLUDED.posts_count,
             likes = EXCLUDED.likes,
@@ -579,7 +582,7 @@ def recompute_today(cur, account_id: int, day) -> None:
             impressions = EXCLUDED.impressions,
             collected_at = NOW()
         """,
-        (account_id, day, account_id, day),
+        (account_id, day, account_id, day, day, day),
     )
 
 

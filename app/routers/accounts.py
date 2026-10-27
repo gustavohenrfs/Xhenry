@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.cache import cached_json
 from app.database import get_db
 from app.models import DEFAULT_TZ, Collector, Folder, FolderKind, XAccount
 from app.routers.auth import current_user
@@ -207,11 +208,17 @@ def refresh_all(
 
 @router.get("/api/dashboard")
 def get_dashboard(
+    request: Request,
     period: str = Query(default="7d"),
     folder_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    return dashboard(db, period, folder_id)
+) -> Response:
+    # Cache em memória (app/cache.py) + ETag: o auto-refresh sem novidade volta 304, sem corpo.
+    body, etag = cached_json(db, ("dashboard", period, folder_id), lambda: dashboard(db, period, folder_id))
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
 
 
 @router.get("/api/suggestions")

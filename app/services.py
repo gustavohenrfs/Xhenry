@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from itertools import accumulate
 from typing import Any
 from urllib.parse import urlencode
@@ -84,6 +84,17 @@ def ensure_user_auth_columns() -> None:
             if column not in setting_cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE app_settings ADD COLUMN {column} {ddl}"))
+    # Índices novos em tabelas que já existem (create_all também não cria esses).
+    indexes = {
+        "ix_tweet_samples_collected": "tweet_samples (collected_at)",
+        "ix_daily_metrics_collected": "daily_metrics (collected_at)",
+        "ix_alerts_sent_kind_id": "alerts_sent (kind, id)",
+        "ix_sync_runs_heartbeat": "sync_runs (kind, account_id, finished_at)",
+    }
+    for name, target in indexes.items():
+        if target.split(" ")[0] in tables:
+            with engine.begin() as conn:
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {target}"))
     if "users" not in tables:
         return
     cols = {col["name"] for col in insp.get_columns("users")}
@@ -615,27 +626,27 @@ def check_handle(db: Session, handle: str, folder_id: int | None) -> dict[str, A
 
 
 def account_payload(db: Session, account: XAccount, start: date, end: date) -> dict[str, Any]:
-    tz = zone(account.timezone)
     latest = db.scalar(
         select(DailyMetric)
         .where(DailyMetric.account_id == account.id)
         .order_by(DailyMetric.metric_date.desc())
         .limit(1)
     )
-    samples = [
-        row
-        for row in db.scalars(select(TweetSample).where(TweetSample.account_id == account.id)).all()
-        if start <= as_utc(row.posted_at).astimezone(tz).date() <= end
-    ]
-    impressions = sum(int(row.impression_count or row.view_count or 0) for row in samples) if samples else None
-    views = sum(int(row.view_count or 0) for row in samples)
-    status = account.last_health_status.value if account.last_health_status else None
     last_check = db.scalar(
         select(HealthCheck)
         .where(HealthCheck.account_id == account.id)
         .order_by(HealthCheck.checked_at.desc())
         .limit(1)
     )
+    samples = [row for _, row, day in load_samples(db, [account]) if start <= day <= end]
+    return account_card(account, samples, latest, last_check.detail if last_check else None)
+
+
+def account_card(account: XAccount, samples: list, latest: DailyMetric | None, detail: str | None) -> dict[str, Any]:
+    """Cartão de uma conta a partir dos posts do período já carregados (sem consultar o banco)."""
+    impressions = sum(int(row.impression_count or row.view_count or 0) for row in samples) if samples else None
+    views = sum(int(row.view_count or 0) for row in samples)
+    status = account.last_health_status.value if account.last_health_status else None
     checked_at = as_utc(account.last_health_checked_at).isoformat() if account.last_health_checked_at else None
     return {
         "id": account.id,
@@ -647,7 +658,7 @@ def account_payload(db: Session, account: XAccount, start: date, end: date) -> d
         "profile_image_url": account.profile_image_url,
         "status": status,
         "status_label": STATUS_LABELS.get(status or "", "Sem verificação"),
-        "detail": last_check.detail if last_check else None,
+        "detail": detail,
         "checked_at": checked_at,
         "followers": latest.followers_count if latest else None,
         "following": latest.following_count if latest else None,
@@ -716,15 +727,23 @@ def heatmap(samples: list[TweetSample]) -> list[list[int | None]]:
 
 
 def build_suggestions(db: Session, accounts: list[XAccount], start: date, end: date) -> dict[str, Any]:
-    if not accounts:
-        return suggestion_payload([], "period") | {"heatmap": heatmap([])}
-    ids = [account.id for account in accounts]
-    all_rows = list(db.scalars(select(TweetSample).where(TweetSample.account_id.in_(ids))).all())
+    return suggestions_from([row for _, row, _ in load_samples(db, accounts)], start, end)
+
+
+def suggestions_from(all_rows: list, start: date, end: date, everything=None) -> dict[str, Any]:
+    """Melhores horários e mapa de calor; o dia de cada post vem do fuso gravado no próprio post.
+
+    all_rows precisa cobrir o período. Com menos de 3 posts nele a sugestão usa o histórico todo:
+    everything() o carrega quando all_rows é só uma janela.
+    """
+    zones: dict[str | None, ZoneInfo] = {}
     in_period = []
     for row in all_rows:
-        local_day = as_utc(row.posted_at).astimezone(zone(row.timezone_used)).date()
-        if start <= local_day <= end:
+        tz = zones.get(row.timezone_used) or zones.setdefault(row.timezone_used, zone(row.timezone_used))
+        if start <= as_utc(row.posted_at).astimezone(tz).date() <= end:
             in_period.append(row)
+    if len(in_period) < 3 and everything is not None:
+        all_rows = everything()
     rows, basis = (in_period, "period") if len(in_period) >= 3 else (all_rows, "all" if all_rows else "period")
     return suggestion_payload(rows, basis) | {"heatmap": heatmap(rows)}
 
@@ -760,17 +779,48 @@ SAMPLE_FIELDS = (
 )
 
 
-def samples_in(db: Session, accounts: list[XAccount], start: date, end: date) -> list[tuple[XAccount, TweetSample]]:
-    """Posts publicados entre start e end (dia no fuso de cada conta), com a conta de cada um."""
+# Só as colunas que o dashboard usa: linhas leves em vez de objetos do ORM (bem mais rápido com o
+# histórico grande).
+SAMPLE_COLUMNS = (
+    TweetSample.account_id,
+    TweetSample.tweet_id,
+    TweetSample.posted_at,
+    TweetSample.timezone_used,
+    TweetSample.hour_local,
+    TweetSample.weekday,
+    TweetSample.text_preview,
+    TweetSample.view_count,
+    TweetSample.impression_count,
+    TweetSample.like_count,
+    TweetSample.retweet_count,
+    TweetSample.reply_count,
+    TweetSample.quote_count,
+    TweetSample.bookmark_count,
+)
+Loaded = list[tuple[XAccount, Any, date]]
+
+
+def load_samples(db: Session, accounts: list[XAccount], since: date | None = None) -> Loaded:
+    """Posts das contas numa consulta só, cada um com a conta e o dia local (fuso da conta).
+
+    Com since, só a partir desse dia local (um dia de folga no UTC cobre qualquer fuso).
+    """
     by_id = {account.id: account for account in accounts}
     if not by_id:
         return []
-    pairs = []
-    for row in db.scalars(select(TweetSample).where(TweetSample.account_id.in_(by_id))).all():
-        account = by_id[row.account_id]
-        if start <= as_utc(row.posted_at).astimezone(zone(account.timezone)).date() <= end:
-            pairs.append((account, row))
-    return pairs
+    zones = {account.id: zone(account.timezone) for account in accounts}
+    query = select(*SAMPLE_COLUMNS).where(TweetSample.account_id.in_(by_id)).order_by(TweetSample.id)
+    if since is not None:
+        query = query.where(TweetSample.posted_at >= datetime.combine(since - timedelta(days=1), time.min, timezone.utc))
+    return [
+        (by_id[row.account_id], row, as_utc(row.posted_at).astimezone(zones[row.account_id]).date())
+        for row in db.execute(query)
+    ]
+
+
+def within(loaded: Loaded, start: date, end: date) -> list[tuple[XAccount, Any]]:
+    """Posts publicados entre start e end (dia no fuso de cada conta), com a conta de cada um."""
+    return [(account, row) for account, row, day in loaded if start <= day <= end]
 
 
 def window_totals(pairs: list[tuple[XAccount, TweetSample]]) -> dict[str, Any]:
@@ -798,16 +848,20 @@ def followers_gained(db: Session, accounts: list[XAccount], start: date, end: da
     Sem leitura antes de start, a base é a primeira leitura dentro do período.
     """
     total = None
-    for account in accounts:
-        rows = db.execute(
-            select(DailyMetric.metric_date, DailyMetric.followers_count)
-            .where(
-                DailyMetric.account_id == account.id,
-                DailyMetric.followers_count.is_not(None),
-                DailyMetric.metric_date <= end,
-            )
-            .order_by(DailyMetric.metric_date)
-        ).all()
+    if not accounts:
+        return None
+    by_account: dict[int, list[tuple[date, int]]] = {}
+    for account_id, day, count in db.execute(
+        select(DailyMetric.account_id, DailyMetric.metric_date, DailyMetric.followers_count)
+        .where(
+            DailyMetric.account_id.in_([account.id for account in accounts]),
+            DailyMetric.followers_count.is_not(None),
+            DailyMetric.metric_date <= end,
+        )
+        .order_by(DailyMetric.account_id, DailyMetric.metric_date)
+    ):
+        by_account.setdefault(account_id, []).append((day, count))
+    for rows in by_account.values():
         inside = [count for day, count in rows if day >= start]
         if not inside:
             continue
@@ -918,8 +972,21 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     if folder_id is not None and all(folder.id != folder_id for folder in folders):
         raise HTTPException(404, "Pasta não encontrada.")
     accounts = selected_accounts(db, folder_id)
-    cards = [account_payload(db, account, start, end) for account in accounts]
     ids = [account.id for account in accounts]
+    # Uma consulta só, da janela que o cartão mais antigo precisa (período anterior ou a linha de
+    # 14 dias) até o fim; cada janela abaixo é só um filtro em memória.
+    span = (end - start).days + 1
+    since = min(start - timedelta(days=span), end - timedelta(days=SPARK_DAYS - 1))
+    loaded = load_samples(db, accounts, since)
+    pairs = within(loaded, start, end)
+    period_rows: dict[int, list] = {}
+    for account, row in pairs:
+        period_rows.setdefault(account.id, []).append(row)
+    latest, details = latest_metrics(db, ids), last_check_details(db, ids)
+    cards = [
+        account_card(account, period_rows.get(account.id, []), latest.get(account.id), details.get(account.id))
+        for account in accounts
+    ]
     last_collected = None
     if ids:
         stamps = [
@@ -928,21 +995,23 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         ]
         stamps = [as_utc(item) for item in stamps if item is not None]
         last_collected = max(stamps).isoformat() if stamps else None
+    # "Total" começa 10 anos atrás: os gráficos começam no primeiro post (os números não mudam).
+    chart_start = start
+    if period.strip().lower() == "total" and loaded:
+        # pelo menos 14 dias: com um dia só o gráfico viraria o de hora em hora
+        chart_start = max(start, min(min(day for _, _, day in loaded), end - timedelta(days=SPARK_DAYS - 1)))
     by_day: dict[date, dict[str, Any]] = {}
-    day = start
+    day = chart_start
     while day <= end:
         by_day[day] = {"date": day.isoformat(), "views": 0, "impressions": None, "posts": 0, "_imps": []}
         day += timedelta(days=1)
-    for account in accounts:
-        tz = zone(account.timezone)
-        for sample in db.scalars(select(TweetSample).where(TweetSample.account_id == account.id)).all():
-            local_day = as_utc(sample.posted_at).astimezone(tz).date()
-            if local_day not in by_day:
-                continue
-            bucket = by_day[local_day]
-            bucket["views"] += int(sample.view_count or 0)
-            bucket["posts"] += 1
-            bucket["_imps"].append(sample.impression_count)
+    for _, sample, local_day in loaded:
+        bucket = by_day.get(local_day)
+        if bucket is None:
+            continue
+        bucket["views"] += int(sample.view_count or 0)
+        bucket["posts"] += 1
+        bucket["_imps"].append(sample.impression_count)
     series = []
     for key in sorted(by_day):
         bucket = by_day[key]
@@ -950,10 +1019,17 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         if imps and all(item is not None for item in imps):
             bucket["impressions"] = sum(int(item or 0) for item in imps)
         series.append(bucket)
+    # Pastas: só contagens pelo status gravado na conta, todas as contas numa consulta.
+    statuses: dict[int, list[str | None]] = {folder.id: [] for folder in folders}
+    for folder_ref, status in db.execute(
+        select(XAccount.folder_id, XAccount.last_health_status).where(
+            XAccount.folder_id.in_(list(statuses)), XAccount.is_archived.is_(False)
+        )
+    ):
+        statuses[folder_ref].append(status.value if status else None)
     folder_cards = []
     for folder in folders:
-        live = [account for account in folder.accounts if not account.is_archived]
-        members = [account_payload(db, account, start, end) for account in live]
+        members = statuses[folder.id]
         folder_cards.append(
             {
                 "id": folder.id,
@@ -961,10 +1037,10 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
                 "kind": folder.kind.value,
                 "color": folder.color,
                 "description": folder.description,
-                "accounts": len(live),
-                "healthy": sum(1 for card in members if card["status"] == "healthy"),
-                "search_ban": sum(1 for card in members if card["status"] == "search_ban"),
-                "ghost_ban": sum(1 for card in members if card["status"] == "ghost_ban"),
+                "accounts": len(members),
+                "healthy": members.count("healthy"),
+                "search_ban": members.count("search_ban"),
+                "ghost_ban": members.count("ghost_ban"),
             }
         )
     followers = [card["followers"] for card in cards if card["followers"] is not None]
@@ -973,21 +1049,20 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     retweets_values = [card.get("retweets") for card in cards if card.get("retweets") is not None]
     replies_values = [card.get("replies") for card in cards if card.get("replies") is not None]
     impression_values = [card["impressions"] for card in cards if card["impressions"] is not None]
-    pairs = samples_in(db, accounts, start, end)
     current = window_totals(pairs)
     ranking = top_posts(pairs, current["views"])
     today = datetime.now(ZoneInfo(DEFAULT_TZ)).date()
     today_views = sum(
         int(row.view_count or 0)
-        for _, row in (pairs if start <= today <= end and start == end else samples_in(db, accounts, today, today))
+        for _, row in (pairs if start <= today <= end and start == end else within(loaded, today, today))
     )
     # Linha do cartão de Views: o período, ou os últimos 14 dias quando o período é curto demais.
-    spark_start = min(start, end - timedelta(days=SPARK_DAYS - 1))
+    spark_start = min(chart_start, end - timedelta(days=SPARK_DAYS - 1))
     spark = {spark_start + timedelta(days=offset): 0 for offset in range((end - spark_start).days + 1)}
     # Cada conta: mini-linha dos últimos 14 dias.
     mini_start = end - timedelta(days=SPARK_DAYS - 1)
     mini = {account.id: [0] * SPARK_DAYS for account in accounts}
-    for account, row in samples_in(db, accounts, spark_start, end) if spark_start < start else pairs:
+    for account, row in within(loaded, spark_start, end) if spark_start < start else pairs:
         day = local_posted(account, row).date()
         spark[day] += int(row.view_count or 0)
         if day >= mini_start:
@@ -996,7 +1071,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     previous = prev_pairs = None
     if compare_label:
         span = (end - start).days + 1
-        prev_pairs = samples_in(db, accounts, start - timedelta(days=span), start - timedelta(days=1))
+        prev_pairs = within(loaded, start - timedelta(days=span), start - timedelta(days=1))
         previous = window_totals(prev_pairs)
     prev_views: dict[int, int] = {}
     for account, row in prev_pairs or []:
@@ -1036,7 +1111,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         "top_posts": ranking,
         "top_post": ranking[0] if ranking else None,
         "goal": {"target": get_settings(db).impression_goal, "today": today_views},
-        "growth": growth_payload(pairs, prev_pairs, start, end),
+        "growth": growth_payload(pairs, prev_pairs, chart_start, end),
         "folders": folder_cards,
         "accounts": cards,
         "series": series,
@@ -1048,8 +1123,46 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             }
             for card in cards
         ],
-        "suggestions": build_suggestions(db, accounts, start, end),
+        "suggestions": suggestions_from(
+            [row for _, row, _ in loaded], start, end, lambda: [row for _, row, _ in load_samples(db, accounts)]
+        ),
     }
+
+
+def latest_metrics(db: Session, ids: list[int]) -> dict[int, DailyMetric]:
+    """Leitura mais recente de cada conta (seguidores), todas numa consulta."""
+    if not ids:
+        return {}
+    newest = (
+        select(DailyMetric.account_id, func.max(DailyMetric.metric_date).label("day"))
+        .where(DailyMetric.account_id.in_(ids))
+        .group_by(DailyMetric.account_id)
+        .subquery()
+    )
+    rows = db.scalars(
+        select(DailyMetric).join(
+            newest, (DailyMetric.account_id == newest.c.account_id) & (DailyMetric.metric_date == newest.c.day)
+        )
+    )
+    return {row.account_id: row for row in rows}
+
+
+def last_check_details(db: Session, ids: list[int]) -> dict[int, str | None]:
+    """Texto da última verificação de saúde de cada conta, todas numa consulta."""
+    if not ids:
+        return {}
+    newest = (
+        select(HealthCheck.account_id, func.max(HealthCheck.checked_at).label("at"))
+        .where(HealthCheck.account_id.in_(ids))
+        .group_by(HealthCheck.account_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(HealthCheck.account_id, HealthCheck.detail)
+        .join(newest, (HealthCheck.account_id == newest.c.account_id) & (HealthCheck.checked_at == newest.c.at))
+        .order_by(HealthCheck.id)
+    )
+    return {account_id: detail for account_id, detail in rows}
 
 
 def archived_payload(db: Session) -> list[dict[str, Any]]:

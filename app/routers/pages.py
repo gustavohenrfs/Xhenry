@@ -31,7 +31,8 @@ def avatar_file(filename: str) -> FileResponse:
 def root() -> FileResponse:
     if not INDEX.is_file():
         raise HTTPException(500, "index.html não está ao lado do main.py.")
-    return FileResponse(INDEX, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+    # no-cache: o navegador sempre confere, mas recebe 304 sem corpo quando nada mudou.
+    return FileResponse(INDEX, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/sw.js")
