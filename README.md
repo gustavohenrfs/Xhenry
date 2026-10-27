@@ -15,18 +15,28 @@ As métricas dos tweets são coletadas pelo `robo.py` (na raiz deste repositóri
 - **Sininho** (canto superior direito): os alertas de views em quatro níveis (Post viralizando, POST BOMBANDO, 100K e 1M), com a conta, o texto, as views de agora e o link. Os mesmos níveis vão para o Telegram. Clicar no sino pede permissão para notificar e inscreve o aparelho no Web Push: cada alerta novo vira notificação com o logo no Windows e no celular, mesmo com o painel fechado (precisa de HTTPS). O botão Testar manda uma notificação de teste para o aparelho.
 - **Instalar o app**: o botão Instalar no topo põe o XHenry na tela inicial do celular ou como app no computador. No iPhone, pelo Safari: Compartilhar → Adicionar à Tela de Início (as notificações do iPhone só funcionam com o app instalado).
 - Salvamentos aparecem depois que o `robo.py` atualizado coletar (antes ele gravava sempre 0).
+- **Ao vivo:** o painel recebe um aviso do servidor (`/api/live`) quando o robô grava dados, chega um alerta ou um coletor muda, e atualiza só a parte que mudou, sem F5. O topo mostra "ao vivo"; os cartões que mudaram ganham uma passada de laser.
+- **Gaveta da conta:** clicar num cartão de conta abre o gráfico de views e seguidores por dia, os melhores posts e o histórico de verificações, com Verificar agora e Abrir no X.
+- **Contas:** busca por nome, @ ou pasta e ordem por Views, Status, Pasta ou Nome; faixa na cor da pasta.
+- **Busca rápida** (`Ctrl+K` ou `/`): abas, ações, contas e coletores. **Atalhos:** `1` a `7` trocam de aba, `T` troca o tema, `R` atualiza os dados, `?` lista os atalhos.
+- **Tema claro e escuro** (botão no topo; segue o sistema até você escolher). Barra lateral recolhida no computador (abre ao passar o mouse); no celular, abas embaixo com "Mais".
+- **Selos vermelhos** nas abas: Dashboard com os alertas não vistos, Coletores com os de castigo ou com erro. A soma aparece no ícone do app instalado.
+- **Notificações depois de reiniciar:** no celular chegam sozinhas. No computador só chegam com o navegador rodando; o sininho tem o guia "Continuar recebendo depois de reiniciar" com os passos do Edge ou do Chrome.
 
 ## Coletores
 
 O `robo.py` nunca entra logado nas contas monitoradas. Ele lê as timelines com contas descartáveis, os **coletores**, cadastradas na aba Coletores, cada uma com o seu proxy e os seus cookies do x.com.
 
-- Cada rodada automática lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo. Com 3 coletores, são 3 contas por rodada, cada uma saindo pelo IP do seu coletor. Seguidores, no máximo 1 vez por hora por conta.
+- Cada rodada automática lê uma conta monitorada por coletor livre, começando pela coletada há mais tempo, cada uma saindo pelo IP do seu coletor. Até 4 leituras ao mesmo tempo (`ROBO_WORKERS`), sempre com coletores diferentes. Seguidores, no máximo 1 vez por hora por conta.
+- **Proteção dos coletores:** cada coletor descansa 10 min entre leituras (`ROBO_COLLECTOR_REST_MIN`) e lê no máximo 150 vezes por dia (`ROBO_COLLECTOR_DAILY_MAX`). Com coletores de menos, as contas esperam mais em vez de o coletor ler mais rápido. Referência: 20 contas com 20 coletores dá cada conta a cada ~10 min e ~144 leituras por coletor por dia.
+- **Testar** (em cada coletor): tira o castigo, testa o proxy na hora e pede ao robô uma leitura com aquele coletor no minuto seguinte; o resultado aparece no cartão.
+- **Verificação de humanidade** (Cloudflare, "is locked by X"): o coletor fica 6 h de castigo e o aviso explica como liberar (resolver no navegador pelo mesmo proxy e apertar Testar).
 - **Configurações → Robô:** liga ou desliga a coleta automática e escolhe o intervalo (5 min a 24 h). O robô lê isso a cada minuto.
 - **Atualizar dados** (topo do Dashboard) manda os coletores lerem todas as contas na hora, revezando os coletores (até 3 contas por coletor), mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto e o botão espera a rodada terminar.
 - Proxy: `ip:porta:usuario:senha` (o formato dos vendedores) ou `http://usuario:senha@ip:porta` (também `https://` e `socks5://`). Cookies: arraste para a aba o arquivo `.json` exportado por uma extensão (Cookie-Editor, EditThisCookie) com a conta logada no x.com; o painel confere se tem o `auth_token`. Sem cookies, o robô usa o login que já estiver no `anyx` do VPS.
 - Proxy e cookies ficam em texto puro no banco (o robô precisa deles) e só aparecem mascarados no painel, para quem está logado.
 - Uma conta monitorada não pode ser coletor, e vice-versa.
-- 429 num coletor para a rodada e deixa o coletor de castigo até o horário que o X informar. Bloqueio, sessão caída e proxy fora também dão castigo e aviso no Telegram. Trocar cookies ou proxy na aba libera o coletor na hora.
+- 429 num coletor impede leituras novas na rodada e deixa o coletor de castigo até o horário que o X informar. Bloqueio, verificação de humanidade, sessão caída e proxy fora também dão castigo e aviso no Telegram. Trocar cookies ou proxy na aba (ou apertar Testar) libera o coletor na hora.
 
 ## Rodar localmente
 
@@ -61,6 +71,9 @@ O painel exige login para tudo que altera dados ou gasta cota (pastas, contas, v
 | `XAI_API_KEY` | Alternativa à chave salva em Configurações (a salva lá tem prioridade). |
 | `ROBO_SILENCE_MIN` | Avisa no Telegram se o robô ficar esse tempo sem coletar. Padrão: 15 (ou 2 intervalos + 5 min, se o intervalo for maior). Com a coleta automática desligada, não avisa. |
 | `AUTO_CHECK_MINUTES` | Verificação automática de saúde. Padrão: desligada (gasta cota da API do X). |
+| `ROBO_WORKERS` | Leituras ao mesmo tempo no robô. Padrão: 4 (cada Chrome usa uns 300 a 500 MB). |
+| `ROBO_COLLECTOR_REST_MIN`, `ROBO_COLLECTOR_DAILY_MAX` | Descanso entre leituras do mesmo coletor (padrão 10 min) e leituras por coletor por dia (padrão 150). |
+| `VAPID_PRIVATE_KEY` | Opcional: chave das notificações push (sem ela, o painel gera e guarda uma). |
 | `WATCHDOG` | `off` desliga o vigia em segundo plano. |
 | `BACKUP_DIR`, `BACKUP_KEEP_DAYS` | Pasta e retenção do backup diário. |
 
@@ -69,7 +82,7 @@ O `.env.example` traz todas comentadas.
 ## Alertas no Telegram
 
 - **Post viralizando** e **queda de views** (hoje x ontem, a partir das 23h): enviados pelo `robo.py`.
-- **Coletor limitado (429), bloqueado, deslogado ou com proxy fora** e **robô sem coletor**: enviados pelo `robo.py`.
+- **Coletor limitado (429), bloqueado, com verificação de humanidade, deslogado ou com proxy fora**, **robô sem coletor** e **todos os coletores no limite do dia**: enviados pelo `robo.py`.
 - **Erro na coleta**: enviado pelo `robo.py`.
 - **Robô parado**: o painel avisa quando o robô fica mais de `ROBO_SILENCE_MIN` minutos sem coletar.
 - **Search Ban / Ghost Ban**: o painel avisa quando uma verificação muda o status da conta.
@@ -77,7 +90,9 @@ O `.env.example` traz todas comentadas.
 
 ## VPS
 
-- Rode com um único worker do uvicorn (o progresso da aba Metadados e o vigia ficam em memória).
+- Rode com um único worker do uvicorn (o progresso da aba Metadados, o cache do Dashboard, o vigia e o canal ao vivo ficam em memória).
+- Depois de `git pull`: reinicie o uvicorn quando houver rota nova no Python e aperte Ctrl+F5 no navegador. O `robo.py` não precisa reiniciar (o cron chama a versão nova no minuto seguinte).
+- O canal ao vivo (`/api/live`) já manda `X-Accel-Buffering: no`; se o indicador ficar em "reconectando…", ponha `proxy_buffering off;` no `location` do painel no nginx.
 - No nginx: `client_max_body_size 110M` e `proxy_read_timeout 1860s` (vídeos da aba Metadados).
 - Bots de varredura (`/.env`, `/credentials.json`...): bloqueie no nginx, dentro de cada `server { ... }` do painel (porta 80 e 443), para não chegarem ao backend:
 
@@ -107,5 +122,7 @@ python -m pytest -q
 ```
 
 Os testes usam um SQLite descartável; a API do X e o Telegram são simulados, nunca chamados.
+
+O CSS do Tailwind é compilado e vai para o git (`static/css/tailwind.css`). Depois de usar uma classe nova do Tailwind no `index.html` ou no `app.js`, gere de novo com `sh scripts/build_css.sh` (precisa do Node) e suba o `?v=` no `index.html`.
 
 O teste ponta a ponta do robô (`tests/test_robo_e2e.py`) precisa de um Postgres **descartável** (apaga as tabelas) e só roda com `ROBO_TEST_DATABASE_URL=postgresql://...`; sem ela, é pulado.
