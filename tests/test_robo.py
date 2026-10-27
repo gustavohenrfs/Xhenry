@@ -228,3 +228,18 @@ def test_tweet_metrics_reads_bookmarks():
     metrics = robo.tweet_metrics(tweet)
     assert (metrics["bookmark_count"], metrics["quote_count"], metrics["view_count"]) == (7, 2, 900)
     assert robo.tweet_metrics({"id": "1"})["bookmark_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("views", "suffix"),
+    [(500, None), (501, ""), (10_000, ""), (10_001, "bombando"), (150_000, "100k"), (1_000_001, "1m")],
+)
+def test_view_level_picks_the_highest_reached(views, suffix):
+    level = robo.view_level(views)
+    assert (level[0] if level else None) == suffix
+
+
+def test_view_alert_key_keeps_the_old_key_for_the_first_level():
+    assert robo.view_alert_key(7, "123", "") == "viral:7:123"
+    assert robo.view_alert_key(7, "123", "1m") == "viral:7:123:1m"
+    assert robo.fmt_int(1234567) == "1.234.567"

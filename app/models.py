@@ -339,6 +339,22 @@ class AppSetting(IntPK, Base):
     robo_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     robo_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     robo_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Web Push: chave VAPID gerada no primeiro uso e o último alerta viral já empurrado.
+    vapid_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    push_last_alert_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class PushSubscription(IntPK, Base):
+    """Um navegador (celular ou computador) que aceitou as notificações do sininho."""
+
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("endpoint", name="uq_push_endpoint"),)
+
+    endpoint: Mapped[str] = mapped_column(String(2048), nullable=False)
+    p256dh: Mapped[str] = mapped_column(String(200), nullable=False)
+    auth: Mapped[str] = mapped_column(String(100), nullable=False)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class AlertSent(IntPK, Base):

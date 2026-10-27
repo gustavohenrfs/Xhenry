@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from itertools import accumulate
 from typing import Any
@@ -76,6 +77,8 @@ def ensure_user_auth_columns() -> None:
             "robo_enabled": "BOOLEAN NOT NULL DEFAULT TRUE",
             "robo_interval_min": "INTEGER NOT NULL DEFAULT 5",
             "robo_run_requested_at": kind,
+            "vapid_private_key": "TEXT",
+            "push_last_alert_id": "INTEGER",
         }
         for column, ddl in added.items():
             if column not in setting_cols:
@@ -1133,6 +1136,56 @@ def viral_message(name: str, username: str, gain: int, when: str, likes: int, re
         f"🔁 Retweets: {reposts}\n"
         f"🔗 Link do Post: {link}"
     )
+
+
+def fmt_int(value: int) -> str:
+    """12345 -> 12.345."""
+    return f"{value:,}".replace(",", ".")
+
+
+# Níveis do alerta de views do robo.py (VIEW_LEVELS lá): sufixo da chave → (emoji, título).
+VIRAL_LEVELS = {
+    "": ("🚀", "Post viralizando"),
+    "bombando": ("🔥", "POST BOMBANDO"),
+    "100k": ("💯", "Passou de 100K views"),
+    "1m": ("👑", "Passou de 1 MILHÃO de views"),
+}
+
+
+def viral_item(db: Session, row: AlertSent) -> dict[str, Any]:
+    """Um alerta de views do robô com o nível, a conta, o link e as views de agora.
+
+    A chave do robô é viral:{conta}:{tweet}[:{nível}]; o texto do alerta só entra se a conta foi apagada.
+    """
+    text = row.detail or ""
+    _, account_id, tweet_id, level = (row.dedupe_key.split(":", 3) + ["", "", ""])[:4]
+    if level not in VIRAL_LEVELS:
+        level = ""
+    account = db.get(XAccount, int(account_id)) if account_id.isdigit() else None
+    sample = None
+    if account is not None and tweet_id:
+        sample = db.scalar(
+            select(TweetSample).where(TweetSample.account_id == account.id, TweetSample.tweet_id == tweet_id)
+        )
+    found = re.search(r"Conta:\s*(.*?)\s*\(@(\w+)\)", text)
+    username = account.username if account else (found.group(2) if found else "")
+    link = re.search(r"https://x\.com/\S+", text)
+    views = re.search(r"Views:\s*([\d.]+)", text)
+    emoji, title = VIRAL_LEVELS[level]
+    return {
+        "id": row.id,
+        "level": level or "viral",
+        "emoji": emoji,
+        "title": title,
+        "sent_at": as_utc(row.sent_at).isoformat(),
+        "username": username,
+        "display_name": (account.display_name if account else (found.group(1) if found else None)) or None,
+        "profile_image_url": account.profile_image_url if account else None,
+        "url": f"https://x.com/{username}/status/{tweet_id}" if username and tweet_id.isdigit() else (link.group(0) if link else None),
+        "text": sample.text_preview if sample else None,
+        "views": int(sample.view_count or 0) if sample else (int(views.group(1).replace(".", "")) if views else None),
+        "likes": int(sample.like_count or 0) if sample else None,
+    }
 
 
 def try_send(db: Session, key: str, kind: str, text: str) -> bool:

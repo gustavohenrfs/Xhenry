@@ -459,6 +459,11 @@ const ALERT_KINDS = {
   viral: ["Viral", "#7cf0b5"], queda: ["Queda", "#ffb4c4"], ban: ["Restrição", "#ffb4c4"],
   coletor: ["Coletor", "#ffc46b"], erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"]
 };
+const VIEW_LEVEL_TAGS = [
+  [/MILHÃO/i, "👑 1M de views", "#ff63c3"],
+  [/100K/i, "💯 100K de views", "#ffd36b"],
+  [/BOMBANDO/i, "🔥 Post bombando", "#ff9f5a"]
+];
 function renderAlerts(alerts) {
   const host = document.getElementById("alert-list");
   if (!alerts.length) {
@@ -466,15 +471,19 @@ function renderAlerts(alerts) {
     return;
   }
   host.replaceChildren(...alerts.map((alert) => {
-    const [label, color] = ALERT_KINDS[alert.kind] || [alert.kind, "#9b8cff"];
+    let [label, color] = ALERT_KINDS[alert.kind] || [alert.kind, "#9b8cff"];
     const lines = alert.text.split("\n").map((line) => line.trim()).filter(Boolean);
+    // Alerta de views: o nível (viralizando, bombando, 100K, 1M) vem na primeira linha do robô.
+    const level = alert.kind === "viral" ? VIEW_LEVEL_TAGS.find(([pattern]) => pattern.test(lines[0] || "")) : null;
+    if (level) [, label, color] = level;
     const li = el("li", "alert-row");
     const dot = el("span", "alert-dot");
     dot.style.background = color;
     const body = el("div", "min-w-0 flex-1");
     const who = lines.find((line) => line.includes("Conta:"));
     body.append(el("p", "truncate text-sm text-white", label + (who ? ": " + who.replace(/^.*Conta:\s*/, "") : "")));
-    if (lines[0]) body.append(el("p", "truncate text-xs text-mute", lines[0]));
+    const sub = alert.kind === "viral" ? lines.find((line) => line.includes("Views:")) || lines[0] : lines[0];
+    if (sub) body.append(el("p", "truncate text-xs text-mute", sub));
     li.title = alert.text;
     li.append(dot, body, el("span", "shrink-0 text-[11px] text-mute", agoText(alert.sent_at)));
     return li;
@@ -2075,11 +2084,16 @@ async function boot() {
     showAuth(true);
   }
 }
-// Sininho: só os alertas "Post viralizando" do robô. O id do alerta mais novo já visto fica no
-// navegador; os mais novos que ele contam no selo e viram notificação do Windows (com a aba aberta).
+// Sininho: os alertas de views do robô em todos os níveis (viralizando, bombando, 100K, 1M). O id
+// do alerta mais novo já visto fica no navegador; os mais novos contam no selo. Com a permissão, o
+// navegador se inscreve no Web Push (/sw.js): o servidor avisa mesmo com o painel fechado, no
+// celular e no Windows. Sem push (HTTP, navegador antigo), a própria aba avisa enquanto estiver aberta.
 const VIRAL_SEEN_KEY = "viral_seen_id";
 const VIRAL_NOTIFIED_KEY = "viral_notified_id";
+const PUSH_ENDPOINT_KEY = "push_endpoint";
 const VIRAL_POLL_MS = 60000;
+const NOTIFY_ICON = "/static/img/icon-192.png";
+const NOTIFY_BADGE = "/static/img/badge-96.png";
 let viralItems = [];
 function storedId(key) {
   try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; }
@@ -2087,41 +2101,155 @@ function storedId(key) {
 function storeId(key, value) {
   try { localStorage.setItem(key, String(value)); } catch { /* aba anônima: segue sem lembrar */ }
 }
+function pushEndpoint() {
+  try { return localStorage.getItem(PUSH_ENDPOINT_KEY) || ""; } catch { return ""; }
+}
+function setPushEndpoint(value) {
+  try {
+    if (value) localStorage.setItem(PUSH_ENDPOINT_KEY, value);
+    else localStorage.removeItem(PUSH_ENDPOINT_KEY);
+  } catch { /* aba anônima */ }
+}
 function notifySupported() {
   return "Notification" in window;
+}
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+}
+function isIos() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+let workerReady = null;
+function registerWorker() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return Promise.resolve(null);
+  if (!workerReady) {
+    workerReady = navigator.serviceWorker.register("/sw.js")
+      .then(() => navigator.serviceWorker.ready)
+      .catch(() => null);
+  }
+  return workerReady;
+}
+// Mostra uma notificação pelo service worker (o Android só aceita assim) ou, sem ele, direto pela aba.
+async function showNotice(title, body, url, tag) {
+  const options = { body, icon: NOTIFY_ICON, badge: NOTIFY_BADGE, tag, data: { url: url || "/" } };
+  const reg = await registerWorker();
+  if (reg) return reg.showNotification(title, options);
+  const note = new Notification(title, options);
+  note.onclick = () => {
+    window.focus();
+    if (url) window.open(url, "_blank", "noopener");
+    note.close();
+  };
+}
+function keyBytes(base64url) {
+  const text = atob(base64url.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - base64url.length % 4) % 4));
+  return Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+}
+function sameKey(buffer, bytes) {
+  if (!buffer) return false;
+  const have = new Uint8Array(buffer);
+  return have.length === bytes.length && have.every((value, index) => value === bytes[index]);
+}
+// Inscreve este navegador no push do servidor. Devolve true quando ficou inscrito.
+async function enablePush() {
+  if (!notifySupported() || Notification.permission !== "granted" || !("PushManager" in window)) return false;
+  const reg = await registerWorker();
+  if (!reg) return false;
+  try {
+    const { public_key: serverKey } = await api("/api/push/key");
+    const bytes = keyBytes(serverKey);
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !sameKey(sub.options.applicationServerKey, bytes)) {
+      await sub.unsubscribe();  // chave do servidor trocou: a inscrição antiga não recebe mais nada
+      sub = null;
+    }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+    const json = sub.toJSON();
+    await api("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys, user_agent: navigator.userAgent.slice(0, 300) })
+    });
+    setPushEndpoint(json.endpoint);
+    return true;
+  } catch {
+    setPushEndpoint("");
+    return false;
+  }
 }
 function paintBellPermission() {
   const button = document.getElementById("bell-permission");
   const note = document.getElementById("bell-note");
   if (!notifySupported()) {
     button.classList.add("hidden");
-    note.textContent = "Este navegador não mostra notificações.";
+    note.textContent = isIos() && !isStandalone()
+      ? "No iPhone, instale o app (botão Instalar) para receber notificações."
+      : "Este navegador não mostra notificações.";
     return;
   }
   const status = Notification.permission;
   button.classList.toggle("hidden", status !== "default");
   note.textContent = status === "granted"
-    ? "Notificações do Windows ligadas enquanto o painel estiver aberto."
+    ? (pushEndpoint()
+      ? "Notificações ligadas neste aparelho, mesmo com o painel fechado."
+      : "Notificações ligadas enquanto o painel estiver aberto.")
     : status === "denied"
-      ? "Notificações bloqueadas. Libere no cadeado da barra de endereço."
-      : "Clique em Ativar no Windows para receber o aviso na hora.";
+      ? "Notificações bloqueadas. Libere nas permissões do site (cadeado da barra de endereço)."
+      : "Toque em Ativar notificações para receber o aviso na hora.";
 }
 async function askNotifications() {
   if (!notifySupported() || Notification.permission !== "default") return;
   try { await Notification.requestPermission(); } catch { /* navegador antigo: ignora */ }
-  paintBellPermission();
   if (Notification.permission === "granted") {
-    const hello = new Notification("Notificações ligadas", {
-      body: "Você vai ver aqui cada post que viralizar.",
-      icon: "/static/img/icon-192.png",
-      tag: "xhenry-hello"
-    });
-    setTimeout(() => hello.close(), 5000);
+    await enablePush();
+    showNotice("Notificações ligadas", "Você vai ver aqui cada post que viralizar, bombar, passar de 100K ou de 1M.", "/", "xhenry-hello").catch(() => {});
+  }
+  paintBellPermission();
+}
+async function testNotification() {
+  const button = document.getElementById("bell-test");
+  if (!notifySupported()) {
+    toast(isIos() && !isStandalone() ? "No iPhone, instale o app primeiro (botão Instalar)." : "Este navegador não mostra notificações.");
+    return;
+  }
+  if (Notification.permission === "default") await askNotifications();
+  if (Notification.permission !== "granted") {
+    paintBellPermission();
+    toast("Notificações bloqueadas. Libere nas permissões do site.");
+    return;
+  }
+  button.disabled = true;
+  try {
+    if (!pushEndpoint()) await enablePush();
+    if (pushEndpoint()) {
+      try {
+        await api("/api/push/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: pushEndpoint() })
+        });
+        toast("Teste enviado. A notificação chega em alguns segundos.");
+      } catch (error) {
+        if (/inscri|expirou/i.test(error.message)) setPushEndpoint("");
+        throw error;
+      }
+    } else {
+      await showNotice("🔥 Teste do XHenry", "Notificações ligadas enquanto o painel estiver aberto.", "/", "xhenry-teste");
+      toast("Teste mostrado. Sem push neste navegador: o aviso só chega com o painel aberto.");
+    }
+  } catch (error) {
+    toast(error.message || "Não foi possível testar.");
+  } finally {
+    button.disabled = false;
+    paintBellPermission();
   }
 }
 function viralWho(item) {
   if (!item.username) return item.display_name || "Conta removida";
   return (item.display_name ? item.display_name + " " : "") + "@" + item.username;
+}
+function viralTitle(item) {
+  return (item.emoji || "🚀") + " " + (item.title || "Post viralizando");
 }
 function renderBell() {
   const unread = viralItems.filter((item) => item.id > storedId(VIRAL_SEEN_KEY)).length;
@@ -2136,7 +2264,7 @@ function renderBell() {
   }
   const seen = storedId(VIRAL_SEEN_KEY);
   host.replaceChildren(...viralItems.map((item) => {
-    const li = el("li", "bell-item" + (item.id > seen ? " is-new" : ""));
+    const li = el("li", "bell-item lvl-" + (item.level || "viral") + (item.id > seen ? " is-new" : ""));
     const avatar = el("div", "post-avatar bell-avatar");
     const initial = (item.username || "?").slice(0, 1).toUpperCase();
     if (item.profile_image_url) {
@@ -2148,9 +2276,9 @@ function renderBell() {
       avatar.append(img);
     } else avatar.textContent = initial;
     const body = el("div", "min-w-0 flex-1");
-    const head = el("div", "flex items-baseline justify-between gap-2");
-    head.append(el("p", "truncate text-sm font-medium text-white", viralWho(item)), el("span", "shrink-0 text-[11px] text-mute", agoText(item.sent_at)));
-    body.append(head);
+    const top = el("div", "flex items-center justify-between gap-2");
+    top.append(el("span", "bell-level", viralTitle(item)), el("span", "shrink-0 text-[11px] text-mute", agoText(item.sent_at)));
+    body.append(top, el("p", "mt-1 truncate text-sm font-medium text-white", viralWho(item)));
     if (item.text) body.append(el("p", "bell-text mt-0.5 text-xs text-mute", item.text));
     const foot = el("div", "mt-2 flex items-center justify-between gap-2");
     foot.append(el("span", "bell-views font-mono text-xs", item.views === null ? "" : num(item.views) + " views"));
@@ -2167,21 +2295,12 @@ function renderBell() {
   }));
 }
 function notifyViral(items) {
-  if (!notifySupported() || Notification.permission !== "granted") return;
+  // Com push ligado quem avisa é o servidor; aqui só sem push, para não chegar em dobro.
+  if (!notifySupported() || Notification.permission !== "granted" || pushEndpoint()) return;
   items.slice(0, 3).reverse().forEach((item) => {
     const lines = [viralWho(item) + (item.views === null ? "" : ", " + num(item.views) + " views")];
     if (item.text) lines.push(item.text);
-    const note = new Notification("🚀 Post viralizando", {
-      body: lines.join("\n"),
-      icon: "/static/img/icon-192.png",
-      badge: "/static/img/favicon-48.png",
-      tag: "viral-" + item.id
-    });
-    note.onclick = () => {
-      window.focus();
-      if (item.url) window.open(item.url, "_blank", "noopener");
-      note.close();
-    };
+    showNotice(viralTitle(item), lines.join("\n"), item.url, "viral-" + item.id).catch(() => {});
   });
 }
 function ringBell() {
@@ -2191,10 +2310,16 @@ function ringBell() {
   bell.classList.add("ring-now");
 }
 let viralBusy = false;
+let pushSynced = false;
 async function checkViral() {
   if (viralBusy || !token() || tokenExpired()) return;
   viralBusy = true;
   try {
+    // Uma vez por abertura: renova a inscrição no servidor (ela pode ter sido apagada ou trocada).
+    if (!pushSynced && notifySupported() && Notification.permission === "granted") {
+      pushSynced = true;
+      enablePush();
+    }
     viralItems = await api("/api/viral?limit=20");
     const newest = viralItems.length ? viralItems[0].id : 0;
     const notified = storedId(VIRAL_NOTIFIED_KEY);
@@ -2234,13 +2359,51 @@ document.getElementById("bell-permission").addEventListener("click", (event) => 
   event.stopPropagation();
   askNotifications();
 });
+document.getElementById("bell-test").addEventListener("click", (event) => {
+  event.stopPropagation();
+  testNotification();
+});
 document.addEventListener("click", (event) => {
   if (!event.target.closest("#bell-wrap")) setBellOpen(false);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") setBellOpen(false);
+  if (event.key === "Escape") {
+    setBellOpen(false);
+    document.getElementById("install-help").classList.add("off");
+  }
 });
 setInterval(checkViral, VIRAL_POLL_MS);
+registerWorker();
+
+// Instalar como app: Chrome/Edge/Android dão o prompt nativo; no iPhone o caminho é pelo Safari.
+let installPrompt = null;
+function paintInstall() {
+  const show = !isStandalone() && (installPrompt !== null || isIos());
+  document.getElementById("install-btn").classList.toggle("hidden", !show);
+}
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  paintInstall();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  paintInstall();
+  toast("XHenry instalado. Abra pelo ícone e ative as notificações no sininho.");
+});
+document.getElementById("install-btn").addEventListener("click", async () => {
+  if (installPrompt) {
+    const prompt = installPrompt;
+    installPrompt = null;
+    prompt.prompt();
+    await prompt.userChoice.catch(() => null);
+    paintInstall();
+  } else document.getElementById("install-help").classList.remove("off");
+});
+document.getElementById("install-help-close").addEventListener("click", () => {
+  document.getElementById("install-help").classList.add("off");
+});
+paintInstall();
 
 setPeriod("today");
 setAuthMode("login");

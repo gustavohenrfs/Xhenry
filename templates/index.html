@@ -2,8 +2,13 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07050a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="XHenry">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
   <title>XHenry</title>
   <link rel="icon" type="image/png" sizes="48x48" href="/static/img/favicon-48.png">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/img/icon-192.png">
@@ -15,7 +20,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css?v=6">
+  <link rel="stylesheet" href="/static/css/styles.css?v=7">
   <script>
     tailwind.config = {
       theme: {
@@ -115,7 +120,7 @@
   </div>
   <div class="flex min-h-screen">
     <aside class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-neon/20 bg-panel px-4 py-6 md:flex">
-      <div class="px-2">
+      <div class="flex flex-col items-center px-2 text-center">
         <img src="/static/img/logo-256.png" alt="XHenry" class="brand-logo h-16 w-16">
         <p class="mt-2 text-[11px] uppercase tracking-[0.22em] text-neon">Monitoramento Real</p>
       </div>
@@ -135,20 +140,20 @@
       </div>
     </aside>
     <main class="min-w-0 flex-1 relative z-10">
-      <header class="sticky top-0 z-20 border-b border-neon/15 bg-ink/85 px-4 py-4 backdrop-blur md:px-8">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex items-center gap-3">
-            <img src="/static/img/logo-256.png" alt="XHenry" class="brand-logo h-10 w-10 md:hidden">
-            <h1 id="heading" class="font-display text-3xl text-white">Dashboard</h1>
+      <header class="app-header sticky top-0 z-20 border-b border-neon/15 bg-ink/85 px-4 backdrop-blur md:px-8">
+        <div class="top-grid">
+          <div class="top-user flex min-w-0 items-center gap-2 md:hidden">
+            <div data-user-avatar class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
+            <div class="min-w-0">
+              <p data-user-name class="truncate text-[13px] leading-tight text-white">—</p>
+              <button type="button" data-logout class="text-[11px] leading-tight text-mute">Sair</button>
+            </div>
           </div>
-          <div class="flex items-center gap-2 md:hidden">
-            <div data-user-avatar class="flex h-8 w-8 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
-            <p data-user-name class="max-w-24 truncate text-sm text-white">—</p>
-            <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
-          </div>
-          <div id="dashboard-controls" class="order-last flex max-w-full flex-wrap items-center gap-3 md:order-none">
-            <button id="refresh-all" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
-            <div id="period-wrap" class="flex max-w-full overflow-x-auto rounded-full border border-neon/30 p-1 text-sm">
+          <img src="/static/img/logo-256.png" alt="XHenry" class="top-logo brand-logo h-11 w-11 md:hidden">
+          <h1 id="heading" class="top-title font-display text-3xl text-white">Dashboard</h1>
+          <div id="dashboard-controls" class="top-controls flex min-w-0 max-w-full items-center gap-2 md:gap-3">
+            <button id="refresh-all" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
+            <div id="period-wrap" class="flex min-w-0 max-w-full overflow-x-auto rounded-full border border-neon/30 p-1 text-sm">
               <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
               <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
               <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
@@ -158,7 +163,12 @@
               <button type="button" data-period="total" class="period rounded-full px-3 py-1.5 text-mute">Total</button>
             </div>
           </div>
-          <div id="bell-wrap" class="relative ml-auto">
+          <div class="top-actions flex items-center gap-2">
+          <button id="install-btn" type="button" class="install-btn hidden" aria-label="Instalar o app">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/></svg>
+            <span>Instalar</span>
+          </button>
+          <div id="bell-wrap" class="relative">
             <button id="bell" type="button" class="bell-btn" aria-label="Posts viralizando" aria-haspopup="true" aria-expanded="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a6 6 0 1 1 12 0c0 4.2 1.4 6 2.2 6.8.3.3.1.8-.3.8H4.1c-.4 0-.6-.5-.3-.8C4.6 16 6 14.2 6 10Z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/></svg>
               <span id="bell-badge" class="bell-badge hidden"></span>
@@ -166,14 +176,16 @@
             <div id="bell-panel" class="bell-panel" role="dialog" aria-label="Posts viralizando">
               <div class="flex items-center justify-between gap-3">
                 <p class="font-display text-lg text-white">Posts viralizando</p>
-                <button id="bell-permission" type="button" class="hidden rounded-full border border-neon/40 px-3 py-1 text-[11px] text-white hover:border-neon">Ativar no Windows</button>
+                <button id="bell-test" type="button" class="bell-test" title="Enviar uma notificação de teste para este aparelho">Testar</button>
               </div>
               <p id="bell-note" class="mt-1 text-[11px] text-mute"></p>
+              <button id="bell-permission" type="button" class="mt-2 hidden w-full rounded-full border border-neon/40 px-3 py-1.5 text-xs text-white hover:border-neon">Ativar notificações</button>
               <ul id="bell-list" class="bell-list mt-3"></ul>
             </div>
           </div>
+          </div>
         </div>
-        <div id="mobile-nav" class="mt-4 flex gap-2 overflow-x-auto md:hidden">
+        <div id="mobile-nav" class="mobile-nav mt-3 flex gap-2 overflow-x-auto md:hidden">
           <button type="button" data-tab="dashboard" class="nav-btn active shrink-0 rounded-full px-3 py-2 text-xs">Dashboard</button>
           <button type="button" data-tab="ops" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Operações</button>
           <button type="button" data-tab="archived" class="nav-btn shrink-0 rounded-full px-3 py-2 text-xs">Arquivadas</button>
@@ -386,9 +398,9 @@
             <h2 class="font-display text-2xl text-white">Perfil</h2>
             <div class="flex items-center gap-4">
               <div id="profile-avatar" data-user-avatar class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-neon/40 text-lg text-neon"></div>
-              <label class="text-xs uppercase tracking-[0.14em] text-mute">
+              <label class="min-w-0 flex-1 text-xs uppercase tracking-[0.14em] text-mute">
                 Foto
-                <input id="profile-photo" type="file" accept="image/jpeg,image/png" class="mt-2 block text-sm normal-case tracking-normal text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
+                <input id="profile-photo" type="file" accept="image/jpeg,image/png" class="mt-2 block w-full max-w-full text-sm normal-case tracking-normal text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
               </label>
             </div>
             <label class="block text-xs uppercase tracking-[0.14em] text-mute" for="profile-name">Nome de exibição</label>
@@ -453,11 +465,26 @@
       </div>
     </main>
   </div>
-  <div id="toast" class="pointer-events-none fixed bottom-4 right-4 z-[60] hidden max-w-sm rounded-2xl border border-neon/40 bg-panel px-4 py-3 text-sm"></div>
+  <div id="toast" class="toast pointer-events-none fixed bottom-4 right-4 z-[60] hidden max-w-sm rounded-2xl border border-neon/40 bg-panel px-4 py-3 text-sm"></div>
+  <div id="install-help" class="auth-modal off" role="dialog" aria-labelledby="install-help-title">
+    <div class="w-full max-w-sm rounded-3xl border border-neon/30 bg-panel p-6 text-center">
+      <img src="/static/img/logo-256.png" alt="" class="brand-logo mx-auto h-14 w-14">
+      <p id="install-help-title" class="mt-3 font-display text-xl text-white">Instalar o XHenry</p>
+      <ol class="mt-4 space-y-2 text-left text-sm text-blush">
+        <li>1. No Safari, toque em Compartilhar (o quadrado com a seta para cima).</li>
+        <li>2. Escolha Adicionar à Tela de Início e confirme.</li>
+        <li>3. Abra o XHenry pelo ícone novo e ative as notificações no sininho.</li>
+      </ol>
+      <p class="mt-3 text-xs text-mute">No iPhone, as notificações só funcionam com o app instalado (iOS 16.4 ou mais novo).</p>
+      <button id="install-help-close" type="button" class="mt-5 w-full rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink">Entendi</button>
+    </div>
+  </div>
   <div id="auth-modal" class="auth-modal">
     <form id="auth-form" class="w-full max-w-sm rounded-3xl border border-neon/30 bg-panel p-6 shadow-[0_0_40px_rgba(255,46,200,.16)]">
-      <img src="/static/img/logo-256.png" alt="XHenry" class="brand-logo h-16 w-16">
-      <p class="mt-2 text-[11px] uppercase tracking-[0.2em] text-neon">Monitoramento Real</p>
+      <div class="flex flex-col items-center text-center">
+        <img src="/static/img/logo-256.png" alt="XHenry" class="brand-logo h-16 w-16">
+        <p class="mt-2 text-[11px] uppercase tracking-[0.2em] text-neon">Monitoramento Real</p>
+      </div>
       <h2 id="auth-title" class="mt-6 text-sm text-white">Entrar</h2>
       <label id="auth-name-label" class="mt-4 hidden text-xs uppercase tracking-[0.14em] text-mute" for="auth-name">Nome</label>
       <input id="auth-name" maxlength="120" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Seu nome">
@@ -489,6 +516,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=21"></script>
+  <script src="/static/js/app.js?v=22"></script>
 </body>
 </html>

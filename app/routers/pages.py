@@ -34,6 +34,26 @@ def root() -> FileResponse:
     return FileResponse(INDEX, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/sw.js")
+def service_worker() -> FileResponse:
+    """Service worker do push na raiz, para valer no site inteiro (em /static ele só cobriria /static)."""
+    return FileResponse(
+        ROOT / "static" / "sw.js",
+        media_type="text/javascript; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
+
+
+@router.get("/manifest.webmanifest")
+def manifest() -> FileResponse:
+    """Manifesto do app instalável (nome, ícones, cor)."""
+    return FileResponse(
+        ROOT / "static" / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/favicon.ico")
 def favicon() -> Response:
     return Response(status_code=204)

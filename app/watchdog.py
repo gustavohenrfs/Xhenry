@@ -5,6 +5,8 @@
   da aba Configurações é maior). O robô grava um batimento por rodada em
   sync_runs (kind=tweets, account_id NULL). Sem nenhum batimento ainda (robô
   antigo) ou com a coleta automática desligada, fica quieto.
+- Empurra por Web Push cada alerta de views novo do robô (app/push.py) para os
+  navegadores inscritos no sininho, com o painel aberto ou não.
 - Se AUTO_CHECK_MINUTES > 0, verifica a saúde das contas nesse intervalo; o
   alerta de Ghost/Search Ban sai do check_handle (dispatch_alerts). Gasta cota
   da API do X (3 chamadas por conta), por isso vem desligado.
@@ -26,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, XAccount
+from app.push import push_new_alerts
 from app.services import as_utc, check_handle, get_settings, now_utc, token_configured, try_send, zone
 
 log = logging.getLogger("xhenry")
@@ -114,6 +117,11 @@ def run_auto_check(db: Session, now: datetime | None = None) -> int:
 def run_once(now: datetime | None = None) -> None:
     with SessionLocal() as db:
         check_silence(db, now)
+        try:
+            push_new_alerts(db)
+        except Exception:
+            log.exception("push dos alertas falhou nesta rodada")
+            db.rollback()
         run_auto_check(db, now)
 
 

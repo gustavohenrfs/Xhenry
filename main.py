@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 import app.models  # registra tabelas no metadata
 from app.config import ROOT
 from app.database import Base, SessionLocal, engine, load_env_file
-from app.routers import accounts, auth, checks, cloaker, collectors, pages, robo
+from app.routers import accounts, auth, checks, cloaker, collectors, pages, push, robo
 from app.services import ensure_owner, ensure_user_auth_columns, token_configured
 from app.watchdog import watch_forever, watchdog_enabled
 
@@ -55,6 +55,7 @@ app.include_router(checks.router)
 app.include_router(cloaker.router)
 app.include_router(collectors.router)
 app.include_router(robo.router)
+app.include_router(push.router)
 app.include_router(pages.router)
 
 

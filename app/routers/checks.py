@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import re
 import secrets
 from datetime import datetime
 from typing import Any
@@ -15,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import ROOT
 from app.database import get_db
-from app.models import DEFAULT_TZ, AlertSent, TweetSample, XAccount
+from app.models import DEFAULT_TZ, AlertSent
 from app.routers.auth import current_user
 from app.services import (
     as_utc,
@@ -24,6 +23,7 @@ from app.services import (
     send_telegram,
     settings_payload,
     telegram_creds,
+    viral_item,
     viral_message,
     xai_key,
     zone,
@@ -63,39 +63,9 @@ def recent_alerts(limit: int = Query(default=8, ge=1, le=50), db: Session = Depe
     ]
 
 
-def viral_item(db: Session, row: AlertSent) -> dict[str, Any]:
-    """Um alerta "Post viralizando" do robô com a conta, o link e as views de agora.
-
-    A chave do robô é viral:{conta}:{tweet}; o texto do alerta só entra se a conta foi apagada.
-    """
-    text = row.detail or ""
-    _, account_id, tweet_id = (row.dedupe_key.split(":", 2) + ["", ""])[:3]
-    account = db.get(XAccount, int(account_id)) if account_id.isdigit() else None
-    sample = None
-    if account is not None and tweet_id:
-        sample = db.scalar(
-            select(TweetSample).where(TweetSample.account_id == account.id, TweetSample.tweet_id == tweet_id)
-        )
-    found = re.search(r"Conta:\s*(.*?)\s*\(@(\w+)\)", text)
-    username = account.username if account else (found.group(2) if found else "")
-    link = re.search(r"https://x\.com/\S+", text)
-    views = re.search(r"Views:\s*([\d.]+)", text)
-    return {
-        "id": row.id,
-        "sent_at": as_utc(row.sent_at).isoformat(),
-        "username": username,
-        "display_name": (account.display_name if account else (found.group(1) if found else None)) or None,
-        "profile_image_url": account.profile_image_url if account else None,
-        "url": f"https://x.com/{username}/status/{tweet_id}" if username and tweet_id.isdigit() else (link.group(0) if link else None),
-        "text": sample.text_preview if sample else None,
-        "views": int(sample.view_count or 0) if sample else (int(views.group(1).replace(".", "")) if views else None),
-        "likes": int(sample.like_count or 0) if sample else None,
-    }
-
-
 @router.get("/api/viral", dependencies=[Depends(current_user)])
 def viral_alerts(limit: int = Query(default=20, ge=1, le=50), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    """Sininho do topo: só os alertas de post viralizando, do mais novo para o mais antigo."""
+    """Sininho do topo: só os alertas de views (todos os níveis), do mais novo para o mais antigo."""
     rows = db.scalars(
         select(AlertSent).where(AlertSent.kind == "viral").order_by(AlertSent.id.desc()).limit(limit)
     ).all()

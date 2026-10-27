@@ -31,9 +31,13 @@ PROTECTED = [
     ("get", "/api/robo/health", None),
     ("get", "/api/alerts", None),
     ("get", "/api/viral", None),
+    ("get", "/api/push/key", None),
+    ("post", "/api/push/subscribe", {"endpoint": "https://push.example/abc", "keys": {"p256dh": "x" * 30, "auth": "y" * 10}}),
+    ("post", "/api/push/unsubscribe", {"endpoint": "https://push.example/abc"}),
+    ("post", "/api/push/test", {"endpoint": "https://push.example/abc"}),
 ]
 
-PUBLIC = ["/", "/health", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
+PUBLIC = ["/", "/health", "/sw.js", "/manifest.webmanifest", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
 
 
 @pytest.fixture(scope="module")

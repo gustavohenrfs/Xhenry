@@ -28,7 +28,8 @@ repassador local (ProxyRelay): o Chrome fala com 127.0.0.1 sem senha e o
 repassador abre o túnel no proxy de verdade com a senha (http, https ou socks5).
 
 Alertas no Telegram:
-- Post viralizando (views acima de VIEW_ALERT), uma vez por post.
+- Views de um post: Viralizando, POST BOMBANDO, 100K e 1M (VIEW_LEVELS). Cada
+  nível sai uma vez por post; se o post pular níveis, só o maior é avisado.
 - Queda de views: a partir de QUEDA_HORA, se as views de hoje ficarem mais de
   QUEDA_LIMITE abaixo das de ontem. Uma vez por conta por dia.
 - Coletor limitado (429), bloqueado, deslogado ou com proxy fora: uma vez por
@@ -78,7 +79,15 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 TWEET_LIMIT = 20
-VIEW_ALERT = 500
+# Níveis do alerta de views, do menor para o maior: (sufixo da chave, views acima de, título).
+# A chave é viral:{conta}:{tweet} no primeiro nível e viral:{conta}:{tweet}:{sufixo} nos outros;
+# o painel (sininho e push) lê o nível pelo sufixo. Todos usam kind=viral.
+VIEW_LEVELS = (
+    ("", 500, "🚀 Post viralizando!"),
+    ("bombando", 10_000, "🔥 POST BOMBANDO!"),
+    ("100k", 100_000, "💯 Post passou de 100K views!"),
+    ("1m", 1_000_000, "👑 Post passou de 1 MILHÃO de views!"),
+)
 # Pausa aleatória entre a página de perfil e a timeline, e entre um par e outro.
 PAUSE_RANGE = (0.3, 2.0)
 FOLLOWERS_EVERY = timedelta(hours=1)
@@ -387,6 +396,20 @@ def alert_once(cur, key: str, kind: str, text: str) -> bool:
         return False
     mark_alerted(cur, key, kind, text)
     return True
+
+
+def view_level(views: int) -> tuple[str, int, str] | None:
+    """O maior nível de VIEW_LEVELS que o post passou, ou None abaixo do primeiro."""
+    reached = [level for level in VIEW_LEVELS if views > level[1]]
+    return reached[-1] if reached else None
+
+
+def view_alert_key(account_id: int, tweet_id: str, suffix: str) -> str:
+    return f"viral:{account_id}:{tweet_id}" + (f":{suffix}" if suffix else "")
+
+
+def fmt_int(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
 
 
 def views_drop(hoje: int, ontem: int) -> int | None:
@@ -950,20 +973,22 @@ def read_account(cur, session: Any, account: dict[str, Any], midnight: datetime)
         upsert_sample(cur, account_id, tid, local, metrics, tweet_text_of(tweet))
         saved += 1
         views = metrics["view_count"]
-        if views > VIEW_ALERT:
+        level = view_level(views)
+        if level is not None:
+            suffix, _, title = level
             when = local.strftime("%d/%m/%Y %H:%M")
             link = f"https://x.com/{username}/status/{tid}"
             text = (
-                "🚀 Post viralizando!\n"
+                f"{title}\n"
                 f"👤 Conta: {display} (@{username})\n"
-                f"👁 Views: {views}\n"
+                f"👁 Views: {fmt_int(views)}\n"
                 f"⏰ Horário do post: {when}\n"
                 f"❤️ Curtidas: {metrics['like_count']}\n"
                 f"🔁 Retweets: {metrics['retweet_count']}\n"
                 f"🔗 Link do Post: {link}"
             )
-            if alert_once(cur, f"viral:{account_id}:{tid}", "viral", text):
-                log.info("alerta views @%s tweet %s (%s)", username, tid, views)
+            if alert_once(cur, view_alert_key(account_id, tid, suffix), "viral", text):
+                log.info("alerta views (%s) @%s tweet %s (%s)", suffix or "viral", username, tid, views)
     recompute_today(cur, account_id, today)
     check_views_drop(cur, account, today)
     mark_collected(cur, account_id)

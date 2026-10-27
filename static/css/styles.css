@@ -714,3 +714,88 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .bell-link { border-radius: 999px; padding: .2rem .7rem; background: var(--magenta); color: #1a0412; font-size: .72rem; font-weight: 600; }
 .bell-link:hover { background: #fff; }
 .bell-empty { padding: .75rem; text-align: center; }
+
+/* Cabeçalho: no celular, conta | logo no centro | instalar + sino; no computador, título | controles | sino */
+.app-header { padding-top: max(.75rem, env(safe-area-inset-top)); padding-bottom: .75rem; }
+.top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: "user logo actions" "controls controls controls";
+  align-items: center;
+  gap: .6rem;
+}
+.top-user { grid-area: user; }
+.top-logo { grid-area: logo; justify-self: center; }
+.top-title { grid-area: title; }
+.top-controls { grid-area: controls; }
+.top-actions { grid-area: actions; justify-self: end; }
+@media (max-width: 767px) {
+  /* A aba ativa já aparece nos botões de baixo: o título fica só para leitor de tela. */
+  .top-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .top-controls { margin-top: .15rem; }
+}
+@media (min-width: 768px) {
+  .app-header { padding-top: 1rem; padding-bottom: 1rem; }
+  .top-grid { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "title controls actions"; gap: 1rem; }
+  .top-controls { justify-self: end; }
+}
+
+/* Instalar o app */
+.install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  height: 2.2rem;
+  padding: 0 .75rem;
+  border: 1px solid rgba(255, 99, 195, .45);
+  border-radius: 999px;
+  background: rgba(255, 99, 195, .1);
+  color: var(--text);
+  font-size: .75rem;
+  font-weight: 500;
+}
+.install-btn.hidden { display: none; }
+.install-btn svg { width: .95rem; height: .95rem; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.install-btn:hover { border-color: var(--magenta); }
+
+/* Sininho: botão Testar e o nível de cada alerta */
+.bell-test {
+  border: 1px solid rgba(103, 220, 255, .35);
+  border-radius: 999px;
+  padding: .1rem .55rem;
+  color: var(--cyan);
+  font-size: .68rem;
+  line-height: 1.3rem;
+}
+.bell-test:hover { border-color: var(--cyan); background: rgba(103, 220, 255, .08); }
+.bell-level { font-size: .68rem; font-weight: 600; letter-spacing: .02em; color: #7cf0b5; }
+.bell-item.lvl-bombando .bell-level { color: #ff9f5a; }
+.bell-item.lvl-100k .bell-level { color: #ffd36b; }
+.bell-item.lvl-1m .bell-level { color: var(--magenta); text-shadow: 0 0 10px rgba(255, 99, 195, .6); }
+.bell-item.lvl-bombando { border-color: rgba(255, 159, 90, .35); }
+.bell-item.lvl-100k { border-color: rgba(255, 211, 107, .4); }
+.bell-item.lvl-1m { border-color: rgba(255, 99, 195, .55); box-shadow: 0 0 18px rgba(255, 99, 195, .18); }
+
+/* Celular */
+html { -webkit-text-size-adjust: 100%; }
+body { -webkit-tap-highlight-color: transparent; }
+@media (max-width: 767px) {
+  /* O iPhone dá zoom em campo com fonte menor que 16px. */
+  input:not([type="file"]):not([type="range"]):not([type="checkbox"]), select, textarea { font-size: 16px !important; }
+  body .text-\[10px\], body .text-\[11px\] { font-size: 12px; }
+  .auth-modal { padding: 1rem; }
+  .bell-panel { position: fixed; top: calc(env(safe-area-inset-top) + 4.2rem); left: .75rem; right: .75rem; width: auto; }
+  .bell-list { max-height: calc(100dvh - 13rem); }
+  .mobile-nav { scrollbar-width: none; margin-inline: -1rem; padding-inline: 1rem; }
+  .mobile-nav::-webkit-scrollbar, #period-wrap::-webkit-scrollbar { display: none; }
+  .mobile-nav .nav-btn { font-size: .8rem; padding: .45rem .85rem; }
+  #period-wrap .period { padding: .35rem .7rem; font-size: .8rem; }
+  #refresh-all { padding: .4rem .85rem; font-size: .8rem; }
+  .toast { left: .75rem; right: .75rem; bottom: calc(.75rem + env(safe-area-inset-bottom)); max-width: none; }
+  /* Esferas do fundo mais leves: blur grande pesa na GPU do celular. */
+  .orb { filter: blur(70px); opacity: .35; animation: none; }
+}
+/* Toque não tem hover: sem cartão "pulando" ao rolar a página. */
+@media (hover: none) {
+  body .glow:hover { transform: none; box-shadow: none; }
+}
