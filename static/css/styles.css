@@ -534,7 +534,8 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 .kpi-hero { min-height: 11rem; padding-bottom: 4.25rem !important; }
 #kpis .kpi-hero .spark-caption { position: absolute; right: 1.25rem; bottom: .4rem; }
 #kpis .kpi-hero .spark { position: absolute; left: 0; right: 0; bottom: 0; z-index: -1; width: 100%; height: 4rem; }
-.spark-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 4px rgb(var(--c-neon) / .55)); }
+/* Sem filter nos traços de SVG: o drop-shadow desenha a região do filtro inteira (um quadrado). */
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 
 .delta-chip {
   display: inline-flex;
@@ -605,8 +606,8 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 .gauge { width: 100%; height: 100%; transform: rotate(-90deg); }
 .gauge circle { fill: none; stroke-width: 4; stroke-linecap: round; }
 .gauge-track { stroke: var(--track); }
-.gauge-fill { stroke: var(--accent-2); filter: drop-shadow(0 0 4px var(--laser-b)); transition: stroke-dasharray .6s ease; }
-.gauge-fill.gauge-warn { stroke: var(--warn); filter: none; }
+.gauge-fill { stroke: var(--accent-2); transition: stroke-dasharray .6s ease; }
+.gauge-fill.gauge-warn { stroke: var(--warn); }
 .gauge-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .seg-bar { display: flex; gap: 3px; height: .5rem; }
 .seg { border-radius: 999px; min-width: .5rem; }
@@ -715,6 +716,64 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 /* ---------- ícones das abas ---------- */
 .nav-ico { width: 1.15rem; height: 1.15rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
 .nav-btn.active .nav-ico { opacity: 1; color: var(--accent); filter: drop-shadow(0 0 6px rgb(var(--c-neon) / .5)); }
+
+/* ---------- barra lateral recolhida (computador com mouse) ----------
+   Só os ícones; ao passar o mouse (ou com o teclado dentro) ela abre por cima do conteúdo e os nomes
+   deslizam para dentro. Flutua em vez de empurrar a página: os gráficos não se redesenham a cada
+   passada. Sem mouse (tablet) fica aberta como sempre. */
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  #sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 35;
+    width: 4.75rem;
+    padding-left: .75rem;
+    padding-right: .75rem;
+    overflow: hidden;
+    transition: width .5s cubic-bezier(.2, .8, .2, 1), box-shadow .5s ease;
+  }
+  #sidebar:hover, #sidebar:focus-within {
+    width: 16rem;
+    box-shadow: 40px 0 90px -40px rgba(0, 0, 0, .65), 0 0 50px -24px var(--laser-a);
+  }
+  main { margin-left: 4.75rem; }
+  #sidebar .nav-btn { white-space: nowrap; }
+  #sidebar .nav-btn > span,
+  #sidebar .brand-tag,
+  #sidebar [data-user-name],
+  #sidebar [data-logout] {
+    opacity: 0;
+    transform: translateX(-8px);
+    transition: opacity .2s ease, transform .35s cubic-bezier(.2, .8, .2, 1);
+  }
+  #sidebar:hover .nav-btn > span,
+  #sidebar:hover .brand-tag,
+  #sidebar:hover [data-user-name],
+  #sidebar:hover [data-logout],
+  #sidebar:focus-within .nav-btn > span,
+  #sidebar:focus-within .brand-tag,
+  #sidebar:focus-within [data-user-name],
+  #sidebar:focus-within [data-logout] {
+    opacity: 1;
+    transform: none;
+    transition-delay: .12s;
+  }
+  /* Nomes um pouco escalonados: a lista "acende" de cima para baixo. */
+  #sidebar:hover .nav-btn:nth-child(2) > span { transition-delay: .15s; }
+  #sidebar:hover .nav-btn:nth-child(3) > span { transition-delay: .18s; }
+  #sidebar:hover .nav-btn:nth-child(4) > span { transition-delay: .21s; }
+  #sidebar:hover .nav-btn:nth-child(5) > span { transition-delay: .24s; }
+  #sidebar:hover .nav-btn:nth-child(6) > span { transition-delay: .27s; }
+  #sidebar:hover .nav-btn:nth-child(7) > span { transition-delay: .3s; }
+  #sidebar .brand-logo { width: 2.9rem; height: 2.9rem; transition: width .5s cubic-bezier(.2, .8, .2, 1), height .5s cubic-bezier(.2, .8, .2, 1); }
+  #sidebar:hover .brand-logo, #sidebar:focus-within .brand-logo { width: 4rem; height: 4rem; }
+  #sidebar .brand-tag { max-height: 0; margin-top: 0; overflow: hidden; transition: opacity .2s ease, transform .35s ease, max-height .5s ease, margin .5s ease; }
+  #sidebar:hover .brand-tag, #sidebar:focus-within .brand-tag { max-height: 2rem; margin-top: .5rem; }
+  #sidebar #user-foot { padding-left: .1rem; }
+  #sidebar #nav .nav-btn:hover { transform: none; }
+}
 
 /* ---------- celular: abas embaixo ---------- */
 /* Só no celular: a regra de display daqui venceria o md:hidden do Tailwind. */

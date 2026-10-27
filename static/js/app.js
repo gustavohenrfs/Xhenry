@@ -40,6 +40,15 @@ if (window.Chart) {
   Chart.defaults.font.family = "Outfit, sans-serif";
   Chart.defaults.animation.duration = 450;
   Chart.defaults.animation.easing = "easeOutCubic";
+  // Legendas com bolinhas na cor sólida da série (legendColor no dataset; senão a cor da linha/barra).
+  const legendLabels = Chart.defaults.plugins.legend.labels;
+  const baseLabels = legendLabels.generateLabels;
+  Object.assign(legendLabels, { usePointStyle: true, pointStyle: "circle", boxWidth: 8, boxHeight: 8, padding: 14 });
+  legendLabels.generateLabels = (chart) => baseLabels(chart).map((item) => {
+    const dataset = chart.data.datasets[item.datasetIndex] || {};
+    const color = dataset.legendColor || (typeof dataset.borderColor === "string" ? dataset.borderColor : item.fillStyle);
+    return Object.assign(item, { fillStyle: color, strokeStyle: color, lineWidth: 0, lineDash: [], pointStyle: "circle" });
+  });
   // As fontes chegam depois do primeiro desenho: mede os rótulos de novo (senão eles ficam inclinados).
   if (document.fonts) document.fonts.ready.then(() => [lineChart, barChart, mixChart].forEach((chart) => chart && chart.update("none")));
 }
@@ -647,7 +656,6 @@ function chartOptions() {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    plugins: { legend: { labels: { boxWidth: 10 } } },
     scales: {
       x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
       y: { beginAtZero: true, ticks: { precision: 0 } }
@@ -682,6 +690,7 @@ function renderGrowth(data) {
   const datasets = [{
     type: "line",
     label: hourly ? "Views (acumulado)" : "Views",
+    legendColor: "#ff2ec8",
     data: g.current,
     borderColor: "#ff2ec8",
     backgroundColor: (ctx) => {
@@ -705,6 +714,7 @@ function renderGrowth(data) {
     label: label ? label.replace("vs ", "") : "Anterior",
     data: g.previous,
     borderColor: "rgba(155,140,255,.75)",
+    legendColor: "#9b8cff",
     borderDash: [6, 5],
     borderWidth: 1.5,
     pointRadius: 0,
@@ -716,6 +726,7 @@ function renderGrowth(data) {
   datasets.push({
     type: "bar",
     label: "Posts",
+    legendColor: "#67dcff",
     data: g.posts,
     backgroundColor: "rgba(103,220,255,.22)",
     hoverBackgroundColor: "rgba(103,220,255,.45)",
@@ -728,7 +739,6 @@ function renderGrowth(data) {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: "index", intersect: false },
-    plugins: { legend: { labels: { boxWidth: 10 } } },
     scales: {
       x: { grid: { display: false }, ticks: { maxTicksLimit: hourly ? 12 : 8 } },
       y: { beginAtZero: true, ticks: { precision: 0 } },

@@ -20,10 +20,10 @@
   <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
-  <link rel="stylesheet" href="/static/css/tailwind.css?v=3">
-  <link rel="stylesheet" href="/static/css/styles.css?v=11">
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=4">
+  <link rel="stylesheet" href="/static/css/styles.css?v=12">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=28"></script>
+  <script defer src="/static/js/app.js?v=29"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -32,10 +32,10 @@
     <div class="orb gold"></div>
   </div>
   <div class="flex min-h-screen">
-    <aside class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-neon/20 bg-panel px-4 py-6 md:flex">
+    <aside id="sidebar" class="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-neon/20 bg-panel px-4 py-6 md:flex">
       <div class="flex flex-col items-center px-2 text-center">
         <img src="/static/img/logo-256.webp" width="256" height="256" decoding="async" alt="XHenry" class="brand-logo h-16 w-16">
-        <p class="mt-2 text-[11px] uppercase tracking-[0.22em] text-neon">Monitoramento Real</p>
+        <p class="brand-tag mt-2 text-[11px] uppercase tracking-[0.22em] text-neon">Monitoramento Real</p>
       </div>
       <nav id="nav" class="mt-8 space-y-2">
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><span>Dashboard</span></button>
