@@ -7,6 +7,7 @@ quando a última rodada tem mais que o intervalo. Ao começar, ele apaga o pedid
 
 from __future__ import annotations
 
+import math
 from datetime import timedelta
 from typing import Any
 
@@ -16,9 +17,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import SyncKind, SyncRun
+from app.models import Collector, SyncKind, SyncRun
 from app.routers.auth import current_user
-from app.services import as_utc, get_settings, now_utc
+from app.services import as_utc, get_settings, now_utc, selected_accounts
 
 router = APIRouter(dependencies=[Depends(current_user)])
 
@@ -90,3 +91,50 @@ def request_run(db: Session = Depends(get_db)) -> dict[str, Any]:
     row.robo_run_requested_at = now_utc()
     db.commit()
     return robo_payload(db)
+
+
+def collection_health(db: Session) -> dict[str, Any]:
+    """Cartão "Saúde da coleta": contas atrasadas e estado dos coletores (só contagens, nada de proxy)."""
+    now = now_utc()
+    payload = robo_payload(db)
+    collectors = db.scalars(select(Collector)).all()
+    benched = [row for row in collectors if row.is_active and row.paused_until and as_utc(row.paused_until) > now]
+    free = [row for row in collectors if row.is_active and row not in benched]
+    accounts = selected_accounts(db, None)
+    # Cada rodada lê uma conta por coletor livre: a volta completa leva ceil(contas/coletores) intervalos.
+    cycle = math.ceil(len(accounts) / max(1, len(free))) * payload["interval_min"]
+    late_after = max(60, 2 * cycle)
+    stale = []
+    for account in accounts:
+        when = as_utc(account.collected_at) if account.collected_at else None
+        if when is None or now - when > timedelta(minutes=late_after):
+            stale.append(
+                {
+                    "username": account.username,
+                    "display_name": account.display_name,
+                    "collected_at": when.isoformat() if when else None,
+                }
+            )
+    stale.sort(key=lambda item: item["collected_at"] or "")
+    next_free = min((as_utc(row.paused_until) for row in benched), default=None)
+    payload.update(
+        {
+            "accounts": len(accounts),
+            "fresh": len(accounts) - len(stale),
+            "stale": stale,
+            "late_after_min": late_after,
+            "collectors": {
+                "total": len(collectors),
+                "free": len(free),
+                "benched": len(benched),
+                "off": len(collectors) - len(free) - len(benched),
+                "next_free_at": next_free.isoformat() if next_free else None,
+            },
+        }
+    )
+    return payload
+
+
+@router.get("/api/robo/health")
+def read_health(db: Session = Depends(get_db)) -> dict[str, Any]:
+    return collection_health(db)

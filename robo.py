@@ -219,6 +219,7 @@ def tweet_metrics(tweet: Any) -> dict[str, int]:
         pick(tweet, "reply_count", "replies") or pick(nested, "reply_count")
     )
     quotes = as_int(pick(tweet, "quote_count", "quotes") or pick(nested, "quote_count"))
+    bookmarks = as_int(pick(tweet, "bookmark_count", "bookmarks") or pick(nested, "bookmark_count"))
     raw_views = pick(tweet, "view_count", "impression_count", "impressions") or pick(
         nested, "view_count", "impression_count"
     )
@@ -232,6 +233,7 @@ def tweet_metrics(tweet: Any) -> dict[str, int]:
         "retweet_count": rts,
         "reply_count": replies,
         "quote_count": quotes,
+        "bookmark_count": bookmarks,
         "view_count": views,
     }
 
@@ -484,7 +486,7 @@ def upsert_sample(cur, account_id: int, tweet_id: str, posted_local: datetime, m
         ) VALUES (
             %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
-            0, %s, %s, NOW()
+            %s, %s, %s, NOW()
         )
         ON CONFLICT (account_id, tweet_id) DO UPDATE SET
             posted_at = EXCLUDED.posted_at,
@@ -496,6 +498,7 @@ def upsert_sample(cur, account_id: int, tweet_id: str, posted_local: datetime, m
             retweet_count = EXCLUDED.retweet_count,
             reply_count = EXCLUDED.reply_count,
             quote_count = EXCLUDED.quote_count,
+            bookmark_count = EXCLUDED.bookmark_count,
             impression_count = EXCLUDED.impression_count,
             view_count = EXCLUDED.view_count,
             collected_at = NOW()
@@ -512,6 +515,7 @@ def upsert_sample(cur, account_id: int, tweet_id: str, posted_local: datetime, m
             metrics["retweet_count"],
             metrics["reply_count"],
             metrics["quote_count"],
+            metrics.get("bookmark_count", 0),
             views,
             views,
         ),
@@ -534,7 +538,7 @@ def recompute_today(cur, account_id: int, day) -> None:
             COALESCE(SUM(retweet_count), 0),
             COALESCE(SUM(reply_count), 0),
             COALESCE(SUM(quote_count), 0),
-            0,
+            COALESCE(SUM(bookmark_count), 0),
             COALESCE(SUM(view_count), 0),
             COALESCE(SUM(view_count), 0),
             NOW()
@@ -547,6 +551,7 @@ def recompute_today(cur, account_id: int, day) -> None:
             retweets = EXCLUDED.retweets,
             replies = EXCLUDED.replies,
             quotes = EXCLUDED.quotes,
+            bookmarks = EXCLUDED.bookmarks,
             views = EXCLUDED.views,
             impressions = EXCLUDED.impressions,
             collected_at = NOW()

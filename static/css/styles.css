@@ -475,3 +475,107 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Dashboard: cartões de métricas em formatos diferentes */
+#kpis > .kpi-left { align-items: stretch; text-align: left; }
+.kpi-hero { min-height: 11rem; padding-bottom: 4.25rem !important; }
+#kpis .kpi-hero .spark-caption { position: absolute; right: 1.25rem; bottom: .4rem; }
+#kpis .kpi-hero .spark { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 4rem; z-index: 0; }
+.spark-line { fill: none; stroke: var(--magenta); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.delta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .15rem;
+  margin-top: .35rem;
+  border-radius: 999px;
+  padding: .1rem .5rem;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: .72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kpi-left .delta-chip, .mix-center .delta-chip { margin-top: 0; }
+.delta-up { color: #a4ffd1; background: rgba(80, 230, 150, .12); }
+.delta-down { color: #ffb4c4; background: rgba(255, 80, 120, .13); }
+.delta-flat { color: var(--muted); background: rgba(162, 180, 255, .1); }
+.gain-up { color: #a4ffd1; }
+.gain-down { color: #ffb4c4; }
+
+.compare-bars { display: grid; gap: .45rem; }
+.compare-row { display: grid; grid-template-columns: 3rem 1fr auto; align-items: center; gap: .6rem; }
+.compare-track { height: .45rem; border-radius: 999px; background: rgba(162, 180, 255, .1); overflow: hidden; }
+.compare-fill { height: 100%; border-radius: inherit; transition: width .5s ease; }
+.compare-now { background: linear-gradient(90deg, var(--cyan), var(--magenta)); }
+.compare-before { background: rgba(162, 180, 255, .35); }
+
+.mix-body { display: flex; align-items: center; gap: 1.25rem; }
+.mix-donut { position: relative; width: 9.5rem; height: 9.5rem; flex-shrink: 0; }
+.mix-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.mix-legend { display: grid; flex: 1; gap: .55rem; min-width: 0; }
+.mix-item { display: flex; align-items: center; gap: .6rem; }
+.mix-dot { width: .6rem; height: .6rem; border-radius: 999px; flex-shrink: 0; }
+
+.post-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 99, 195, .45);
+  border-radius: 999px;
+  color: var(--magenta);
+  font-weight: 600;
+}
+.post-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.post-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  border-left: 2px solid rgba(255, 99, 195, .5);
+  padding-left: .75rem;
+  line-height: 1.55;
+}
+.post-stat { border: 1px solid var(--line); border-radius: .9rem; padding: .45rem .25rem; }
+.post-stat-hot { border-color: rgba(255, 99, 195, .45); background: rgba(255, 99, 195, .08); }
+
+/* "ring" é utilitário do Tailwind (sombra azul): o anel usa gauge-*. */
+.gauge-wrap { position: relative; width: 5.5rem; height: 5.5rem; flex-shrink: 0; }
+.gauge { width: 100%; height: 100%; transform: rotate(-90deg); }
+.gauge circle { fill: none; stroke-width: 4; stroke-linecap: round; }
+.gauge-track { stroke: rgba(162, 180, 255, .12); }
+.gauge-fill { stroke: var(--cyan); transition: stroke-dasharray .6s ease; }
+.gauge-fill.gauge-warn { stroke: #ffc46b; }
+.gauge-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.seg-bar { display: flex; gap: 3px; height: .5rem; }
+.seg { border-radius: 999px; min-width: .5rem; }
+.seg-dot { width: .5rem; height: .5rem; border-radius: 999px; }
+.seg-free { background: var(--cyan); }
+.seg-benched { background: #ffc46b; }
+.seg-off { background: rgba(162, 180, 255, .3); }
+.stale-chip {
+  border: 1px solid rgba(255, 196, 80, .4);
+  border-radius: 999px;
+  padding: .15rem .6rem;
+  color: #ffe0a3;
+  font-size: .72rem;
+}
+
+@media (max-width: 480px) {
+  .mix-body { flex-direction: column; }
+  .mix-legend { width: 100%; }
+}
+
+/* Celular: os períodos rolam de lado em vez de alargar a página. */
+#period-wrap { scrollbar-width: none; }
+#period-wrap .period { flex-shrink: 0; white-space: nowrap; }

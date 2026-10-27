@@ -721,6 +721,109 @@ def selected_accounts(db: Session, folder_id: int | None) -> list[XAccount]:
     return list(db.scalars(query).all())
 
 
+# Rótulo da comparação com o período anterior, do mesmo tamanho. "Total" não tem anterior.
+COMPARE_LABELS = {
+    "today": "vs ontem",
+    "hoje": "vs ontem",
+    "yesterday": "vs anteontem",
+    "ontem": "vs anteontem",
+    "7d": "vs 7 dias anteriores",
+    "30d": "vs 30 dias anteriores",
+    "3m": "vs 3 meses anteriores",
+    "1y": "vs ano anterior",
+    "365d": "vs ano anterior",
+}
+SPARK_DAYS = 14
+SAMPLE_FIELDS = (
+    ("views", "view_count"),
+    ("likes", "like_count"),
+    ("retweets", "retweet_count"),
+    ("replies", "reply_count"),
+    ("quotes", "quote_count"),
+    ("bookmarks", "bookmark_count"),
+)
+
+
+def samples_in(db: Session, accounts: list[XAccount], start: date, end: date) -> list[tuple[XAccount, TweetSample]]:
+    """Posts publicados entre start e end (dia no fuso de cada conta), com a conta de cada um."""
+    by_id = {account.id: account for account in accounts}
+    if not by_id:
+        return []
+    pairs = []
+    for row in db.scalars(select(TweetSample).where(TweetSample.account_id.in_(by_id))).all():
+        account = by_id[row.account_id]
+        if start <= as_utc(row.posted_at).astimezone(zone(account.timezone)).date() <= end:
+            pairs.append((account, row))
+    return pairs
+
+
+def window_totals(pairs: list[tuple[XAccount, TweetSample]]) -> dict[str, Any]:
+    """Somas de um período, views por post e taxa de interação (interações ÷ views, em %)."""
+    totals: dict[str, Any] = {
+        key: sum(int(getattr(row, column) or 0) for _, row in pairs) for key, column in SAMPLE_FIELDS
+    }
+    posts = len(pairs)
+    interactions = sum(totals[key] for key in ("likes", "retweets", "replies", "quotes", "bookmarks"))
+    views = totals["views"]
+    totals.update(
+        {
+            "posts": posts,
+            "interactions": interactions,
+            "views_per_post": round(views / posts) if posts else None,
+            "interaction_rate": round(interactions / views * 100, 2) if views else None,
+        }
+    )
+    return totals
+
+
+def followers_gained(db: Session, accounts: list[XAccount], start: date, end: date) -> int | None:
+    """Saldo de seguidores no período: último valor até end menos o último antes de start.
+
+    Sem leitura antes de start, a base é a primeira leitura dentro do período.
+    """
+    total = None
+    for account in accounts:
+        rows = db.execute(
+            select(DailyMetric.metric_date, DailyMetric.followers_count)
+            .where(
+                DailyMetric.account_id == account.id,
+                DailyMetric.followers_count.is_not(None),
+                DailyMetric.metric_date <= end,
+            )
+            .order_by(DailyMetric.metric_date)
+        ).all()
+        inside = [count for day, count in rows if day >= start]
+        if not inside:
+            continue
+        before = [count for day, count in rows if day < start]
+        base = before[-1] if before else inside[0]
+        total = (total or 0) + int(inside[-1]) - int(base)
+    return total
+
+
+def top_post(pairs: list[tuple[XAccount, TweetSample]], total_views: int) -> dict[str, Any] | None:
+    """O post com mais views no período, com o link dele no X."""
+    if not pairs:
+        return None
+    account, row = max(pairs, key=lambda pair: (int(pair[1].view_count or 0), int(pair[1].like_count or 0)))
+    views = int(row.view_count or 0)
+    return {
+        "username": account.username,
+        "display_name": account.display_name,
+        "profile_image_url": account.profile_image_url,
+        "tweet_id": row.tweet_id,
+        "url": f"https://x.com/{account.username}/status/{row.tweet_id}",
+        "text": row.text_preview,
+        "posted_at": as_utc(row.posted_at).isoformat(),
+        "views": views,
+        "likes": int(row.like_count or 0),
+        "retweets": int(row.retweet_count or 0),
+        "replies": int(row.reply_count or 0),
+        "quotes": int(row.quote_count or 0),
+        "share": round(views / total_views * 100, 1) if total_views else None,
+    }
+
+
 def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]:
     start, end = period_window(period)
     folders = list(db.scalars(select(Folder).where(Folder.is_archived.is_(False)).order_by(Folder.name)).all())
@@ -782,6 +885,18 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     retweets_values = [card.get("retweets") for card in cards if card.get("retweets") is not None]
     replies_values = [card.get("replies") for card in cards if card.get("replies") is not None]
     impression_values = [card["impressions"] for card in cards if card["impressions"] is not None]
+    pairs = samples_in(db, accounts, start, end)
+    current = window_totals(pairs)
+    # Linha do cartão de Views: o período, ou os últimos 14 dias quando o período é curto demais.
+    spark_start = min(start, end - timedelta(days=SPARK_DAYS - 1))
+    spark = {spark_start + timedelta(days=offset): 0 for offset in range((end - spark_start).days + 1)}
+    for account, row in samples_in(db, accounts, spark_start, end) if spark_start < start else pairs:
+        spark[as_utc(row.posted_at).astimezone(zone(account.timezone)).date()] += int(row.view_count or 0)
+    compare_label = COMPARE_LABELS.get(period.strip().lower())
+    previous = None
+    if compare_label:
+        span = (end - start).days + 1
+        previous = window_totals(samples_in(db, accounts, start - timedelta(days=span), start - timedelta(days=1)))
     return {
         "period": period,
         "last_collected_at": last_collected,
@@ -799,7 +914,19 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
             "retweets": sum(retweets_values) if retweets_values else None,
             "replies": sum(replies_values) if replies_values else None,
             "impressions": sum(impression_values) if impression_values else None,
+            "quotes": current["quotes"],
+            # O robô antigo gravava 0 sempre: zero no período vira "sem leitura".
+            "bookmarks": current["bookmarks"] or None,
+            "posts": current["posts"],
+            "views_per_post": current["views_per_post"],
+            "interactions": current["interactions"],
+            "interaction_rate": current["interaction_rate"],
+            "followers_gained": followers_gained(db, accounts, start, end),
         },
+        "compare_label": compare_label,
+        "spark": [{"date": day.isoformat(), "views": views} for day, views in sorted(spark.items())],
+        "previous": previous,
+        "top_post": top_post(pairs, current["views"]),
         "folders": folder_cards,
         "accounts": cards,
         "series": series,

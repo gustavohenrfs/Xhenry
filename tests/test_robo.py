@@ -221,3 +221,10 @@ def test_views_drop():
     assert robo.views_drop(60, 100) == 40
     assert robo.views_drop(80, 100) is None   # caiu menos que QUEDA_LIMITE
     assert robo.views_drop(0, 50) is None     # ontem pequeno demais
+
+
+def test_tweet_metrics_reads_bookmarks():
+    tweet = {"legacy": {"favorite_count": 5, "bookmark_count": 7, "quote_count": 2}, "views": {"count": "900"}}
+    metrics = robo.tweet_metrics(tweet)
+    assert (metrics["bookmark_count"], metrics["quote_count"], metrics["view_count"]) == (7, 2, 900)
+    assert robo.tweet_metrics({"id": "1"})["bookmark_count"] == 0

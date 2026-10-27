@@ -4,6 +4,14 @@ Painel para monitorar contas do X organizadas em pastas: saúde da conta (Search
 
 As métricas dos tweets são coletadas pelo `robo.py` (na raiz deste repositório), que roda no cron do VPS e grava no mesmo banco. O painel só lê o banco; a API oficial do X é usada apenas para a verificação de saúde.
 
+## Dashboard
+
+- **Views** com a linha dos últimos dias, **views por post** (agora e no período anterior), **seguidores ganhos** no período, curtidas, retweets, replies, citações e salvamentos. Cada número mostra a variação contra o período anterior do mesmo tamanho (Hoje contra ontem inteiro, 7 dias contra os 7 anteriores; Total não compara).
+- **Interações:** a rosca mostra de onde vêm as interações e, no meio, a taxa (interações ÷ views).
+- **Melhor post:** o post com mais views no período, com o link para abrir no X.
+- **Saúde da coleta:** contas atrasadas (sem coleta além do ritmo esperado para o número de coletores e o intervalo), última rodada do robô e coletores livres, de castigo e desligados.
+- Salvamentos aparecem depois que o `robo.py` atualizado coletar (antes ele gravava sempre 0).
+
 ## Coletores
 
 O `robo.py` nunca entra logado nas contas monitoradas. Ele lê as timelines com contas descartáveis, os **coletores**, cadastradas na aba Coletores, cada uma com o seu proxy e os seus cookies do x.com.

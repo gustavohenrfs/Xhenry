@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css">
+  <link rel="stylesheet" href="/static/css/styles.css?v=2">
   <script>
     tailwind.config = {
       theme: {
@@ -143,9 +143,9 @@
             <p data-user-name class="max-w-24 truncate text-sm text-white">—</p>
             <button type="button" data-logout class="text-[11px] uppercase tracking-[0.14em] text-mute">Sair</button>
           </div>
-          <div id="dashboard-controls" class="flex items-center gap-3">
+          <div id="dashboard-controls" class="flex max-w-full flex-wrap items-center gap-3">
             <button id="refresh-all" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar Dados</button>
-            <div id="period-wrap" class="flex rounded-full border border-neon/30 p-1 text-sm">
+            <div id="period-wrap" class="flex max-w-full overflow-x-auto rounded-full border border-neon/30 p-1 text-sm">
               <button type="button" data-period="today" class="period rounded-full px-3 py-1.5">Hoje</button>
               <button type="button" data-period="yesterday" class="period rounded-full px-3 py-1.5 text-mute">Ontem</button>
               <button type="button" data-period="7d" class="period rounded-full px-3 py-1.5 text-mute">7 dias</button>
@@ -185,7 +185,34 @@
           <div class="text-center mb-6">
             <p class="text-lg tracking-wide text-mute">Bem vindo <span id="welcome-name" class="metallic-pink glow-slow"></span></p>
           </div>
-          <div id="kpis" class="grid grid-cols-2 gap-3 xl:grid-cols-6"></div>
+          <div id="kpis" class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6"></div>
+          <div class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            <article id="mix-card" class="glow rounded-3xl border border-neon/20 bg-card p-4">
+              <h2 class="font-display text-xl text-white">Interações</h2>
+              <p id="mix-note" class="mb-3 text-xs text-mute">De onde vêm as interações dos posts do período</p>
+              <div class="mix-body">
+                <div class="mix-donut">
+                  <canvas id="mix-chart" aria-label="Divisão das interações"></canvas>
+                  <div class="mix-center">
+                    <p id="mix-rate" class="font-mono text-2xl text-white">—</p>
+                    <p class="text-[11px] text-mute">das views</p>
+                    <p id="mix-rate-delta"></p>
+                  </div>
+                </div>
+                <ul id="mix-legend" class="mix-legend"></ul>
+              </div>
+            </article>
+            <article id="top-post" class="glow rounded-3xl border border-neon/20 bg-card p-4">
+              <h2 class="font-display text-xl text-white">Melhor post</h2>
+              <p class="mb-3 text-xs text-mute">O post com mais views no período</p>
+              <div id="top-post-body"></div>
+            </article>
+            <article id="health-card" class="glow rounded-3xl border border-neon/20 bg-card p-4 lg:col-span-2 xl:col-span-1">
+              <h2 class="font-display text-xl text-white">Saúde da coleta</h2>
+              <p id="health-note" class="mb-3 text-xs text-mute">Contas lidas pelos coletores no ritmo esperado</p>
+              <div id="health-body"></div>
+            </article>
+          </div>
           <div class="grid gap-4 xl:grid-cols-5">
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4 xl:col-span-3">
               <h2 class="font-display text-xl text-white">Potencial de Crescimento</h2>
@@ -432,6 +459,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=16"></script>
+  <script src="/static/js/app.js?v=17"></script>
 </body>
 </html>

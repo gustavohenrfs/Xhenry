@@ -125,3 +125,45 @@ def test_invalid_period_route_is_400(client):
 
 def test_debug_route_is_gone(client):
     assert client.get("/debug-metrics").status_code == 404
+
+
+def test_today_compares_with_yesterday(client, folder):
+    body = get(client, "today", folder["id"])
+    kpis, prev = body["kpis"], body["previous"]
+    assert body["compare_label"] == "vs ontem"
+    assert (kpis["posts"], kpis["views_per_post"]) == (2, 75)
+    assert (prev["views"], prev["posts"], prev["views_per_post"]) == (1000, 1, 1000)
+
+
+def test_interaction_rate_is_interactions_over_views(client, folder):
+    kpis = get(client, "today", folder["id"])["kpis"]
+    # 15 curtidas + 2 RTs + 4 replies em 150 views.
+    assert (kpis["interactions"], kpis["interaction_rate"]) == (21, 14.0)
+    assert kpis["quotes"] == 0
+    assert kpis["bookmarks"] is None, "zero salvamento no período vira sem leitura"
+
+
+def test_followers_gained_uses_reading_before_period(client, folder):
+    # dash_a: 90 ontem -> 100 hoje (+10); dash_b só tem a leitura de hoje (0).
+    assert get(client, "today", folder["id"])["kpis"]["followers_gained"] == 10
+    assert get(client, "7d", folder["id"])["kpis"]["followers_gained"] == 10
+
+
+def test_top_post_has_link_and_share(client, folder):
+    post = get(client, "today", folder["id"])["top_post"]
+    assert (post["username"], post["tweet_id"], post["views"]) == ("dash_a", "a1", 100)
+    assert post["url"] == "https://x.com/dash_a/status/a1"
+    assert post["share"] == 66.7
+    assert get(client, "7d", folder["id"])["top_post"]["url"] == "https://x.com/dash_b/status/b1"
+
+
+def test_total_has_no_previous_period(client, folder):
+    body = get(client, "total", folder["id"])
+    assert body["compare_label"] is None and body["previous"] is None
+
+
+def test_spark_covers_two_weeks_for_short_periods(client, folder):
+    spark = get(client, "today", folder["id"])["spark"]
+    assert len(spark) == 14
+    assert (spark[-1]["views"], spark[-2]["views"]) == (150, 1000)
+    assert len(get(client, "30d", folder["id"])["spark"]) == 30

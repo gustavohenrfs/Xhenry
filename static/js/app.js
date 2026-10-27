@@ -8,6 +8,7 @@ const state = {
 const SESSION_EXPIRED = "Sua sessão expirou. Entre novamente.";
 let lineChart = null;
 let barChart = null;
+let mixChart = null;
 let toastTimer = 0;
 let croppedFile = null;
 let cropper = null;
@@ -173,33 +174,312 @@ function setTab(tab) {
   if (tab === "archived") loadArchived();
   if (tab === "collectors") loadCollectors();
 }
-function kpi(label, value, hot, trend) {
-  const card = document.createElement("article");
-  card.className = "glow kpi-card flex min-h-24 flex-col items-center justify-center rounded-3xl border bg-card px-4 py-4 relative text-center items-center justify-center" + (hot ? " border-neon/50 shadow-[0_0_28px_rgba(255,46,200,.12)]" : " border-neon/20");
-  const k = document.createElement("p");
-  k.className = "text-[11px] uppercase tracking-[0.16em] text-mute";
-  k.textContent = label;
-  const v = document.createElement("p");
-  v.className = "mt-2 font-mono text-3xl text-white tracking-tight";
-  v.textContent = value;
-  if (trend) {
-    const t = document.createElement("span");
-    t.className = "absolute top-3 right-4 text-lg";
-    t.textContent = trend === "up" ? "📈" : "📉";
-    card.append(t);
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+function pctText(value, digits) {
+  return value.toLocaleString("pt-BR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+// Variação contra o período anterior, do mesmo tamanho. points=true compara taxas em pontos percentuais.
+function delta(current, previous, points) {
+  if (current === null || current === undefined || previous === null || previous === undefined) return null;
+  if (points) {
+    const diff = current - previous;
+    const dir = Math.abs(diff) < 0.05 ? "flat" : diff > 0 ? "up" : "down";
+    return { dir, text: (diff > 0 ? "+" : "") + pctText(diff, 1) + " p.p." };
   }
-  card.append(k, v);
+  if (previous === 0) return current > 0 ? { dir: "up", text: "novo" } : null;
+  const pct = (current - previous) / previous * 100;
+  const dir = Math.abs(pct) < 0.5 ? "flat" : pct > 0 ? "up" : "down";
+  return { dir, text: (pct > 0 ? "+" : "") + pctText(pct, Math.abs(pct) < 10 ? 1 : 0) + "%" };
+}
+function deltaChip(current, previous, points) {
+  const d = delta(current, previous, points);
+  if (!d) return el("span", "delta-none");
+  const chip = el("span", "delta-chip delta-" + d.dir, (d.dir === "up" ? "▲ " : d.dir === "down" ? "▼ " : "") + d.text);
+  const label = (state.data && state.data.compare_label) || "";
+  chip.title = label + ": " + (points ? pctText(previous, 2) + "%" : num(previous));
+  chip.setAttribute("aria-label", d.text + " " + label);
+  return chip;
+}
+function prevOf(key) {
+  const prev = state.data && state.data.previous;
+  return prev ? prev[key] : null;
+}
+function signed(value) {
+  if (value === null || value === undefined) return "—";
+  return (value > 0 ? "+" : value < 0 ? "−" : "") + fmt.format(Math.abs(value));
+}
+// Views por dia em SVG, no rodapé do cartão principal.
+function sparkline(series) {
+  const ns = "http://www.w3.org/2000/svg";
+  const values = series.map((row) => row.views || 0);
+  const max = Math.max(...values, 1);
+  const step = 100 / (values.length - 1);
+  const line = values.map((v, i) => (i ? "L" : "M") + (i * step).toFixed(2) + " " + (30 - v / max * 26).toFixed(2)).join(" ");
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 100 32");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("spark");
+  const defs = document.createElementNS(ns, "defs");
+  const grad = document.createElementNS(ns, "linearGradient");
+  grad.id = "spark-fill";
+  grad.setAttribute("x1", "0"); grad.setAttribute("x2", "0"); grad.setAttribute("y1", "0"); grad.setAttribute("y2", "1");
+  [["0", "rgba(255,99,195,.38)"], ["1", "rgba(103,220,255,0)"]].forEach(([offset, color]) => {
+    const stop = document.createElementNS(ns, "stop");
+    stop.setAttribute("offset", offset);
+    stop.setAttribute("stop-color", color);
+    grad.append(stop);
+  });
+  defs.append(grad);
+  const area = document.createElementNS(ns, "path");
+  area.setAttribute("d", line + " L100 32 L0 32 Z");
+  area.setAttribute("fill", "url(#spark-fill)");
+  const stroke = document.createElementNS(ns, "path");
+  stroke.setAttribute("d", line);
+  stroke.setAttribute("class", "spark-line");
+  svg.append(defs, area, stroke);
+  return svg;
+}
+function heroCard(kpis, series) {
+  const card = el("article", "kpi-card kpi-left kpi-hero col-span-2 rounded-3xl border bg-card p-5");
+  const top = el("div", "flex items-center justify-between gap-3");
+  top.append(el("p", "text-sm text-mute", "Views"), deltaChip(kpis.views, prevOf("views")));
+  const label = state.data.compare_label;
+  card.append(
+    top,
+    el("p", "mt-1 font-mono text-5xl tracking-tight text-white", num(kpis.views)),
+    el("p", "mt-1 text-xs text-mute", label ? label + ": " + num(prevOf("views")) + " views" : "Desde o primeiro post coletado")
+  );
+  if (series.length > 1) {
+    const days = series.length;
+    card.append(sparkline(series), el("p", "spark-caption text-[10px] text-mute", days <= 14 ? "últimos " + days + " dias" : "views por dia"));
+  }
+  return card;
+}
+function perPostCard(kpis) {
+  const card = el("article", "kpi-card kpi-left col-span-2 rounded-3xl border bg-card p-5");
+  const top = el("div", "flex items-center justify-between gap-3");
+  top.append(el("p", "text-sm text-mute", "Views por post"), deltaChip(kpis.views_per_post, prevOf("views_per_post")));
+  const posts = kpis.posts || 0;
+  card.append(
+    top,
+    el("p", "mt-1 font-mono text-4xl tracking-tight text-white", num(kpis.views_per_post)),
+    el("p", "mt-1 text-xs text-mute", "Média de " + posts + (posts === 1 ? " post" : " posts"))
+  );
+  if (state.data.previous) {
+    const prev = prevOf("views_per_post");
+    const max = Math.max(kpis.views_per_post || 0, prev || 0, 1);
+    const bars = el("div", "compare-bars mt-4");
+    [["Agora", kpis.views_per_post, "now"], ["Antes", prev, "before"]].forEach(([name, val, kind]) => {
+      const track = el("div", "compare-track");
+      const fill = el("div", "compare-fill compare-" + kind);
+      fill.style.width = ((val || 0) / max * 100).toFixed(1) + "%";
+      track.append(fill);
+      const row = el("div", "compare-row");
+      row.append(el("span", "text-[11px] text-mute", name), track, el("span", "font-mono text-xs text-white", num(val)));
+      bars.append(row);
+    });
+    card.append(bars);
+  }
+  return card;
+}
+function followersCard(kpis) {
+  const card = el("article", "kpi-card kpi-left col-span-2 rounded-3xl border bg-card p-5");
+  const gained = kpis.followers_gained;
+  const tone = gained > 0 ? "gain-up" : gained < 0 ? "gain-down" : "text-white";
+  card.append(
+    el("p", "text-sm text-mute", "Seguidores no período"),
+    el("p", "mt-1 font-mono text-4xl tracking-tight " + tone, signed(gained)),
+    el("p", "mt-1 text-xs text-mute", "Total agora: " + num(kpis.followers))
+  );
+  return card;
+}
+function tile(label, value, current, previous, hint) {
+  const card = el("article", "kpi-card flex min-h-24 flex-col items-center justify-center rounded-3xl border bg-card px-4 py-4 text-center");
+  card.append(el("p", "text-xs text-mute", label), el("p", "mt-1 font-mono text-2xl tracking-tight text-white", value));
+  card.append(hint ? el("p", "mt-1 text-[11px] text-mute", hint) : deltaChip(current, previous));
   return card;
 }
 function renderKpis(kpis) {
   document.getElementById("kpis").replaceChildren(
-    kpi("Views", num(kpis.views), true, kpis.trend_views),
-    kpi("Curtidas", num(kpis.likes), false, kpis.trend_likes),
-    kpi("Retweets", num(kpis.retweets), false, kpis.trend_retweets),
-    kpi("Replies", num(kpis.replies), false, kpis.trend_replies),
-    kpi("Seguidores", num(kpis.followers), false, kpis.trend_followers),
-    kpi("Contas", num(kpis.accounts), false)
+    heroCard(kpis, state.data.spark || []),
+    perPostCard(kpis),
+    followersCard(kpis),
+    tile("Curtidas", num(kpis.likes), kpis.likes, prevOf("likes")),
+    tile("Retweets", num(kpis.retweets), kpis.retweets, prevOf("retweets")),
+    tile("Replies", num(kpis.replies), kpis.replies, prevOf("replies")),
+    tile("Citações", num(kpis.quotes), kpis.quotes, prevOf("quotes")),
+    tile("Salvamentos", num(kpis.bookmarks), kpis.bookmarks, prevOf("bookmarks"), kpis.bookmarks === null ? "Ainda sem leitura" : ""),
+    tile("Contas", num(kpis.accounts), null, null, kpis.healthy + (kpis.healthy === 1 ? " saudável" : " saudáveis"))
   );
+  renderMix(kpis);
+}
+const MIX_PARTS = [
+  ["likes", "Curtidas", "#ff63c3"],
+  ["retweets", "Retweets", "#67dcff"],
+  ["replies", "Replies", "#9b8cff"],
+  ["quotes", "Citações", "#ffc46b"],
+  ["bookmarks", "Salvamentos", "#7cf0b5"]
+];
+// Rosca das interações: a fatia de cada tipo e, no meio, a taxa de interação (interações ÷ views).
+function renderMix(kpis) {
+  const parts = MIX_PARTS.map(([key, label, color]) => ({ label, color, value: kpis[key] || 0 })).filter((part) => part.value > 0);
+  const total = parts.reduce((sum, part) => sum + part.value, 0);
+  const rate = kpis.interaction_rate;
+  document.getElementById("mix-rate").textContent = rate === null || rate === undefined ? "—" : pctText(rate, 2) + "%";
+  const chip = deltaChip(rate, prevOf("interaction_rate"), true);
+  chip.id = "mix-rate-delta";
+  document.getElementById("mix-rate-delta").replaceWith(chip);
+  document.getElementById("mix-note").textContent = total
+    ? fmt.format(total) + " interações em " + fmt.format(kpis.views || 0) + " views"
+    : "Sem interações nos posts do período";
+  document.getElementById("mix-legend").replaceChildren(...parts.map((part) => {
+    const li = el("li", "mix-item");
+    const dot = el("span", "mix-dot");
+    dot.style.background = part.color;
+    li.append(
+      dot,
+      el("span", "flex-1 truncate text-sm text-white", part.label),
+      el("span", "font-mono text-sm text-mute", pctText(part.value / total * 100, 0) + "%")
+    );
+    li.title = part.label + ": " + num(part.value);
+    return li;
+  }));
+  if (!window.Chart) return;
+  const mixData = {
+    labels: parts.length ? parts.map((part) => part.label) : ["Sem dados"],
+    datasets: [{
+      data: parts.length ? parts.map((part) => part.value) : [1],
+      backgroundColor: parts.length ? parts.map((part) => part.color) : ["rgba(162,180,255,.14)"],
+      borderColor: "rgba(8,12,25,.9)",
+      borderWidth: 3,
+      hoverOffset: 6
+    }]
+  };
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: "72%",
+    plugins: { legend: { display: false }, tooltip: { enabled: parts.length > 0 } }
+  };
+  if (mixChart) { mixChart.data = mixData; mixChart.options = options; mixChart.update("none"); }
+  else mixChart = new Chart(document.getElementById("mix-chart"), { type: "doughnut", data: mixData, options });
+}
+function renderTopPost(post) {
+  const host = document.getElementById("top-post-body");
+  if (!post) {
+    host.replaceChildren(el("p", "text-sm text-mute", "Nenhum post coletado no período. Clique em Atualizar Dados para ler as contas agora."));
+    return;
+  }
+  const initial = post.username.slice(0, 1).toUpperCase();
+  const avatar = el("div", "post-avatar");
+  if (post.profile_image_url) {
+    const img = el("img");
+    img.src = post.profile_image_url;
+    img.alt = "";
+    img.referrerPolicy = "no-referrer";
+    img.addEventListener("error", () => { img.remove(); avatar.textContent = initial; });
+    avatar.append(img);
+  } else avatar.textContent = initial;
+  const who = el("div", "min-w-0 flex-1 text-left");
+  who.append(
+    el("p", "truncate text-sm font-medium text-white", post.display_name || "@" + post.username),
+    el("p", "truncate text-xs text-mute", "@" + post.username + ", " + stampBR(post.posted_at))
+  );
+  const head = el("div", "flex items-center gap-3");
+  head.append(avatar, who);
+  const stats = el("dl", "mt-4 grid grid-cols-4 gap-2 text-center");
+  [["Views", post.views], ["Curtidas", post.likes], ["RTs", post.retweets], ["Replies", post.replies]].forEach(([label, value], index) => {
+    const box = el("div", "post-stat" + (index === 0 ? " post-stat-hot" : ""));
+    box.append(el("dt", "text-[10px] text-mute", label), el("dd", "mt-0.5 font-mono text-sm text-white", num(value)));
+    stats.append(box);
+  });
+  const link = el("a", "shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white", "Abrir no X");
+  link.href = post.url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  const foot = el("div", "mt-4 flex items-center justify-between gap-3");
+  foot.append(el("p", "text-left text-xs text-mute", post.share === null ? "" : pctText(post.share, 1) + "% das views do período"), link);
+  host.replaceChildren(head, el("p", "post-text mt-3 text-left text-sm text-white", post.text || "Post sem texto (só mídia)."), stats, foot);
+}
+function agoText(iso) {
+  if (!iso) return "nunca";
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return mins < 1 ? "agora" : mins < 60 ? "há " + mins + " min" : mins < 1440 ? "há " + Math.floor(mins / 60) + " h" : "há " + Math.floor(mins / 1440) + " d";
+}
+// Anel das contas em dia sobre o total, em SVG.
+function ring(done, total) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 44 44");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("gauge");
+  const length = 2 * Math.PI * 19;
+  const share = total ? done / total : 0;
+  [["gauge-track", length], ["gauge-fill" + (share < 0.7 ? " gauge-warn" : ""), share * length]].forEach(([cls, dash]) => {
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", "22"); circle.setAttribute("cy", "22"); circle.setAttribute("r", "19");
+    circle.setAttribute("class", cls);
+    circle.setAttribute("stroke-dasharray", dash.toFixed(2) + " " + length.toFixed(2));
+    svg.append(circle);
+  });
+  return svg;
+}
+function renderHealth(health) {
+  const host = document.getElementById("health-body");
+  const note = document.getElementById("health-note");
+  const late = health.late_after_min >= 120 ? Math.round(health.late_after_min / 60) + " h" : health.late_after_min + " min";
+  note.textContent = health.enabled
+    ? "Atrasada é a conta sem coleta há mais de " + late + "."
+    : "Coleta automática desligada: só coleta quando você clica em Atualizar Dados.";
+  const gauge = el("div", "gauge-wrap");
+  gauge.append(ring(health.fresh, health.accounts), el("p", "gauge-label font-mono text-lg text-white", health.fresh + "/" + health.accounts));
+  const behind = health.stale.length;
+  const last = health.last_run;
+  const summary = el("div", "min-w-0 flex-1 text-left");
+  summary.append(
+    el("p", "text-sm text-white", behind ? behind + (behind === 1 ? " conta atrasada" : " contas atrasadas") : "Todas as contas em dia"),
+    el("p", "mt-1 text-xs text-mute", last ? "Última rodada " + agoText(last.finished_at) + ", às " + stampBR(last.finished_at) : "O robô ainda não rodou")
+  );
+  const top = el("div", "flex items-center gap-4");
+  top.append(gauge, summary);
+  const c = health.collectors;
+  const seg = el("div", "seg-bar mt-2");
+  [["free", c.free], ["benched", c.benched], ["off", c.off]].forEach(([kind, count]) => {
+    if (!count) return;
+    const part = el("span", "seg seg-" + kind);
+    part.style.flexGrow = String(count);
+    seg.append(part);
+  });
+  const legend = el("div", "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mute");
+  [["free", "livres", c.free], ["benched", "de castigo", c.benched], ["off", "desligados", c.off]].forEach(([kind, label, count]) => {
+    const item = el("span", "inline-flex items-center gap-1.5");
+    item.append(el("span", "seg-dot seg-" + kind), el("span", "", count + " " + label));
+    legend.append(item);
+  });
+  const parts = [top, el("p", "mt-4 text-xs text-mute", c.total ? c.total + (c.total === 1 ? " coletor" : " coletores") : "Nenhum coletor cadastrado. Cadastre na aba Coletores.")];
+  if (c.total) parts.push(seg, legend);
+  if (c.next_free_at) parts.push(el("p", "mt-2 text-xs text-mute", "Próximo coletor livre em " + stampBR(c.next_free_at)));
+  if (behind) {
+    const list = el("ul", "mt-4 flex flex-wrap gap-2");
+    health.stale.slice(0, 6).forEach((item) => list.append(el("li", "stale-chip", "@" + item.username + " " + (item.collected_at ? agoText(item.collected_at) : "sem coleta"))));
+    if (behind > 6) list.append(el("li", "stale-chip", "+" + (behind - 6)));
+    parts.push(list);
+  }
+  host.replaceChildren(...parts);
+}
+async function loadHealth() {
+  try {
+    renderHealth(await api("/api/robo/health"));
+  } catch (error) {
+    if (error.message === SESSION_EXPIRED) return;
+    document.getElementById("health-note").textContent = "Não deu para ler a saúde da coleta: " + (error.message || "erro") + ".";
+  }
 }
 function chartOptions() {
   return {
@@ -451,6 +731,7 @@ async function load({ silent = false } = {}) {
   try {
     const data = await api("/api/dashboard?" + query.toString());
     if (seq !== loadSeq) return;            // chegou uma resposta mais nova: descarta esta
+    loadHealth();                           // rota com login, fora da assinatura do dashboard
     renderLastCollect(data.last_collected_at);
     const sig = JSON.stringify(data);
     if (silent && sig === lastSig) return;  // nada mudou: não mexe no DOM (zero flicker)
@@ -459,6 +740,7 @@ async function load({ silent = false } = {}) {
     document.getElementById("banner").classList.add("hidden");
     document.getElementById("range-label").textContent = data.start + " → " + data.end;
     renderKpis(data.kpis);
+    renderTopPost(data.top_post);
     renderCharts(data);
     renderSuggestions(data.suggestions);
     renderAccounts(data.accounts);

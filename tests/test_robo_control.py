@@ -110,3 +110,44 @@ def test_watchdog_waits_for_pending_request(client, sent):
     beat(30)
     client.post("/api/robo/run")
     assert silence() is False
+
+
+def test_health_counts_late_accounts_and_collectors(client):
+    from uuid import uuid4
+
+    from app.models import Collector, Folder, XAccount
+    from app.services import ensure_owner
+
+    now = now_utc()
+    tag = uuid4().hex[:6]
+    with SessionLocal() as db:
+        folder = Folder(owner_id=ensure_owner(db).id, name=f"Saude {tag}")
+        db.add(folder)
+        db.flush()
+        db.add_all([
+            XAccount(folder_id=folder.id, username=f"em_dia_{tag}", collected_at=now - timedelta(minutes=10)),
+            XAccount(folder_id=folder.id, username=f"atras_{tag}", collected_at=now - timedelta(days=2)),
+            XAccount(folder_id=folder.id, username=f"nunca_{tag}"),
+            Collector(handle=f"livre_{tag}", is_active=True),
+            Collector(handle=f"cast_{tag}", is_active=True, paused_until=now + timedelta(minutes=30)),
+            Collector(handle=f"off_{tag}", is_active=False),
+        ])
+        db.commit()
+    beat(3, contas=1)
+    try:
+        body = client.get("/api/robo/health").json()
+        late = {item["username"] for item in body["stale"]}
+        assert {f"atras_{tag}", f"nunca_{tag}"} <= late and f"em_dia_{tag}" not in late
+        assert body["stale"][0]["collected_at"] is None, "nunca coletada vem primeiro"
+        assert body["fresh"] == body["accounts"] - len(body["stale"])
+        c = body["collectors"]
+        assert (c["free"], c["benched"], c["off"]) >= (1, 1, 1)
+        assert c["next_free_at"] is not None
+        assert body["late_after_min"] >= 60 and body["last_run"] is not None
+        assert "proxy" not in str(body) and "cookies" not in str(body)
+    finally:
+        with SessionLocal() as db:
+            db.query(XAccount).filter(XAccount.username.like(f"%_{tag}")).delete(synchronize_session=False)
+            db.query(Collector).filter(Collector.handle.like(f"%_{tag}")).delete(synchronize_session=False)
+            db.query(Folder).filter(Folder.name == f"Saude {tag}").delete(synchronize_session=False)
+            db.commit()
