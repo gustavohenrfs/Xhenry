@@ -167,6 +167,8 @@ def test_recent_alerts_newest_first():
     from app.services import now_utc
     from main import app
 
+    with TestClient(app):
+        pass  # o lifespan cria as tabelas antes de gravar
     tag = uuid4().hex[:8]
     with SessionLocal() as db:
         db.add_all([
@@ -182,3 +184,53 @@ def test_recent_alerts_newest_first():
         app.dependency_overrides.clear()
     assert [row["kind"] for row in rows] == ["viral", "queda"]
     assert rows[0]["text"] == "🚀 Post viralizando!" and rows[0]["sent_at"]
+
+
+def test_viral_feed_has_account_link_and_live_views():
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from fastapi.testclient import TestClient
+
+    from app.database import SessionLocal
+    from app.models import AlertSent, Folder, TweetSample, XAccount
+    from app.routers.auth import current_user
+    from app.services import ensure_owner
+    from main import app
+
+    with TestClient(app):
+        pass  # o lifespan cria as tabelas antes de gravar
+    tag = uuid4().hex[:6]
+    with SessionLocal() as db:
+        folder = Folder(owner_id=ensure_owner(db).id, name=f"Viral {tag}")
+        db.add(folder)
+        db.flush()
+        account = XAccount(folder_id=folder.id, username=f"vir_{tag}", display_name="Ana Vibes")
+        db.add(account)
+        db.flush()
+        db.add(TweetSample(
+            account_id=account.id, tweet_id="777", posted_at=datetime.now(timezone.utc),
+            timezone_used="America/Sao_Paulo", hour_local=10, weekday=0,
+            text_preview="Hoje tem live", view_count=9000, like_count=300,
+        ))
+        db.add_all([
+            AlertSent(dedupe_key=f"viral:{account.id}:777", kind="viral", detail="🚀 Post viralizando!\n👁 Views: 600"),
+            AlertSent(dedupe_key=f"queda:{tag}", kind="queda", detail="📉 Queda"),
+            # Conta apagada: sai do texto do alerta.
+            AlertSent(dedupe_key="viral:9999999:888", kind="viral",
+                      detail=f"🚀 Post viralizando!\n👤 Conta: Bia (@bia_{tag})\n👁 Views: 1.234\n🔗 Link do Post: https://x.com/bia/status/888"),
+        ])
+        db.commit()
+    app.dependency_overrides[current_user] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            items = client.get("/api/viral?limit=50").json()
+    finally:
+        app.dependency_overrides.clear()
+    mine = [item for item in items if tag in (item["username"] or "")]
+    assert all(item["username"] for item in mine) and len(mine) == 2, "só alertas viral"
+    gone, live = mine
+    assert (live["url"], live["views"], live["likes"], live["text"]) == (f"https://x.com/vir_{tag}/status/777", 9000, 300, "Hoje tem live")
+    assert live["display_name"] == "Ana Vibes"
+    assert (gone["username"], gone["display_name"], gone["views"]) == (f"bia_{tag}", "Bia", 1234)
+    assert gone["url"] == f"https://x.com/bia_{tag}/status/888"

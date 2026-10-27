@@ -913,6 +913,7 @@ async function load({ silent = false } = {}) {
     if (seq !== loadSeq) return;            // chegou uma resposta mais nova: descarta esta
     loadHealth();                           // rotas com login, fora da assinatura do dashboard
     loadAlerts();
+    checkViral();
     renderLastCollect(data.last_collected_at);
     const sig = JSON.stringify(data);
     if (silent && sig === lastSig) return;  // nada mudou: não mexe no DOM (zero flicker)
@@ -2074,6 +2075,173 @@ async function boot() {
     showAuth(true);
   }
 }
+// Sininho: só os alertas "Post viralizando" do robô. O id do alerta mais novo já visto fica no
+// navegador; os mais novos que ele contam no selo e viram notificação do Windows (com a aba aberta).
+const VIRAL_SEEN_KEY = "viral_seen_id";
+const VIRAL_NOTIFIED_KEY = "viral_notified_id";
+const VIRAL_POLL_MS = 60000;
+let viralItems = [];
+function storedId(key) {
+  try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; }
+}
+function storeId(key, value) {
+  try { localStorage.setItem(key, String(value)); } catch { /* aba anônima: segue sem lembrar */ }
+}
+function notifySupported() {
+  return "Notification" in window;
+}
+function paintBellPermission() {
+  const button = document.getElementById("bell-permission");
+  const note = document.getElementById("bell-note");
+  if (!notifySupported()) {
+    button.classList.add("hidden");
+    note.textContent = "Este navegador não mostra notificações.";
+    return;
+  }
+  const status = Notification.permission;
+  button.classList.toggle("hidden", status !== "default");
+  note.textContent = status === "granted"
+    ? "Notificações do Windows ligadas enquanto o painel estiver aberto."
+    : status === "denied"
+      ? "Notificações bloqueadas. Libere no cadeado da barra de endereço."
+      : "Clique em Ativar no Windows para receber o aviso na hora.";
+}
+async function askNotifications() {
+  if (!notifySupported() || Notification.permission !== "default") return;
+  try { await Notification.requestPermission(); } catch { /* navegador antigo: ignora */ }
+  paintBellPermission();
+  if (Notification.permission === "granted") {
+    const hello = new Notification("Notificações ligadas", {
+      body: "Você vai ver aqui cada post que viralizar.",
+      icon: "/static/img/icon-192.png",
+      tag: "xhenry-hello"
+    });
+    setTimeout(() => hello.close(), 5000);
+  }
+}
+function viralWho(item) {
+  if (!item.username) return item.display_name || "Conta removida";
+  return (item.display_name ? item.display_name + " " : "") + "@" + item.username;
+}
+function renderBell() {
+  const unread = viralItems.filter((item) => item.id > storedId(VIRAL_SEEN_KEY)).length;
+  const badge = document.getElementById("bell-badge");
+  badge.textContent = unread > 9 ? "9+" : String(unread);
+  badge.classList.toggle("hidden", !unread);
+  document.getElementById("bell").classList.toggle("has-new", unread > 0);
+  const host = document.getElementById("bell-list");
+  if (!viralItems.length) {
+    host.replaceChildren(el("li", "bell-empty text-sm text-mute", "Nenhum post viralizou ainda. Quando um passar do limite, ele aparece aqui."));
+    return;
+  }
+  const seen = storedId(VIRAL_SEEN_KEY);
+  host.replaceChildren(...viralItems.map((item) => {
+    const li = el("li", "bell-item" + (item.id > seen ? " is-new" : ""));
+    const avatar = el("div", "post-avatar bell-avatar");
+    const initial = (item.username || "?").slice(0, 1).toUpperCase();
+    if (item.profile_image_url) {
+      const img = el("img");
+      img.src = item.profile_image_url;
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      img.addEventListener("error", () => { img.remove(); avatar.textContent = initial; });
+      avatar.append(img);
+    } else avatar.textContent = initial;
+    const body = el("div", "min-w-0 flex-1");
+    const head = el("div", "flex items-baseline justify-between gap-2");
+    head.append(el("p", "truncate text-sm font-medium text-white", viralWho(item)), el("span", "shrink-0 text-[11px] text-mute", agoText(item.sent_at)));
+    body.append(head);
+    if (item.text) body.append(el("p", "bell-text mt-0.5 text-xs text-mute", item.text));
+    const foot = el("div", "mt-2 flex items-center justify-between gap-2");
+    foot.append(el("span", "bell-views font-mono text-xs", item.views === null ? "" : num(item.views) + " views"));
+    if (item.url) {
+      const link = el("a", "bell-link", "Abrir no X");
+      link.href = item.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      foot.append(link);
+    }
+    body.append(foot);
+    li.append(avatar, body);
+    return li;
+  }));
+}
+function notifyViral(items) {
+  if (!notifySupported() || Notification.permission !== "granted") return;
+  items.slice(0, 3).reverse().forEach((item) => {
+    const lines = [viralWho(item) + (item.views === null ? "" : ", " + num(item.views) + " views")];
+    if (item.text) lines.push(item.text);
+    const note = new Notification("🚀 Post viralizando", {
+      body: lines.join("\n"),
+      icon: "/static/img/icon-192.png",
+      badge: "/static/img/favicon-48.png",
+      tag: "viral-" + item.id
+    });
+    note.onclick = () => {
+      window.focus();
+      if (item.url) window.open(item.url, "_blank", "noopener");
+      note.close();
+    };
+  });
+}
+function ringBell() {
+  const bell = document.getElementById("bell");
+  bell.classList.remove("ring-now");
+  void bell.offsetWidth;  // reinicia a animação
+  bell.classList.add("ring-now");
+}
+let viralBusy = false;
+async function checkViral() {
+  if (viralBusy || !token() || tokenExpired()) return;
+  viralBusy = true;
+  try {
+    viralItems = await api("/api/viral?limit=20");
+    const newest = viralItems.length ? viralItems[0].id : 0;
+    const notified = storedId(VIRAL_NOTIFIED_KEY);
+    if (!notified) storeId(VIRAL_NOTIFIED_KEY, newest || 1);  // primeira vez: não dispara o histórico
+    else if (newest > notified) {
+      const fresh = viralItems.filter((item) => item.id > notified);
+      notifyViral(fresh);
+      ringBell();
+      storeId(VIRAL_NOTIFIED_KEY, newest);
+    }
+    renderBell();
+  } catch (error) {
+    if (error.message === SESSION_EXPIRED) return;
+  } finally {
+    viralBusy = false;
+  }
+}
+function setBellOpen(open) {
+  const panel = document.getElementById("bell-panel");
+  panel.classList.toggle("open", open);
+  document.getElementById("bell").setAttribute("aria-expanded", String(open));
+  if (open) {
+    paintBellPermission();
+    if (viralItems.length) storeId(VIRAL_SEEN_KEY, Math.max(storedId(VIRAL_SEEN_KEY), viralItems[0].id));
+    // Abriu: o selo some na hora; o destaque dos novos fica até fechar.
+    document.getElementById("bell-badge").classList.add("hidden");
+    document.getElementById("bell").classList.remove("has-new");
+  } else renderBell();
+}
+document.getElementById("bell").addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = !document.getElementById("bell-panel").classList.contains("open");
+  setBellOpen(open);
+  if (open) askNotifications();
+});
+document.getElementById("bell-permission").addEventListener("click", (event) => {
+  event.stopPropagation();
+  askNotifications();
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#bell-wrap")) setBellOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setBellOpen(false);
+});
+setInterval(checkViral, VIRAL_POLL_MS);
+
 setPeriod("today");
 setAuthMode("login");
 // Auto-refresh: a cada 60s, só na aba Dashboard, com a página visível e logado.

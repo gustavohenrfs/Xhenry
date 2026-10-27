@@ -30,6 +30,7 @@ PROTECTED = [
     ("post", "/api/robo/run", None),
     ("get", "/api/robo/health", None),
     ("get", "/api/alerts", None),
+    ("get", "/api/viral", None),
 ]
 
 PUBLIC = ["/", "/health", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]

@@ -629,3 +629,88 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .rank-who, .rank-likes { display: none; }
   .heat-hour { font-size: 8px; }
 }
+
+/* Logo */
+.brand-logo { object-fit: contain; filter: drop-shadow(0 0 10px rgba(255, 99, 195, .45)); }
+
+/* Sininho de posts viralizando */
+.bell-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border: 1px solid rgba(103, 220, 255, .24);
+  border-radius: 999px;
+  background: rgba(7, 12, 24, .58);
+  color: var(--text);
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.bell-btn svg { width: 1.2rem; height: 1.2rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.bell-btn:hover, .bell-btn[aria-expanded="true"] { border-color: var(--magenta); box-shadow: 0 0 18px rgba(255, 99, 195, .35); }
+.bell-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.bell-btn.has-new { color: var(--magenta); border-color: rgba(255, 99, 195, .6); box-shadow: 0 0 22px rgba(255, 99, 195, .4); }
+.bell-btn.has-new svg { animation: bell-sway 2.8s ease-in-out infinite; transform-origin: 50% 8%; }
+.bell-btn.ring-now svg { animation: bell-ring .9s ease-in-out 2; transform-origin: 50% 8%; }
+.bell-badge {
+  position: absolute;
+  top: -.3rem;
+  right: -.3rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 .3rem;
+  border-radius: 999px;
+  background: var(--magenta);
+  color: #1a0412;
+  font: 600 .65rem/1.15rem "Space Grotesk", sans-serif;
+  text-align: center;
+}
+.bell-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--magenta);
+  animation: bell-pulse 1.8s ease-out infinite;
+}
+@keyframes bell-sway { 0%, 86%, 100% { transform: rotate(0); } 90% { transform: rotate(12deg); } 94% { transform: rotate(-10deg); } 97% { transform: rotate(5deg); } }
+@keyframes bell-ring { 0%, 100% { transform: rotate(0); } 15% { transform: rotate(18deg); } 30% { transform: rotate(-16deg); } 45% { transform: rotate(12deg); } 60% { transform: rotate(-8deg); } 75% { transform: rotate(4deg); } }
+@keyframes bell-pulse { from { transform: scale(1); opacity: .8; } to { transform: scale(1.9); opacity: 0; } }
+
+.bell-panel {
+  position: absolute;
+  top: calc(100% + .7rem);
+  right: 0;
+  z-index: 50;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 1rem;
+  border: 1px solid rgba(255, 99, 195, .35);
+  border-radius: 1.4rem;
+  background: linear-gradient(160deg, #1c122c, #080c19);
+  box-shadow: 0 0 0 1px rgba(103, 220, 255, .08), 0 24px 70px rgba(0, 0, 0, .55), 0 0 40px rgba(255, 99, 195, .14);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px) scale(.97);
+  transform-origin: top right;
+  transition: opacity .18s ease, transform .22s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .22s;
+}
+.bell-panel.open { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.bell-list { display: grid; gap: .5rem; max-height: min(26rem, 70vh); overflow-y: auto; scrollbar-width: thin; }
+.bell-item {
+  display: flex;
+  gap: .75rem;
+  padding: .75rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(7, 12, 24, .5);
+  text-align: left;
+}
+.bell-item.is-new { border-color: rgba(255, 99, 195, .5); background: linear-gradient(135deg, rgba(255, 99, 195, .12), rgba(7, 12, 24, .5)); }
+.bell-avatar { width: 2.2rem; height: 2.2rem; font-size: .85rem; }
+.bell-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bell-views { color: #7cf0b5; }
+.bell-link { border-radius: 999px; padding: .2rem .7rem; background: var(--magenta); color: #1a0412; font-size: .72rem; font-weight: 600; }
+.bell-link:hover { background: #fff; }
+.bell-empty { padding: .75rem; text-align: center; }

@@ -12,6 +12,7 @@ As métricas dos tweets são coletadas pelo `robo.py` (na raiz deste repositóri
 - **Saúde da coleta:** contas atrasadas (sem coleta além do ritmo esperado para o número de coletores e o intervalo), última rodada do robô e coletores livres, de castigo e desligados.
 - **Meta do dia:** barra no cartão de Views com as views de hoje contra a meta de Configurações (Meta de views do dia).
 - **Mapa de calor** em Melhor Horário (média de views por dia da semana e hora), **ranking** dos 10 posts do período com link, **alertas recentes** enviados ao Telegram e, em cada conta, a linha dos últimos 14 dias e a variação das views.
+- **Sininho** (canto superior direito): só os posts viralizando, com a conta, o texto, as views de agora e o link. Clicar nele pede permissão para notificar; com a permissão, cada post novo que viralizar aparece como notificação do Windows (precisa de HTTPS e do painel aberto numa aba, mesmo minimizada).
 - Salvamentos aparecem depois que o `robo.py` atualizado coletar (antes ele gravava sempre 0).
 
 ## Coletores
