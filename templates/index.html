@@ -17,84 +17,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@360;480;580&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <!-- Tailwind compilado (scripts/build_css.sh), depois do styles.css como era com o CDN. -->
-  <link rel="stylesheet" href="/static/css/styles.css?v=9">
-  <link rel="stylesheet" href="/static/css/tailwind.css?v=1">
+  <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
+  <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
+  <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=2">
+  <link rel="stylesheet" href="/static/css/styles.css?v=10">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=26"></script>
-  <style>
-    html, body { background: #07050a; color: #fff7fc; min-height: 100%; }
-    body { font-family: Outfit, sans-serif; }
-    ::selection { background: #ff2ec8; color: #1a0412; }
-    .nav-btn { color: #b39ab4; border: 1px solid transparent; }
-    .nav-btn.active {
-      color: #fff7fc;
-      background: rgba(255, 46, 200, .12);
-      border-color: rgba(255, 46, 200, .45);
-      box-shadow: 0 0 22px rgba(255, 46, 200, .16);
-    }
-    .glow { transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease; }
-    .glow:hover {
-      transform: translateY(-5px);
-      border-color: rgba(255, 46, 200, .85);
-      box-shadow: 0 0 0 1px rgba(255, 46, 200, .6), 0 0 18px rgba(255, 46, 200, .55), 0 20px 50px rgba(255, 46, 200, .25);
-    }
-    .status-reveal { opacity: 0; transform: translateY(6px); transition: opacity .18s ease, transform .18s ease; }
-    .account-card:hover .status-reveal,
-    .account-card.is-open .status-reveal { opacity: 1; transform: none; }
-    .st-healthy { color: #b8ffd8; border-color: rgba(80, 230, 150, .45); background: rgba(80, 230, 150, .1); }
-    .st-search_ban { color: #ffe0a3; border-color: rgba(255, 196, 80, .45); background: rgba(255, 196, 80, .1); }
-    .st-ghost_ban { color: #ffb4c4; border-color: rgba(255, 80, 120, .5); background: rgba(255, 46, 100, .12); }
-    .st-none, .st-unknown, .st-api_error, .st-rate_limited, .st-protected, .st-suspended, .st-not_found {
-      color: #ffd6f2; border-color: rgba(255, 46, 200, .35); background: rgba(255, 46, 200, .08);
-    }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    .pane { display: none !important; }
-    .pane.on { display: block !important; }
-    #pane-settings.on { display: block !important; }
-    .auth-modal {
-      position: fixed; inset: 0; z-index: 50;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(7, 5, 10, .86);
-      backdrop-filter: blur(10px);
-    }
-    .auth-modal.off { display: none !important; }
-
-    /* Efeito Neon no Nome */
-    #welcome-name {
-        color: #ff007f !important;
-        text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f, 0 0 40px #ff007f !important;
-        animation: pulse-neon 2s infinite alternate;
-    }
-    @keyframes pulse-neon {
-        from { text-shadow: 0 0 10px #ff007f, 0 0 20px #ff007f; }
-        to { text-shadow: 0 0 20px #ff007f, 0 0 40px #ff007f, 0 0 60px #ff007f; }
-    }
-    /* Esferas de Fundo */
-    #bg-orbs {
-        position: fixed;
-        inset: 0;
-        z-index: -1;
-        pointer-events: none;
-        overflow: hidden;
-    }
-    .orb {
-        position: absolute;
-        border-radius: 50%;
-        filter: blur(100px);
-        opacity: .55;
-        animation: orb-float 28s ease-in-out infinite;
-    }
-    .orb.pink { background: #ff2ec8; width: 420px; height: 420px; top: 8%; left: 12%; animation-delay: 0s; }
-    .orb.purple { background: #8c50dc; width: 380px; height: 380px; bottom: 12%; right: 18%; animation-delay: -9s; }
-    .orb.gold { background: #d4af37; width: 320px; height: 320px; top: 55%; left: 65%; animation-delay: -18s; }
-    @keyframes orb-float {
-        0%,100% { transform: translate(0,0) scale(1); }
-        25% { transform: translate(35px, -28px) scale(1.04); }
-        50% { transform: translate(-22px, 32px) scale(0.96); }
-        75% { transform: translate(18px, -15px) scale(1.02); }
-    }
-  </style>
+  <script defer src="/static/js/app.js?v=27"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -151,6 +80,10 @@
           <button id="install-btn" type="button" class="install-btn hidden" aria-label="Instalar o app">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/></svg>
             <span>Instalar</span>
+          </button>
+          <button id="theme-btn" type="button" class="theme-btn" aria-label="Alternar tema claro e escuro" title="Tema claro / escuro">
+            <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
+            <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.6A8.5 8.5 0 0 1 9.4 4a8.5 8.5 0 1 0 10.6 10.6Z"/></svg>
           </button>
           <div id="bell-wrap" class="relative">
             <button id="bell" type="button" class="bell-btn" aria-label="Posts viralizando" aria-haspopup="true" aria-expanded="false">

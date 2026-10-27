@@ -12,9 +12,31 @@ let mixChart = null;
 let toastTimer = 0;
 let croppedFile = null;
 let cropper = null;
+// Tema claro/escuro: <html data-theme>, aplicado antes da pintura por um script no <head>. A escolha
+// fica em localStorage.theme; sem escolha, segue o sistema. As cores moram nas variáveis do styles.css.
+const THEME_KEY = "theme";
+const systemLight = matchMedia("(prefers-color-scheme: light)");
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function currentTheme() { return document.documentElement.dataset.theme === "light" ? "light" : "dark"; }
+function applyChartTheme() {
+  if (!window.Chart) return;
+  Chart.defaults.color = cssVar("--muted");
+  Chart.defaults.borderColor = cssVar("--line");
+  if (mixChart) mixChart.data.datasets[0].borderColor = cssVar("--slice-gap");
+  [lineChart, barChart, mixChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
+}
+function setTheme(theme, remember) {
+  document.documentElement.dataset.theme = theme;
+  if (remember) { try { localStorage.setItem(THEME_KEY, theme); } catch { /* sem armazenamento: vale só nesta aba */ } }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === "light" ? "#eef0f8" : "#07050c";
+  applyChartTheme();
+}
+function savedTheme() { try { return localStorage.getItem(THEME_KEY); } catch { return null; } }
+systemLight.addEventListener("change", (event) => { if (!savedTheme()) setTheme(event.matches ? "light" : "dark", false); });
 if (window.Chart) {
-  Chart.defaults.color = "#b39ab4";
-  Chart.defaults.borderColor = "rgba(255,46,200,.12)";
+  Chart.defaults.color = cssVar("--muted");
+  Chart.defaults.borderColor = cssVar("--line");
   Chart.defaults.font.family = "Outfit, sans-serif";
   Chart.defaults.animation.duration = 450;
   Chart.defaults.animation.easing = "easeOutCubic";
@@ -385,7 +407,7 @@ function renderMix(kpis) {
     datasets: [{
       data: parts.length ? parts.map((part) => part.value) : [1],
       backgroundColor: parts.length ? parts.map((part) => part.color) : ["rgba(162,180,255,.14)"],
-      borderColor: "rgba(8,12,25,.9)",
+      borderColor: cssVar("--slice-gap"),  // a fresta entre as fatias tem a cor do cartão
       borderWidth: 3,
       hoverOffset: 6
     }]
@@ -2550,6 +2572,77 @@ document.getElementById("install-help-close").addEventListener("click", () => {
   document.getElementById("install-help").classList.add("off");
 });
 paintInstall();
+
+// Troca de tema: o tema novo se abre num círculo a partir do botão (View Transitions). Sem suporte ou
+// com "reduzir movimento", troca na hora. As transições de cor ficam desligadas durante a troca, senão
+// o retrato do tema novo sairia com as cores do antigo.
+document.getElementById("theme-btn").addEventListener("click", (event) => {
+  const next = currentTheme() === "light" ? "dark" : "light";
+  const root = document.documentElement;
+  if (!document.startViewTransition || reduceMotion.matches) { setTheme(next, true); return; }
+  const box = event.currentTarget.getBoundingClientRect();
+  const x = box.left + box.width / 2;
+  const y = box.top + box.height / 2;
+  const radius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  root.classList.add("theme-switching");
+  const transition = document.startViewTransition(() => setTheme(next, true));
+  transition.ready.then(() => root.animate(
+    { clipPath: ["circle(0px at " + x + "px " + y + "px)", "circle(" + radius + "px at " + x + "px " + y + "px)"] },
+    { duration: 560, easing: "cubic-bezier(.65, 0, .25, 1)", pseudoElement: "::view-transition-new(root)" }
+  )).catch(() => {});
+  transition.finished.finally(() => root.classList.remove("theme-switching"));
+});
+
+// Vidro vivo: o laser da borda e o reflexo seguem o cursor (--mx/--my) e os cartões inclinam em 3D
+// (--rx/--ry). Um ouvinte só para a página toda, pintado uma vez por quadro. Só com mouse; sem
+// inclinação com "reduzir movimento". Formulários não se mexem (o laser deles acende ao digitar).
+const GLASS_SELECTOR = ".glow, .kpi-card, #pane-dashboard article, #cloaker-results";
+const TILT_SELECTOR = ".kpi-card, #pane-dashboard article.glow, .account-card, #folder-cards > .glow, #ops-accounts > .glow, #collector-list > .glow, #archived-accounts > .glow";
+const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let litCard = null;
+let glassFrame = 0;
+let glassPointer = null;
+function releaseCard() {
+  const card = litCard;
+  if (!card) return;
+  litCard = null;
+  card.classList.remove("is-lit");
+  card.style.setProperty("--rx", "0deg");
+  card.style.setProperty("--ry", "0deg");
+  // Depois de voltar ao lugar, tira o 3D (cartão parado não precisa de camada própria).
+  setTimeout(() => { if (card !== litCard) card.classList.remove("tilt"); }, 650);
+}
+function paintGlass() {
+  glassFrame = 0;
+  const event = glassPointer;
+  const found = event.target instanceof Element ? event.target.closest(GLASS_SELECTOR) : null;
+  const card = found && found.tagName !== "FORM" ? found : null;
+  if (card !== litCard) {
+    releaseCard();
+    if (!card) return;
+    litCard = card;
+    card.classList.add("is-lit");
+    if (!reduceMotion.matches && card.matches(TILT_SELECTOR)) card.classList.add("tilt");
+  }
+  if (!card) return;
+  const box = card.getBoundingClientRect();
+  const x = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
+  const y = Math.min(1, Math.max(0, (event.clientY - box.top) / box.height));
+  card.style.setProperty("--mx", (x * 100).toFixed(1) + "%");
+  card.style.setProperty("--my", (y * 100).toFixed(1) + "%");
+  if (card.classList.contains("tilt")) {
+    const max = box.width > 640 ? 2 : box.width > 360 ? 4 : 7;  // cartão grande inclina menos
+    card.style.setProperty("--rx", ((0.5 - y) * max * 2).toFixed(2) + "deg");
+    card.style.setProperty("--ry", ((x - 0.5) * max * 2).toFixed(2) + "deg");
+  }
+}
+document.addEventListener("pointermove", (event) => {
+  if (event.pointerType !== "mouse" || !finePointer.matches) return;
+  glassPointer = event;
+  if (!glassFrame) glassFrame = requestAnimationFrame(paintGlass);
+}, { passive: true });
+document.addEventListener("mouseout", (event) => { if (!event.relatedTarget) releaseCard(); });
 
 setPeriod("today");
 setAuthMode("login");
