@@ -266,3 +266,19 @@ def test_total_charts_start_at_first_post(client, folder):
     assert data["growth"]["mode"] == "day"
     assert len(data["growth"]["labels"]) == 14, "posts de ontem e hoje: o mínimo de 14 dias, não 3650"
     assert len(data["spark"]) == 14
+
+
+def test_account_detail_drawer(client, folder):
+    from app.routers.auth import current_user
+
+    app.dependency_overrides[current_user] = lambda: object()
+    try:
+        data = client.get(f"/api/accounts/{folder['a']}/detail?period=today").json()
+        assert data["account"]["username"] == "dash_a" and data["account"]["views"] >= 150
+        assert len(data["series"]) == 14, "período curto: o gráfico mostra 14 dias"
+        assert data["series"][-1]["views"] >= 150 and data["series"][-1]["followers"] == 100
+        assert [p["views"] for p in data["top_posts"]][:2] == sorted([p["views"] for p in data["top_posts"]], reverse=True)[:2]
+        assert isinstance(data["checks"], list)
+        assert client.get("/api/accounts/999999/detail").status_code == 404
+    finally:
+        app.dependency_overrides.clear()

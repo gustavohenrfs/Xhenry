@@ -26,6 +26,7 @@ PROTECTED = [
     ("patch", "/api/collectors/1", {"is_active": False}),
     ("delete", "/api/collectors/1", None),
     ("post", "/api/collectors/1/test", None),
+    ("get", "/api/accounts/1/detail?period=7d", None),
     ("get", "/api/robo", None),
     ("put", "/api/robo", {"enabled": False}),
     ("post", "/api/robo/run", None),

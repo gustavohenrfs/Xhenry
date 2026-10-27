@@ -9,6 +9,7 @@ const SESSION_EXPIRED = "Sua sessão expirou. Entre novamente.";
 let lineChart = null;
 let barChart = null;
 let mixChart = null;
+let drawerChart = null;
 let toastTimer = 0;
 let croppedFile = null;
 let cropper = null;
@@ -23,7 +24,7 @@ function applyChartTheme() {
   Chart.defaults.color = cssVar("--muted");
   Chart.defaults.borderColor = cssVar("--line");
   if (mixChart) mixChart.data.datasets[0].borderColor = cssVar("--slice-gap");
-  [lineChart, barChart, mixChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
+  [lineChart, barChart, mixChart, drawerChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
 }
 function setTheme(theme, remember) {
   document.documentElement.dataset.theme = theme;
@@ -325,6 +326,7 @@ function countTo(node, key, value, format) {
   const from = shownNumbers.has(key) ? shownNumbers.get(key) : null;
   shownNumbers.set(key, to);
   node.textContent = format(value);
+  if (from !== null && to !== null && from !== to) node.dataset.changed = "1";
   if (from === null || to === null || from === to || matchMedia("(prefers-reduced-motion: reduce)").matches) return node;
   const start = performance.now();
   const step = (now) => {
@@ -339,6 +341,7 @@ function countTo(node, key, value, format) {
 }
 function heroCard(kpis, series) {
   const card = el("article", "kpi-card kpi-left kpi-hero col-span-2 rounded-3xl border bg-card p-5");
+  card.dataset.key = "views";
   const top = el("div", "flex items-center justify-between gap-3");
   top.append(el("p", "text-sm text-mute", "Views"), deltaChip(kpis.views, prevOf("views")));
   const label = state.data.compare_label;
@@ -361,11 +364,13 @@ function heroCard(kpis, series) {
   if (series.length > 1) {
     const days = series.length;
     card.append(sparkline(series), el("p", "spark-caption text-[10px] text-mute", days <= 14 ? "últimos " + days + " dias" : "views por dia"));
+    sparkHover(card, series);
   }
   return card;
 }
 function perPostCard(kpis) {
   const card = el("article", "kpi-card kpi-left col-span-2 rounded-3xl border bg-card p-5");
+  card.dataset.key = "views_per_post";
   const top = el("div", "flex items-center justify-between gap-3");
   top.append(el("p", "text-sm text-mute", "Views por post"), deltaChip(kpis.views_per_post, prevOf("views_per_post")));
   const posts = kpis.posts || 0;
@@ -393,6 +398,7 @@ function perPostCard(kpis) {
 }
 function followersCard(kpis) {
   const card = el("article", "kpi-card kpi-left col-span-2 rounded-3xl border bg-card p-5");
+  card.dataset.key = "followers_gained";
   const gained = kpis.followers_gained;
   const tone = gained > 0 ? "gain-up" : gained < 0 ? "gain-down" : "text-white";
   card.append(
@@ -404,6 +410,7 @@ function followersCard(kpis) {
 }
 function tile(label, value, current, previous, hint) {
   const card = el("article", "kpi-card flex min-h-24 flex-col items-center justify-center rounded-3xl border bg-card px-4 py-4 text-center");
+  card.dataset.key = "tile:" + label;
   const big = el("p", "mt-1 font-mono text-2xl tracking-tight text-white", value);
   if (typeof current === "number") countTo(big, "tile:" + label, current, num);
   card.append(el("p", "text-xs text-mute", label), big);
@@ -838,30 +845,78 @@ function renderSuggestions(suggestions) {
     return li;
   }));
 }
+// Busca e ordem das contas do Dashboard (a ordem escolhida fica no aparelho).
+const ACC_SORT_KEY = "acc_sort";
+const STATUS_ORDER = { ghost_ban: 0, search_ban: 1, suspended: 2, not_found: 3, protected: 4, rate_limited: 5, api_error: 6, unknown: 7, healthy: 9 };
+function plain(text) { return String(text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
+function accountSort() { try { return localStorage.getItem(ACC_SORT_KEY) || "views"; } catch { return "views"; } }
+function paintAccountSort() {
+  const current = accountSort();
+  document.querySelectorAll("#acc-sort [data-sort]").forEach((button) => {
+    const on = button.dataset.sort === current;
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-checked", String(on));
+  });
+}
+function sortedAccounts(accounts) {
+  const query = plain(document.getElementById("acc-search").value.trim().replace(/^@/, ""));
+  const list = accounts.filter((a) => !a.is_archived && (!query || [a.display_name, a.username, a.folder_name].some((v) => plain(v).includes(query))));
+  const by = accountSort();
+  const name = (a) => plain(a.display_name || a.username);
+  const compare = {
+    views: (a, b) => (b.views || 0) - (a.views || 0),
+    status: (a, b) => (STATUS_ORDER[a.status] ?? 8) - (STATUS_ORDER[b.status] ?? 8) || (b.views || 0) - (a.views || 0),
+    folder: (a, b) => plain(a.folder_name).localeCompare(plain(b.folder_name)) || (b.views || 0) - (a.views || 0),
+    name: (a, b) => name(a).localeCompare(name(b))
+  }[by] || (() => 0);
+  return list.sort(compare);
+}
+function folderColor(folderId) {
+  const folder = ((state.data && state.data.folders) || []).find((item) => item.id === folderId);
+  return folder && /^#[0-9a-f]{3,8}$/i.test(folder.color || "") ? folder.color : null;
+}
 function renderAccounts(accounts) {
   const host = document.getElementById("accounts");
-  const visible = accounts.filter((a) => !a.is_archived);
+  if (!accounts.some((a) => !a.is_archived)) {
+    host.replaceChildren(emptyState("ops", "Nenhuma conta ainda", "Crie uma pasta em Operações e adicione as contas que você quer acompanhar.", "Abrir Operações", () => setTab("ops")));
+    return;
+  }
+  const visible = sortedAccounts(accounts);
   if (!visible.length) {
-    const empty = document.createElement("p");
-    empty.className = "text-sm text-mute";
-    empty.textContent = "Nenhuma conta ainda. Abra Operações e crie uma pasta.";
-    host.replaceChildren(empty);
+    host.replaceChildren(emptyState("search", "Nenhuma conta encontrada", "Nada com “" + document.getElementById("acc-search").value.trim() + "” no nome, no @ ou na pasta.", "Limpar busca", () => {
+      document.getElementById("acc-search").value = "";
+      renderAccounts(accounts);
+    }));
     return;
   }
   host.replaceChildren(...visible.map((account) => {
     const card = document.createElement("article");
-    card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4 text-center flex flex-col items-center justify-center" + (state.openId === account.id ? " is-open" : "");
+    card.className = "account-card glow relative cursor-pointer rounded-2xl border border-neon/20 bg-card p-4 text-center flex flex-col items-center justify-center";
+    card.dataset.accountId = String(account.id);
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", "Abrir detalhes de @" + account.username);
     card.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;
-      state.openId = state.openId === account.id ? null : account.id;
-      renderAccounts(accounts);
+      openDrawer(account.id);
     });
+    card.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && event.target === card) { event.preventDefault(); openDrawer(account.id); }
+    });
+    const color = folderColor(account.folder_id);
+    if (color) {
+      const stripe = el("span", "folder-stripe");
+      stripe.style.background = color;
+      card.append(stripe);
+      card.style.setProperty("--folder", color);
+    }
     const name = document.createElement("p");
     name.className = "font-medium text-white";
     name.textContent = account.display_name || "@" + account.username;
     const handle = document.createElement("p");
     handle.className = "text-sm text-mute";
     handle.textContent = "@" + account.username + " · " + account.folder_name;
+    if (color) handle.prepend(el("span", "folder-dot"));
     const grid = document.createElement("dl");
     grid.className = "mt-4 grid grid-cols-2 items-center justify-center gap-x-2 gap-y-3 text-center text-sm sm:grid-cols-4";
     [["Views", num(account.views)], ["Curtidas", num(account.likes)], ["Retweets", num(account.retweets)], ["Seguidores", num(account.followers)]].forEach(([label, value]) => {
@@ -900,10 +955,7 @@ function renderAccounts(accounts) {
 function renderFolders(folders) {
   const host = document.getElementById("folder-cards");
   if (!folders.length) {
-    const empty = document.createElement("p");
-    empty.className = "text-sm text-mute";
-    empty.textContent = "Nenhuma pasta. Crie a primeira acima.";
-    host.replaceChildren(empty);
+    host.replaceChildren(emptyState("ops", "Nenhuma pasta ainda", "Pastas agrupam as contas monitoradas (por nicho, cliente ou como preferir).", "Criar pasta", () => document.getElementById("folder-name").focus()));
     return;
   }
   host.replaceChildren(...folders.map((folder) => {
@@ -955,10 +1007,7 @@ function renderOpsAccounts(accounts) {
   if (!state.opsFolderId) { host.replaceChildren(); return; }
   const rows = accounts.filter((account) => account.folder_id === state.opsFolderId && !account.is_archived);
   if (!rows.length) {
-    const empty = document.createElement("p");
-    empty.className = "text-sm text-mute";
-    empty.textContent = "Nenhuma conta ativa nesta pasta. Adicione a primeira acima.";
-    host.replaceChildren(empty);
+    host.replaceChildren(emptyState("account", "Nenhuma conta nesta pasta", "Adicione o @ de uma conta acima e o robô começa a ler na próxima rodada.", "Adicionar conta", () => document.getElementById("account-handle").focus()));
     return;
   }
   host.replaceChildren(...rows.map((account) => {
@@ -1035,9 +1084,10 @@ function dashQuery(period, folderId) {
   if (folderId) query.set("folder_id", String(folderId));
   return "/api/dashboard?" + query.toString();
 }
-function renderDashboard(data, sig, swap) {
+function renderDashboard(data, sig, swap, live) {
   if (sig === lastSig) return;              // nada mudou: não mexe no DOM (zero flicker)
   lastSig = sig;
+  const before = state.data;
   state.data = data;
   if (swap) {                               // troca de período/pasta: os números entram com um fade curto
     const pane = document.getElementById("pane-dashboard");
@@ -1057,6 +1107,8 @@ function renderDashboard(data, sig, swap) {
   renderAccounts(data.accounts);
   renderFolders(data.folders);
   renderOpsView();
+  // Atualização automática com números novos: os cartões que mudaram ganham uma passada de laser.
+  if (live && before && before.start === data.start && before.end === data.end) flashChanges(before, data);
 }
 function rememberDash(period, folderId, data) {
   const sig = JSON.stringify(data);
@@ -1110,10 +1162,12 @@ async function load({ silent = false } = {}) {
       checkViral();
     }
     renderLastCollect(data.last_collected_at);
-    renderDashboard(data, sig, !silent && !cached && lastSig !== "");
+    renderDashboard(data, sig, !silent && !cached && lastSig !== "", silent);
+    markLive(true);
     if (!silent) prefetchPeriods();
   } catch (error) {
     if (!silent) toast(error.message || "Falha ao carregar.");
+    else markLive(false);
   } finally {
     if (seq === loadSeq) loadInflight = false;
   }
@@ -1698,7 +1752,7 @@ async function loadArchived() {
     const accounts = await api("/api/accounts/archived");
     archivedCharts.forEach((chart) => chart.destroy());
     archivedCharts = [];
-    host.replaceChildren(...(accounts.length ? accounts.map(archivedCard) : [message("Nenhuma conta arquivada.")]));
+    host.replaceChildren(...(accounts.length ? accounts.map(archivedCard) : [emptyState("archived", "Nenhuma conta arquivada", "Arquivar tira a conta do Dashboard e da coleta, mas o histórico fica guardado aqui.")]));
   } catch (error) {
     host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
@@ -1743,6 +1797,7 @@ function collectorButton(text, onClick) {
 function collectorCard(collector) {
   const card = document.createElement("article");
   card.className = "glow rounded-2xl border border-neon/20 bg-card p-4";
+  card.dataset.collectorId = String(collector.id);
   const head = document.createElement("div");
   head.className = "flex items-start justify-between gap-3";
   const name = document.createElement("p");
@@ -1812,7 +1867,7 @@ async function loadCollectors({ silent = false } = {}) {
     const sig = JSON.stringify(collectors);
     if (silent && sig === collectorsSig) return;  // nada mudou: não mexe no DOM
     collectorsSig = sig;
-    host.replaceChildren(...(collectors.length ? collectors.map(collectorCard) : [message("Nenhum coletor. Sem coletores o robô não lê nenhuma timeline.")]));
+    host.replaceChildren(...(collectors.length ? collectors.map(collectorCard) : [emptyState("collectors", "Nenhum coletor ainda", "Sem coletores o robô não lê nenhuma timeline. Cadastre uma conta descartável com o proxy dela.", "Adicionar coletor", () => document.getElementById("collector-handle").focus())]));
   } catch (error) {
     if (!silent) host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
@@ -2638,6 +2693,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     setBellOpen(false);
     setMoreOpen(false);
+    closePalette();
+    closeDrawer();
     document.getElementById("install-help").classList.add("off");
   }
 });
@@ -2759,5 +2816,415 @@ function autoRefresh() {
 }
 setInterval(autoRefresh, AUTO_REFRESH_MS);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) autoRefresh(); });
+
+// ---------- ícones e telas vazias ----------
+// Mesmo traço dos ícones das abas (index.html); usados nas telas vazias e na busca rápida.
+const ICONS = {
+  dashboard: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
+  ops: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>',
+  archived: '<rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/>',
+  collectors: '<circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/>',
+  post: '<path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/>',
+  cloaker: '<path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/>',
+  settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
+  account: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
+  theme: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/>'
+};
+function icon(name, className) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", className || "nav-ico");
+  svg.innerHTML = ICONS[name] || ICONS.search;  // marcação fixa daqui, nunca texto de fora
+  return svg;
+}
+// Tela vazia com direção: o que é, por que está vazia e o próximo passo.
+function emptyState(iconName, title, text, actionLabel, onAction) {
+  const box = el("div", "empty-state col-span-full");
+  box.append(icon(iconName, "empty-ico"), el("p", "font-display text-lg text-white", title), el("p", "max-w-md text-sm text-mute", text));
+  if (actionLabel) {
+    const button = el("button", "mt-1 rounded-full bg-neon px-4 py-2 text-sm font-medium text-ink", actionLabel);
+    button.type = "button";
+    button.addEventListener("click", onAction);
+    box.append(button);
+  }
+  return box;
+}
+
+// ---------- ao vivo + destaque do que mudou ----------
+let liveAt = 0;
+let liveOk = true;
+function paintLive() {
+  const pill = document.getElementById("live-pill");
+  if (!pill || !liveAt) return;
+  const secs = Math.max(0, Math.round((Date.now() - liveAt) / 1000));
+  const ago = secs < 15 ? "agora" : secs < 60 ? "há " + secs + " s" : "há " + Math.round(secs / 60) + " min";
+  pill.classList.toggle("is-off", !liveOk);
+  pill.classList.toggle("is-stale", liveOk && secs > 180);
+  document.getElementById("live-text").textContent = liveOk ? "atualizado " + ago : "sem conexão";
+}
+function markLive(ok) {
+  liveOk = ok;
+  if (ok) liveAt = Date.now();
+  paintLive();
+}
+setInterval(paintLive, 10000);
+function flash(node) {
+  if (!node) return;
+  node.classList.remove("just-changed");
+  void node.offsetWidth;
+  node.classList.add("just-changed");
+  setTimeout(() => node.classList.remove("just-changed"), 1800);
+}
+function flashChanges(before, data) {
+  document.querySelectorAll("#kpis [data-changed]").forEach((node) => flash(node.closest(".kpi-card")));
+  const old = new Map((before.accounts || []).map((a) => [a.id, a.views]));
+  (data.accounts || []).forEach((account) => {
+    if (old.has(account.id) && old.get(account.id) !== account.views) {
+      flash(document.querySelector('#accounts [data-account-id="' + account.id + '"]'));
+    }
+  });
+}
+
+// ---------- valor de cada dia na linha de views ----------
+function sparkHover(card, series) {
+  const svg = card.querySelector(".spark");
+  if (!svg || series.length < 2) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const marker = document.createElementNS(ns, "line");
+  marker.setAttribute("class", "spark-marker");
+  marker.setAttribute("y1", "0");
+  marker.setAttribute("y2", "32");
+  svg.append(marker);
+  const tip = el("p", "spark-tip");
+  card.append(tip);
+  svg.addEventListener("pointermove", (event) => {
+    const box = svg.getBoundingClientRect();
+    const index = Math.round(Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)) * (series.length - 1));
+    const x = index / (series.length - 1) * 100;
+    marker.setAttribute("x1", x.toFixed(2));
+    marker.setAttribute("x2", x.toFixed(2));
+    const day = series[index].date;
+    tip.textContent = day.slice(8, 10) + "/" + day.slice(5, 7) + ": " + num(series[index].views) + " views";
+    tip.style.left = Math.min(Math.max(x, 12), 88) + "%";
+    card.classList.add("spark-on");
+  });
+  svg.addEventListener("pointerleave", () => card.classList.remove("spark-on"));
+}
+
+// ---------- gaveta da conta ----------
+let drawerFor = null;
+let drawerReturn = null;
+function drawerOpen() { return document.getElementById("drawer").classList.contains("open"); }
+function closeDrawer() {
+  const drawer = document.getElementById("drawer");
+  if (!drawer.classList.contains("open")) return;
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("drawer-lock");
+  drawerFor = null;
+  setTimeout(() => { if (!drawerOpen() && drawerChart) { drawerChart.destroy(); drawerChart = null; } }, 400);
+  if (drawerReturn && drawerReturn.isConnected) drawerReturn.focus();
+}
+document.getElementById("drawer").addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-drawer]")) closeDrawer();
+});
+function drawerSection(title, ...children) {
+  const box = el("div", "drawer-section");
+  box.append(el("h3", "font-display text-base text-white", title), ...children);
+  return box;
+}
+async function openDrawer(accountId) {
+  const account = ((state.data && state.data.accounts) || []).find((a) => a.id === accountId);
+  if (!account) return;
+  const drawer = document.getElementById("drawer");
+  if (!drawerOpen()) drawerReturn = document.activeElement;
+  drawerFor = accountId;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  document.body.classList.add("drawer-lock");
+  renderDrawer(account, null);
+  document.getElementById("drawer-close").focus();
+  try {
+    const detail = await api("/api/accounts/" + accountId + "/detail?period=" + encodeURIComponent(state.period));
+    if (drawerFor === accountId) renderDrawer(detail.account, detail);
+  } catch (error) {
+    if (drawerFor !== accountId) return;
+    document.getElementById("drawer-extra").replaceChildren(el("p", "text-sm text-mute", "Não deu para carregar os detalhes: " + (error.message || "erro") + "."));
+  }
+}
+function renderDrawer(account, detail) {
+  const body = document.getElementById("drawer-body");
+  const color = folderColor(account.folder_id);
+  const head = el("div", "drawer-head");
+  const who = el("p", "text-sm text-mute", "@" + account.username + " · " + account.folder_name);
+  if (color) { who.prepend(el("span", "folder-dot")); head.style.setProperty("--folder", color); }
+  const title = el("h2", "font-display text-2xl text-white", account.display_name || "@" + account.username);
+  title.id = "drawer-title";
+  const actions = el("div", "mt-3 flex flex-wrap gap-2");
+  const check = el("button", "rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink", "Verificar agora");
+  check.type = "button";
+  check.addEventListener("click", async () => {
+    check.disabled = true;
+    check.textContent = "Verificando…";
+    await verify(account);
+    if (drawerFor === account.id) openDrawer(account.id);
+  });
+  const open = el("a", "rounded-full border border-neon/40 px-4 py-1.5 text-sm", "Abrir no X");
+  open.href = "https://x.com/" + encodeURIComponent(account.username);
+  open.target = "_blank";
+  open.rel = "noopener";
+  actions.append(check, open);
+  head.append(el("span", "rounded-full border px-2.5 py-0.5 text-xs font-medium st-" + (account.status || "none"), account.status_label), title, who, actions);
+  const stats = el("dl", "drawer-stats");
+  [["Views", account.views], ["Curtidas", account.likes], ["Retweets", account.retweets], ["Seguidores", account.followers]].forEach(([label, value]) => {
+    const item = el("div", "drawer-stat");
+    item.append(el("dt", "text-[11px] text-mute", label), el("dd", "font-mono text-lg text-white", num(value)));
+    stats.append(item);
+  });
+  const extra = el("div", "space-y-5");
+  extra.id = "drawer-extra";
+  if (!detail) {
+    extra.append(el("div", "skel", ""), el("div", "skel-stack"));
+    extra.firstChild.style.height = "12rem";
+    extra.lastChild.append(...[1, 2, 3, 4].map(() => el("i", "skel skel-line")));
+  } else {
+    const canvasBox = el("div", "h-48");
+    const canvas = document.createElement("canvas");
+    canvasBox.append(canvas);
+    const range = detail.start === detail.end ? "últimos 14 dias" : "do período";
+    extra.append(drawerSection("Views por dia", el("p", "-mt-1 mb-2 text-xs text-mute", "Views dos posts " + range), canvasBox));
+    const posts = el("ol", "drawer-list");
+    detail.top_posts.forEach((post) => {
+      const li = el("li", "drawer-post");
+      const link = el("a", "drawer-post-text text-sm text-white", post.text || "(sem texto)");
+      link.href = post.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      li.append(link, el("span", "font-mono text-sm text-white", num(post.views)), el("span", "text-[11px] text-mute", num(post.likes) + " ♥"));
+      posts.append(li);
+    });
+    extra.append(drawerSection("Melhores posts", detail.top_posts.length ? posts : el("p", "text-sm text-mute", "Nenhum post coletado no período.")));
+    const checks = el("ol", "drawer-list");
+    detail.checks.forEach((item) => {
+      const li = el("li", "drawer-check");
+      li.append(
+        el("span", "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium st-" + item.status, item.label),
+        el("span", "text-xs text-mute", stampBR(item.checked_at)),
+        el("p", "w-full text-xs text-mute", item.detail || "")
+      );
+      checks.append(li);
+    });
+    extra.append(drawerSection("Histórico de status", detail.checks.length ? checks : el("p", "text-sm text-mute", "Nenhuma verificação ainda. Use Verificar agora.")));
+    if (window.Chart) {
+      if (drawerChart) drawerChart.destroy();
+      const labels = detail.series.map((row) => row.date.slice(8, 10) + "/" + row.date.slice(5, 7));
+      const datasets = [{
+        type: "line",
+        label: "Views",
+        legendColor: "#ff2ec8",
+        data: detail.series.map((row) => row.views),
+        borderColor: "#ff2ec8",
+        backgroundColor: "rgba(255,46,200,.14)",
+        fill: true,
+        tension: .35,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        borderWidth: 2,
+        yAxisID: "y"
+      }];
+      if (detail.series.some((row) => row.followers !== null)) datasets.push({
+        type: "line",
+        label: "Seguidores",
+        legendColor: "#67dcff",
+        data: detail.series.map((row) => row.followers),
+        borderColor: "#67dcff",
+        borderDash: [5, 4],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        spanGaps: true,
+        yAxisID: "y1"
+      });
+      drawerChart = new Chart(canvas, {
+        type: "line",
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 7 } },
+            y: { beginAtZero: true, ticks: { precision: 0, maxTicksLimit: 5 } },
+            y1: { position: "right", grid: { display: false }, display: datasets.length > 1, ticks: { precision: 0, maxTicksLimit: 5 } }
+          }
+        }
+      });
+    }
+  }
+  body.replaceChildren(head, stats, extra);
+}
+
+// ---------- busca rápida (Ctrl+K ou /) ----------
+const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["collectors", "Coletores"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["settings", "Configurações"]];
+let paletteItems = [];
+let paletteIndex = 0;
+let paletteCollectors = null;
+function paletteOpen() { return document.getElementById("palette").classList.contains("open"); }
+function paletteSource() {
+  const items = TAB_LIST.map(([tab, label], index) => ({ icon: tab, title: label, hint: "Aba · tecla " + (index + 1), run: () => setTab(tab) }));
+  items.push(
+    { icon: "refresh", title: "Atualizar dados", hint: "Ação · tecla R", run: () => { setTab("dashboard"); document.getElementById("refresh-all").click(); } },
+    { icon: "theme", title: currentTheme() === "light" ? "Usar tema escuro" : "Usar tema claro", hint: "Ação · tecla T", run: () => document.getElementById("theme-btn").click() }
+  );
+  ((state.data && state.data.accounts) || []).filter((a) => !a.is_archived).forEach((account) => items.push({
+    icon: "account",
+    title: account.display_name || "@" + account.username,
+    hint: "Conta · @" + account.username + " · " + account.folder_name,
+    run: () => { setTab("dashboard"); openDrawer(account.id); }
+  }));
+  (paletteCollectors || []).forEach((collector) => items.push({
+    icon: "collectors",
+    title: "@" + collector.handle,
+    hint: "Coletor · " + ({ ready: "pronto", paused: "pausado", off: "desligado" }[collector.state] || collector.state),
+    run: () => { setTab("collectors"); revealCollector(collector.id); }
+  }));
+  return items;
+}
+function paintPalette() {
+  const terms = plain(document.getElementById("palette-input").value.trim()).split(/\s+/).filter(Boolean);
+  paletteItems = paletteSource().filter((item) => terms.every((term) => plain(item.title + " " + item.hint).includes(term))).slice(0, 30);
+  paletteIndex = Math.min(paletteIndex, Math.max(0, paletteItems.length - 1));
+  const list = document.getElementById("palette-list");
+  if (!paletteItems.length) {
+    list.replaceChildren(el("li", "palette-empty", "Nada encontrado. Tente o nome de uma aba, conta ou coletor."));
+    return;
+  }
+  list.replaceChildren(...paletteItems.map((item, index) => {
+    const li = el("li", "palette-item" + (index === paletteIndex ? " on" : ""));
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(index === paletteIndex));
+    const text = el("span", "min-w-0 flex-1");
+    text.append(el("span", "block truncate text-sm text-white", item.title), el("span", "block truncate text-[11px] text-mute", item.hint));
+    li.append(icon(item.icon), text);
+    li.addEventListener("mousemove", () => { if (paletteIndex !== index) { paletteIndex = index; paintPalette(); } });
+    li.addEventListener("click", () => runPalette(index));
+    return li;
+  }));
+  const active = list.children[paletteIndex];
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+function openPalette() {
+  if (!token()) return;
+  const palette = document.getElementById("palette");
+  palette.classList.add("open");
+  palette.setAttribute("aria-hidden", "false");
+  const input = document.getElementById("palette-input");
+  input.value = "";
+  paletteIndex = 0;
+  paintPalette();
+  input.focus();
+  api("/api/collectors").then((list) => { paletteCollectors = list; if (paletteOpen()) paintPalette(); }).catch(() => {});
+}
+function closePalette() {
+  const palette = document.getElementById("palette");
+  if (!palette.classList.contains("open")) return;
+  palette.classList.remove("open");
+  palette.setAttribute("aria-hidden", "true");
+}
+function runPalette(index) {
+  const item = paletteItems[index];
+  if (!item) return;
+  closePalette();
+  item.run();
+}
+function revealCollector(id) {
+  let tries = 0;
+  const look = () => {
+    const card = document.querySelector('#collector-list [data-collector-id="' + id + '"]');
+    if (card) { card.scrollIntoView({ behavior: "smooth", block: "center" }); flash(card); return; }
+    if (++tries < 20) setTimeout(look, 100);
+  };
+  look();
+}
+document.getElementById("palette-input").addEventListener("input", () => { paletteIndex = 0; paintPalette(); });
+document.getElementById("palette-input").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    paletteIndex = (paletteIndex + step + paletteItems.length) % Math.max(1, paletteItems.length);
+    paintPalette();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    runPalette(paletteIndex);
+  }
+});
+document.getElementById("palette").addEventListener("click", (event) => { if (event.target.id === "palette") closePalette(); });
+document.getElementById("palette-btn").addEventListener("click", openPalette);
+
+// ---------- busca e ordem das contas ----------
+document.getElementById("acc-search").addEventListener("input", () => { if (state.data) renderAccounts(state.data.accounts); });
+document.getElementById("acc-sort").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sort]");
+  if (!button) return;
+  try { localStorage.setItem(ACC_SORT_KEY, button.dataset.sort); } catch { /* vale só agora */ }
+  paintAccountSort();
+  if (state.data) renderAccounts(state.data.accounts);
+});
+paintAccountSort();
+
+// ---------- atalhos de teclado ----------
+// 1–7 abas, T tema, R atualizar dados, / ou Ctrl+K busca, ? lista os atalhos. Nunca enquanto se digita.
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (paletteOpen()) closePalette(); else openPalette();
+    return;
+  }
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+  if (event.target.closest && event.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (!token() || !document.getElementById("auth-modal").classList.contains("off") || paletteOpen()) return;
+  const key = event.key.toLowerCase();
+  if (event.key === "/") { event.preventDefault(); openPalette(); }
+  else if (drawerOpen()) return;
+  else if (/^[1-7]$/.test(key)) setTab(TAB_LIST[Number(key) - 1][0]);
+  else if (key === "t") document.getElementById("theme-btn").click();
+  else if (key === "r") { setTab("dashboard"); document.getElementById("refresh-all").click(); }
+  else if (event.key === "?") toast("Atalhos: 1 a 7 trocam de aba, T troca o tema, R atualiza os dados, / ou Ctrl+K abre a busca.", "info");
+});
+
+// ---------- puxar para atualizar (app instalado, no toque) ----------
+// No navegador o próprio Chrome já faz isso; no app instalado não existe, então fazemos aqui.
+async function refreshCurrentTab() {
+  if (state.tab === "dashboard") await load();
+  else if (state.tab === "collectors") await loadCollectors();
+  else if (state.tab === "archived") await loadArchived();
+  else if (state.tab === "settings") await loadSettings();
+}
+if (isStandalone() && "ontouchstart" in window) {
+  const ptr = document.getElementById("ptr");
+  let pullFrom = null;
+  const reset = () => { ptr.classList.remove("show", "ready", "spin"); ptr.style.transform = ""; };
+  addEventListener("touchstart", (event) => {
+    pullFrom = scrollY <= 0 && event.touches.length === 1 && !drawerOpen() && !paletteOpen() ? event.touches[0].clientY : null;
+  }, { passive: true });
+  addEventListener("touchmove", (event) => {
+    if (pullFrom === null) return;
+    const pull = Math.min((event.touches[0].clientY - pullFrom) * .45, 84);
+    if (pull <= 4) { reset(); return; }
+    ptr.classList.add("show");
+    ptr.classList.toggle("ready", pull >= 60);
+    ptr.style.transform = "translate(-50%, " + pull + "px) rotate(" + pull * 4 + "deg)";
+  }, { passive: true });
+  addEventListener("touchend", async () => {
+    if (pullFrom === null) return;
+    pullFrom = null;
+    if (!ptr.classList.contains("ready")) { reset(); return; }
+    ptr.classList.add("spin");
+    ptr.style.transform = "translate(-50%, 60px)";
+    try { await refreshCurrentTab(); } finally { reset(); }
+  });
+}
 
 boot();

@@ -20,10 +20,10 @@
   <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
-  <link rel="stylesheet" href="/static/css/tailwind.css?v=4">
-  <link rel="stylesheet" href="/static/css/styles.css?v=12">
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=5">
+  <link rel="stylesheet" href="/static/css/styles.css?v=13">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=29"></script>
+  <script defer src="/static/js/app.js?v=30"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -80,6 +80,11 @@
           <button id="install-btn" type="button" class="install-btn hidden" aria-label="Instalar o app">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7.5 10.5 4.5 4.5 4.5-4.5"/><path d="M5 19h14"/></svg>
             <span>Instalar</span>
+          </button>
+          <span id="live-pill" class="live-pill" role="status" title="Os números se atualizam sozinhos a cada minuto"><i></i><span id="live-text">ao vivo</span></span>
+          <button id="palette-btn" type="button" class="palette-btn" aria-label="Buscar (Ctrl+K)" title="Buscar aba, conta ou coletor (Ctrl+K)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+            <kbd>Ctrl K</kbd>
           </button>
           <button id="theme-btn" type="button" class="theme-btn" aria-label="Alternar tema claro e escuro" title="Tema claro / escuro">
             <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>
@@ -187,6 +192,18 @@
               <div class="text-right">
                 <p id="range-label" class="text-xs text-mute"></p>
                 <p id="last-collect" class="mt-1 text-[11px] text-mute"></p>
+              </div>
+            </div>
+            <div class="acc-tools mb-3">
+              <label class="acc-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                <input id="acc-search" type="search" autocomplete="off" placeholder="Buscar conta ou pasta" aria-label="Buscar conta ou pasta">
+              </label>
+              <div id="acc-sort" class="acc-sort" role="radiogroup" aria-label="Ordenar contas">
+                <button type="button" data-sort="views" role="radio">Views</button>
+                <button type="button" data-sort="status" role="radio">Status</button>
+                <button type="button" data-sort="folder" role="radio">Pasta</button>
+                <button type="button" data-sort="name" role="radio">Nome</button>
               </div>
             </div>
             <div id="accounts" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"><div class="skel skel-account"></div><div class="skel skel-account"></div><div class="skel skel-account"></div></div>
@@ -387,6 +404,29 @@
     <button type="button" data-tab="cloaker" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
     <button type="button" data-tab="settings" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
   </div>
+  <!-- Gaveta da conta: gráfico, melhores posts e histórico de status de uma conta. -->
+  <div id="drawer" class="drawer" aria-hidden="true">
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <section class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <button id="drawer-close" type="button" class="drawer-close" data-close-drawer aria-label="Fechar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <div id="drawer-body"></div>
+    </section>
+  </div>
+  <!-- Busca rápida (Ctrl+K ou /): abas, contas, coletores e ações. -->
+  <div id="palette" class="palette" aria-hidden="true">
+    <div class="palette-box" role="dialog" aria-modal="true" aria-label="Busca rápida">
+      <label class="palette-input">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="palette-input" type="text" autocomplete="off" spellcheck="false" placeholder="Ir para aba, conta ou coletor…" aria-controls="palette-list">
+      </label>
+      <ul id="palette-list" class="palette-list" role="listbox"></ul>
+      <p class="palette-hint"><kbd>↑</kbd><kbd>↓</kbd> escolher <kbd>Enter</kbd> abrir <kbd>Esc</kbd> fechar</p>
+    </div>
+  </div>
+  <!-- Puxar para atualizar (app instalado no celular). -->
+  <div id="ptr" class="ptr" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg></div>
   <div id="toast" class="toast pointer-events-none fixed bottom-4 right-4 z-[60] hidden max-w-sm rounded-2xl border border-neon/40 bg-panel px-4 py-3 text-sm"></div>
   <div id="install-help" class="auth-modal off" role="dialog" aria-labelledby="install-help-title">
     <div class="w-full max-w-sm rounded-3xl border border-neon/30 bg-panel p-6 text-center">

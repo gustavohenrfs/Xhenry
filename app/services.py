@@ -1137,6 +1137,68 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
     }
 
 
+DETAIL_CHECKS = 10
+DETAIL_POSTS = 5
+
+
+def account_detail(db: Session, account_id: int, period: str) -> dict[str, Any]:
+    """Gaveta da conta: o cartão dela, views e seguidores por dia, os melhores posts e as últimas
+    verificações de saúde. Períodos curtos mostram os últimos 14 dias no gráfico."""
+    account = db.get(XAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "Conta não encontrada.")
+    start, end = period_window(period)
+    chart_start = min(start, end - timedelta(days=SPARK_DAYS - 1))
+    is_total = period.strip().lower() == "total"
+    loaded = load_samples(db, [account], None if is_total else chart_start)
+    if is_total and loaded:
+        chart_start = max(start, min(min(day for _, _, day in loaded), end - timedelta(days=SPARK_DAYS - 1)))
+    rows = [row for _, row, day in loaded if start <= day <= end]
+    card = account_card(
+        account, rows, latest_metrics(db, [account.id]).get(account.id), last_check_details(db, [account.id]).get(account.id)
+    )
+    views = {chart_start + timedelta(days=offset): 0 for offset in range((end - chart_start).days + 1)}
+    for _, row, day in loaded:
+        if day in views:
+            views[day] += int(row.view_count or 0)
+    followers = dict(
+        db.execute(
+            select(DailyMetric.metric_date, DailyMetric.followers_count).where(
+                DailyMetric.account_id == account.id,
+                DailyMetric.metric_date >= chart_start,
+                DailyMetric.metric_date <= end,
+                DailyMetric.followers_count.is_not(None),
+            )
+        ).all()
+    )
+    ranked = sorted(rows, key=lambda row: (int(row.view_count or 0), int(row.like_count or 0)), reverse=True)
+    checks = db.scalars(
+        select(HealthCheck)
+        .where(HealthCheck.account_id == account.id)
+        .order_by(HealthCheck.checked_at.desc(), HealthCheck.id.desc())
+        .limit(DETAIL_CHECKS)
+    ).all()
+    return {
+        "account": card,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "series": [
+            {"date": day.isoformat(), "views": count, "followers": followers.get(day)}
+            for day, count in sorted(views.items())
+        ],
+        "top_posts": [post_payload(account, row, card["views"]) for row in ranked[:DETAIL_POSTS]],
+        "checks": [
+            {
+                "status": check.status.value,
+                "label": STATUS_LABELS.get(check.status.value, check.status.value),
+                "checked_at": as_utc(check.checked_at).isoformat(),
+                "detail": check.detail,
+            }
+            for check in checks
+        ],
+    }
+
+
 def latest_metrics(db: Session, ids: list[int]) -> dict[int, DailyMetric]:
     """Leitura mais recente de cada conta (seguidores), todas numa consulta."""
     if not ids:

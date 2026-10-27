@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import DEFAULT_TZ, Collector, Folder, FolderKind, XAccount
 from app.routers.auth import current_user
 from app.services import (
+    account_detail,
     archived_payload,
     build_suggestions,
     check_handle,
@@ -219,6 +220,16 @@ def get_dashboard(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     return Response(body, media_type="application/json", headers=headers)
+
+
+@router.get("/api/accounts/{account_id}/detail", dependencies=[Depends(current_user)])
+def get_account_detail(
+    account_id: int,
+    period: str = Query(default="7d"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Gaveta da conta no Dashboard."""
+    return account_detail(db, account_id, period)
 
 
 @router.get("/api/suggestions")
