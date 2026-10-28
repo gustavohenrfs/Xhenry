@@ -159,7 +159,7 @@ def test_admin_only_routes_refuse_friends(client):
     friend = bearer(make_user())
     for method, path in [("get", "/api/collectors"), ("get", "/api/robo"), ("post", "/api/robo/run"),
                          ("get", "/api/robo/health"), ("get", "/api/admin/users"), ("post", "/api/admin/invites"),
-                         ("post", "/api/telegram/test")]:
+                         ]:
         resp = client.request(method, path, headers=friend, json={} if method == "post" else None)
         assert resp.status_code == 403, (path, resp.text)
 
@@ -231,19 +231,17 @@ def test_push_goes_only_to_the_owner(client, monkeypatch):
     assert sent == ["https://push.example/a"]
 
 
-def test_friend_alerts_skip_admin_telegram(monkeypatch):
-    messages: list[str] = []
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(services, "send_telegram", lambda _t, _c, text: messages.append(text))
+def test_alerts_never_go_to_telegram(monkeypatch):
+    monkeypatch.setattr(services, "send_telegram", lambda *_a: pytest.fail("alerta não vai mais ao Telegram"))
     friend = make_user()
     with SessionLocal() as db:
         admin_id = ensure_admin(db).id
         tag = uuid4().hex
-        assert services.try_send(db, f"t:{tag}:amigo", "ban", "do amigo", friend) is True
-        assert services.try_send(db, f"t:{tag}:admin", "ban", "do admin", admin_id) is True
-        assert services.try_send(db, f"t:{tag}:sistema", "silencio", "do sistema") is True
+        assert services.record_alert(db, f"t:{tag}:amigo", "ban", "do amigo", friend) is True
+        assert services.record_alert(db, f"t:{tag}:admin", "ban", "do admin", admin_id) is True
+        assert services.record_alert(db, f"t:{tag}:sistema", "silencio", "do sistema") is True
+        assert services.record_alert(db, f"t:{tag}:sistema", "silencio", "repetido") is False, "uma vez por chave"
         owners = dict(db.query(AlertSent.dedupe_key, AlertSent.owner_id).filter(AlertSent.dedupe_key.like(f"t:{tag}:%")).all())
-    assert messages == ["do admin", "do sistema"]
     assert owners == {f"t:{tag}:amigo": friend, f"t:{tag}:admin": admin_id, f"t:{tag}:sistema": None}
 
 
@@ -325,7 +323,7 @@ def test_watchdog_waits_the_apify_interval(monkeypatch):
     from app import watchdog
 
     sent: list[str] = []
-    monkeypatch.setattr(watchdog, "try_send", lambda db, key, kind, text: sent.append(text) or True)
+    monkeypatch.setattr(watchdog, "record_alert", lambda db, key, kind, text: sent.append(text) or True)
     with SessionLocal() as db:
         admin = ensure_admin(db)
         settings = get_settings(db)

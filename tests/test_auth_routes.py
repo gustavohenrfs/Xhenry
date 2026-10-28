@@ -12,7 +12,10 @@ from main import app
 PROTECTED = [
     ("get", "/api/settings", None),
     ("put", "/api/settings", {"impression_goal": 500}),
-    ("post", "/api/telegram/test", None),
+    ("get", "/api/notifications", None),
+    ("put", "/api/notifications", {}),
+    ("get", "/api/push/devices", None),
+    ("delete", "/api/push/devices/1", None),
     ("post", "/api/folders", {"name": "Pasta"}),
     ("patch", "/api/folders/1", {"name": "Outra"}),
     ("delete", "/api/folders/1", None),

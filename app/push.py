@@ -1,9 +1,11 @@
 """Web Push: os alertas de views do robô chegam no celular e no Windows mesmo com o painel fechado.
 
 O navegador se inscreve pelo sininho (/api/push/subscribe) e guarda a inscrição em
-push_subscriptions. O vigia (app/watchdog.py) chama push_new_alerts a cada minuto: o
-que o robo.py gravou em alerts_sent (kind=viral) depois de push_last_alert_id vai
-para os navegadores do dono da conta (alerts_sent.owner_id = push_subscriptions.owner_id). A chave VAPID é gerada no primeiro uso e fica em
+push_subscriptions. O vigia (app/watchdog.py) chama push_new_alerts a cada minuto: todo
+alerta gravado em alerts_sent (robô e painel, qualquer tipo) depois de push_last_alert_id
+vai para os navegadores do dono (alerts_sent.owner_id = push_subscriptions.owner_id; os
+do sistema, owner_id NULL, para o admin), se o tipo estiver ligado nas Notificações dele e
+fora do "não perturbe". A chave VAPID é gerada no primeiro uso e fica em
 app_settings; VAPID_PRIVATE_KEY no .env tem prioridade. O service worker
 (static/sw.js) recebe a mensagem e mostra a notificação com o logo.
 """
@@ -20,8 +22,18 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import AlertSent, PushSubscription
-from app.services import as_utc, fmt_int, get_settings, now_utc, viral_item
+from app.models import AlertSent, PushSubscription, UserSetting
+from app.services import (
+    admin_user_id,
+    alert_item,
+    as_utc,
+    fmt_int,
+    get_settings,
+    in_quiet_hours,
+    notify_prefs,
+    now_utc,
+    wants,
+)
 
 log = logging.getLogger("xhenry")
 ICON = "/static/img/icon-192.png"
@@ -101,6 +113,22 @@ def send_one(db: Session, sub: PushSubscription, payload: dict[str, Any]) -> str
         return "error"
 
 
+def alert_payload(item: dict[str, Any]) -> dict[str, Any]:
+    """Notificação de qualquer alerta: o de views com conta e views; os outros com o texto dele."""
+    if item["level"] in {"viral", "bombando", "100k", "1m"}:
+        return viral_payload(item)
+    who = ((item["display_name"] or "") + (" @" + item["username"] if item["username"] else "")).strip()
+    body = "\n".join(part for part in (who if who != "XHenry" else "", item["text"] or "") if part)
+    return {
+        "title": f"{item['emoji']} {item['title']}",
+        "body": body or "Abra o XHenry para ver.",
+        "url": item["url"] or "/",
+        "tag": f"alerta-{item['id']}",
+        "icon": ICON,
+        "badge": BADGE,
+    }
+
+
 def viral_payload(item: dict[str, Any]) -> dict[str, Any]:
     who = (item["display_name"] + " " if item["display_name"] else "") + "@" + item["username"]
     head = who + (f", {fmt_int(item['views'])} views" if item["views"] is not None else "")
@@ -117,7 +145,7 @@ def viral_payload(item: dict[str, Any]) -> dict[str, Any]:
 def test_payload() -> dict[str, Any]:
     return {
         "title": "🔥 Teste do XHenry",
-        "body": "Notificações ligadas. Cada post que viralizar, bombar, passar de 100K ou de 1M aparece aqui.",
+        "body": "Notificações ligadas. Views, marcos, quedas e falhas chegam aqui, como você escolheu em Configurações.",
         "url": "/",
         "tag": "xhenry-teste",
         "icon": ICON,
@@ -126,9 +154,9 @@ def test_payload() -> dict[str, Any]:
 
 
 def push_new_alerts(db: Session) -> int:
-    """Empurra os alertas de views que entraram desde a última rodada. Devolve quantos envios deram certo."""
+    """Empurra os alertas que entraram desde a última rodada. Devolve quantos envios deram certo."""
     settings = get_settings(db)
-    newest = db.scalar(select(func.max(AlertSent.id)).where(AlertSent.kind == "viral")) or 0
+    newest = db.scalar(select(func.max(AlertSent.id))) or 0
     cursor = settings.push_last_alert_id
     subs = db.scalars(select(PushSubscription).order_by(PushSubscription.id)).all()
     if cursor is None or not subs or newest <= cursor:
@@ -138,22 +166,28 @@ def push_new_alerts(db: Session) -> int:
             db.commit()
         return 0
     oldest_ok = now_utc() - timedelta(seconds=TTL_SECONDS)
-    pending = db.scalars(
-        select(AlertSent)
-        .where(AlertSent.kind == "viral", AlertSent.id > cursor)
-        .order_by(AlertSent.id)
-    ).all()
+    pending = db.scalars(select(AlertSent).where(AlertSent.id > cursor).order_by(AlertSent.id)).all()
     fresh = [row for row in pending if as_utc(row.sent_at) >= oldest_ok]
     rows = fresh[:MAX_PER_TICK]
-    payloads = [(row.owner_id, viral_payload(viral_item(db, row))) for row in rows]
+    admin_id = admin_user_id(db)
+    # Alerta do sistema (owner_id NULL) é do admin.
+    payloads = [(row.owner_id or admin_id, row, alert_payload(alert_item(db, row))) for row in rows]
+    owners = {sub.owner_id for sub in subs}
+    prefs = {
+        owner: notify_prefs(db.scalar(select(UserSetting).where(UserSetting.owner_id == owner)))
+        for owner in owners if owner is not None
+    }
+    quiet = {owner: in_quiet_hours(value) for owner, value in prefs.items()}
     # Sem nada recente, pula os velhos de uma vez; senão para no último enviado e o resto sai depois.
     settings.push_last_alert_id = rows[-1].id if len(fresh) > MAX_PER_TICK else newest
     db.commit()
     sent = 0
     for sub in subs:
-        for owner_id, payload in payloads:
+        for owner_id, row, payload in payloads:
             if owner_id is None or owner_id != sub.owner_id:
                 continue  # cada um só recebe os alertas das próprias contas
+            if quiet.get(owner_id) or not wants(prefs[owner_id], row):
+                continue  # tipo desligado ou "não perturbe": fica só no histórico
             result = send_one(db, sub, payload)
             if result == "gone":
                 break

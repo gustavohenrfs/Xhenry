@@ -82,7 +82,11 @@ def ensure_user_auth_columns() -> None:
                 conn.execute(text("ALTER TABLE x_accounts ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE"))
     if "user_settings" in tables:
         user_setting_cols = {col["name"] for col in insp.get_columns("user_settings")}
-        added = {"apify_auto": "BOOLEAN NOT NULL DEFAULT TRUE", "apify_interval_min": "INTEGER NOT NULL DEFAULT 60"}
+        added = {
+            "apify_auto": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "apify_interval_min": "INTEGER NOT NULL DEFAULT 60",
+            "notify_prefs": "TEXT",
+        }
         for column, ddl in added.items():
             if column not in user_setting_cols:
                 with engine.begin() as conn:
@@ -1529,25 +1533,136 @@ def viral_item(db: Session, row: AlertSent) -> dict[str, Any]:
     }
 
 
-def try_send(db: Session, key: str, kind: str, text: str, owner_id: int | None = None) -> bool:
-    """Registra o alerta (uma vez por chave) e manda no Telegram do .env quando ele é do admin ou do
-    sistema (owner_id None). Alerta de outro usuário só fica no painel dele (sininho, push, Alertas):
-    o bot é do admin."""
+def record_alert(db: Session, key: str, kind: str, text: str, owner_id: int | None = None) -> bool:
+    """Registra o alerta (uma vez por chave). O vigia manda por push (app/push.py) e ele aparece no
+    sininho e no histórico, conforme as Notificações do dono; owner_id None = sistema, vai para o admin.
+    Telegram ficou só para o "Esqueceu a senha?" e o aviso do backup."""
     if db.scalar(select(AlertSent).where(AlertSent.dedupe_key == key)):
         return False
-    telegram = owner_id is None or owner_id == admin_user_id(db)
-    if telegram:
-        token, chat = telegram_creds(db)
-        if not token or not chat:
-            return False
-        try:
-            send_telegram(token, chat, text)
-        except HTTPException as exc:
-            log.warning("telegram %s não enviado: %s", kind, exc.detail)
-            return False
     db.add(AlertSent(owner_id=owner_id, dedupe_key=key, kind=kind, detail=text[:500], sent_at=now_utc()))
     db.commit()
     return True
+
+
+# ---------- Notificações (push e sininho) ----------
+# Cada tipo liga/desliga em Configurações → Notificações. Os alertas continuam todos no histórico.
+NOTIFY_TYPES = [
+    # chave, rótulo, emoji, só admin
+    ("viral", "Post viralizando (500 views)", "🚀", False),
+    ("bombando", "Post bombando (10K views)", "🔥", False),
+    ("100k", "Post passou de 100K views", "💯", False),
+    ("1m", "Post passou de 1M de views", "👑", False),
+    ("marco_post", "Marcos de views de um post", "📈", False),
+    ("marco_dia", "Marcos de views do dia", "📊", False),
+    ("meta", "Meta do dia batida", "🎯", False),
+    ("queda", "Queda de views", "📉", False),
+    ("ban", "Possível restrição da conta", "⚠️", False),
+    ("falha", "Falhas de leitura (Apify, coletores, robô)", "🛠️", False),
+    ("acesso", "Novo pedido de acesso", "👤", True),
+]
+POST_STEPS = (0, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 1_000_000)
+DAY_STEPS = (0, 10_000, 50_000, 100_000, 500_000, 1_000_000)
+NOTIFY_DEFAULTS: dict[str, Any] = {
+    "kinds": {key: True for key, *_ in NOTIFY_TYPES},
+    "post_step": 0,
+    "day_step": 0,
+    "quiet": {"on": False, "from": "00:00", "to": "08:00"},
+}
+# alerts_sent.kind → grupo das preferências (o nível do viral vem do fim da chave).
+FAILURE_KINDS = {"coletor", "erro", "silencio", "apify"}
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def notify_prefs(row: UserSetting | None) -> dict[str, Any]:
+    """Preferências salvas por cima dos padrões (tipo novo nasce ligado)."""
+    import json
+
+    saved: dict[str, Any] = {}
+    if row is not None and row.notify_prefs:
+        try:
+            saved = json.loads(row.notify_prefs)
+        except ValueError:
+            saved = {}
+    kinds = dict(NOTIFY_DEFAULTS["kinds"])
+    kinds.update({k: bool(v) for k, v in (saved.get("kinds") or {}).items() if k in kinds})
+    quiet = dict(NOTIFY_DEFAULTS["quiet"])
+    quiet.update({k: v for k, v in (saved.get("quiet") or {}).items() if k in quiet})
+    post_step = saved.get("post_step", 0)
+    day_step = saved.get("day_step", 0)
+    return {
+        "kinds": kinds,
+        "post_step": post_step if post_step in POST_STEPS else 0,
+        "day_step": day_step if day_step in DAY_STEPS else 0,
+        "quiet": quiet,
+    }
+
+
+def alert_group(row: AlertSent) -> str:
+    if row.kind == "viral":
+        level = (row.dedupe_key.split(":", 3) + ["", "", ""])[3]
+        return level if level in {"bombando", "100k", "1m"} else "viral"
+    if row.kind in FAILURE_KINDS:
+        return "falha"
+    return row.kind
+
+
+def in_quiet_hours(prefs: dict[str, Any], now: datetime | None = None) -> bool:
+    """Não perturbe (horário de Brasília): de "from" até "to", atravessando a meia-noite se precisar."""
+    quiet = prefs["quiet"]
+    if not quiet.get("on") or not HHMM.match(str(quiet.get("from"))) or not HHMM.match(str(quiet.get("to"))):
+        return False
+    local = (now or now_utc()).astimezone(zone(DEFAULT_TZ)).strftime("%H:%M")
+    start, end = quiet["from"], quiet["to"]
+    if start == end:
+        return False
+    return start <= local < end if start < end else (local >= start or local < end)
+
+
+def wants(prefs: dict[str, Any], row: AlertSent) -> bool:
+    return bool(prefs["kinds"].get(alert_group(row), True))
+
+
+ALERT_TITLES = {
+    "queda": ("📉", "Queda de views"),
+    "ban": ("⚠️", "Possível restrição"),
+    "marco_post": ("📈", "Marco de views do post"),
+    "marco_dia": ("📊", "Marco de views do dia"),
+    "meta": ("🎯", "Meta do dia batida"),
+    "acesso": ("👤", "Novo pedido de acesso"),
+    "coletor": ("🛠️", "Coletor com problema"),
+    "erro": ("❌", "Erro na leitura"),
+    "silencio": ("🔇", "Robô parado"),
+    "apify": ("🔑", "Leitura pelo Apify"),
+}
+
+
+def alert_item(db: Session, row: AlertSent) -> dict[str, Any]:
+    """Item do sininho para qualquer alerta: os de views com conta, link e views de agora (viral_item);
+    os outros com o título do tipo e o texto do alerta."""
+    if row.kind == "viral":
+        return viral_item(db, row)
+    lines = [line.strip() for line in (row.detail or "").splitlines() if line.strip()]
+    emoji, title = ALERT_TITLES.get(row.kind, ("🔔", "Alerta"))
+    if lines and row.kind in {"marco_post", "marco_dia", "meta"}:
+        title = re.sub(r"^\W+\s*", "", lines[0]) or title  # "Post passou de 10.000 views"
+    found = re.search(r"Conta:\s*(.*?)\s*\(@(\w+)\)", row.detail or "")
+    link = re.search(r"https://x\.com/\S+", row.detail or "")
+    views = re.search(r"Views(?: hoje)?:\s*([\d.]+)", row.detail or "")
+    rest = [line for line in lines[1:] if "Conta:" not in line and "https://" not in line]
+    return {
+        "id": row.id,
+        "level": row.kind,
+        "emoji": emoji,
+        "title": title,
+        "sent_at": as_utc(row.sent_at).isoformat(),
+        "username": found.group(2) if found else "",
+        "display_name": found.group(1) if found else "XHenry",
+        "profile_image_url": None,
+        "url": link.group(0) if link else None,
+        "text": " · ".join(rest)[:240] or None,
+        "views": int(views.group(1).replace(".", "")) if views else None,
+        "likes": None,
+    }
 
 
 def alerts_query(user: User):
@@ -1564,7 +1679,7 @@ def dispatch_alerts(db: Session, account: XAccount, previous_status: HealthStatu
     status = account.last_health_status
     if status in {HealthStatus.SEARCH_BAN, HealthStatus.GHOST_BAN} and status != previous_status:
         label = STATUS_LABELS[status.value]
-        try_send(
+        record_alert(
             db,
             f"ban:{account.id}:{status.value}:{local_now.date().isoformat()}",
             "ban",

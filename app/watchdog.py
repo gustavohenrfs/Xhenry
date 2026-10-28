@@ -1,6 +1,6 @@
 """Vigia em segundo plano, dentro do uvicorn.
 
-- Avisa no Telegram quando o robo.py para de ler (sem batimento OK há mais
+- Avisa (push e histórico, para o admin) quando o robo.py para de ler (sem batimento OK há mais
   de ROBO_SILENCE_MIN minutos, ou de 2 intervalos + 5 min quando o intervalo
   da aba Configurações é maior). O robô grava um batimento por rodada em
   sync_runs (kind=tweets, account_id NULL). Sem nenhum batimento ainda (robô
@@ -38,7 +38,7 @@ from app.services import (
     owned_accounts,
     robot_interval,
     token_configured,
-    try_send,
+    record_alert,
     zone,
 )
 
@@ -96,7 +96,7 @@ def check_silence(db: Session, now: datetime | None = None) -> bool:
         "Confira o robo.py no VPS: cron, sessão do anyx e conexão com o banco."
     )
     # Uma mensagem por apagão: a chave muda quando o robô volta e para de novo.
-    return try_send(db, f"silencio:{last.isoformat()}", "silencio", text)
+    return record_alert(db, f"silencio:{last.isoformat()}", "silencio", text)
 
 
 def run_auto_check(db: Session, now: datetime | None = None) -> int:

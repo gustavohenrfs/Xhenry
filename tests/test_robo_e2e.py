@@ -40,6 +40,32 @@ class SessionExpired(Exception):
     pass
 
 
+class SentAlerts:
+    """Textos gravados em alerts_sent desde o último clear(), na ordem (antes era o Telegram)."""
+
+    def __init__(self, world):
+        self.world, self.mark = world, 0
+        self.clear()
+
+    def clear(self):
+        self.mark = self.world.q("select coalesce(max(id), 0) from alerts_sent")[0][0]
+
+    def _texts(self):
+        return [row[0] or "" for row in self.world.q("select detail from alerts_sent where id > :m order by id", m=self.mark)]
+
+    def __iter__(self):
+        return iter(self._texts())
+
+    def __len__(self):
+        return len(self._texts())
+
+    def __getitem__(self, index):
+        return self._texts()[index]
+
+    def __eq__(self, other):
+        return self._texts() == list(other)
+
+
 class World:
     """Banco, anyx falso e o que o robô fez na última rodada."""
 
@@ -233,7 +259,7 @@ def w(tmp_path_factory):
         mp.setenv("ROBO_ENV_FILE", str(state / "sem.env"))  # não lê o .env local
         for name, module in fake_anyx(world).items():
             mp.setitem(sys.modules, name, module)
-        mp.setattr(robo, "send_telegram", lambda message: world.sent.append(message) or True)
+        world.sent = SentAlerts(world)  # alertas só no banco (o painel manda por push)
         mp.setattr(robo, "OFFLINE_STAMP", state / "alerta_banco")
         mp.setattr(robo, "LOCK_FILE", state / "robo.lock")
         mp.setattr(robo, "READS_FILE", state / "leituras.json")
@@ -528,7 +554,7 @@ def test_apify_without_token_says_it_is_missing(w, monkeypatch):
     assert all(user != f"amiga{n}" for _, user in w.timelines() for n in range(20)), "coletor nunca lê conta de amigo"
     alerts = w.q("select owner_id, kind from alerts_sent where kind='apify'")
     assert alerts == [(owner_id, "apify")]
-    assert not [m for m in w.sent if "Apify" in m], "aviso do amigo não vai para o Telegram do admin"
+    assert [m for m in w.sent if "Apify" in m], "o aviso fica no histórico do amigo (owner_id acima)"
     w.run()
     assert w.q("select count(*) from alerts_sent where kind='apify'")[0][0] == 1, "um aviso por dia"
 
@@ -562,7 +588,7 @@ def test_apify_reads_friend_accounts_with_their_token(w, monkeypatch):
     assert w.q("select followers_count from daily_metrics where account_id=:a", a=account_id) == [(4321,)]
     viral = w.q("select owner_id, dedupe_key from alerts_sent where kind='viral' and dedupe_key like :k", k=f"viral:{account_id}:%")
     assert viral == [(owner_id, f"viral:{account_id}:5551:bombando")]
-    assert not [m for m in w.sent if username in m], "alerta do amigo fica só no painel dele"
+    assert w.q("select count(*) from alerts_sent where detail like :u and owner_id <> :o", u=f"%@{username}%", o=owner_id)[0][0] == 0,         "alerta do amigo é só dele"
     calls.clear()
     w.run()
     assert calls == [], "dentro do intervalo, sem pedido: não chama de novo"
@@ -771,4 +797,35 @@ def test_admin_read_now_failure_goes_to_collectors_without_retrying_apify(w, mon
     w.run()
     assert "tok-admin" not in tokens, "o cron não repete o Apify que acabou de falhar"
     assert w.opens() and w.last_beat()[1]["via"] == "coletores"
+    admin_token(w, None)
+
+
+# ---- Notificações: marcos de views (por post e do dia) e meta do dia ----
+
+def test_milestones_and_daily_goal(w, monkeypatch):
+    import robo
+
+    owner = admin_id(w)
+    admin_token(w, "tok-admin")
+    prefs = json.dumps({"post_step": 10000, "day_step": 50000})
+    w.sql(f"update user_settings set notify_prefs='{prefs}', impression_goal=60000 where owner_id={owner}")
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    items = [{"id": "9701", "createdAt": posted, "viewCount": 35000, "author": {"userName": "conta1", "followers": 1}},
+             {"id": "9702", "createdAt": posted, "viewCount": 31000, "author": {"userName": "conta2", "followers": 1}}]
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: items if token == "tok-admin" else [])
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.run()
+    rows = dict(w.q("select dedupe_key, owner_id from alerts_sent where kind in ('marco_post','marco_dia','meta')"))
+    post = [k for k in rows if k.startswith(f"marco_post:{w.ids['conta1']}:9701:")]
+    assert post == [f"marco_post:{w.ids['conta1']}:9701:10000:3"], "só o maior marco (30 mil) do post"
+    day = [k for k in rows if k.startswith("marco_dia:")]
+    assert day and all(k.startswith(f"marco_dia:{owner}:") for k in day)
+    assert any(k.startswith(f"meta:{owner}:") for k in rows), "total do dia passou da meta"
+    mine = [k for k in rows if f":{w.ids['conta1']}:" in k or f":{w.ids['conta2']}:" in k or k.split(":")[1] == str(owner)]
+    assert {rows[k] for k in mine} == {owner}, "os alertas das contas do admin são do admin"
+    before = len(rows)
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.run()
+    assert w.q("select count(*) from alerts_sent where kind in ('marco_post','marco_dia','meta')")[0][0] == before,         "mesmos números: nada repete"
+    w.sql(f"update user_settings set notify_prefs=NULL where owner_id={owner}")
     admin_token(w, None)

@@ -21,9 +21,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=18">
+  <link rel="stylesheet" href="/static/css/styles.css?v=19">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=35"></script>
+  <script defer src="/static/js/app.js?v=36"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -92,13 +92,13 @@
             <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.6A8.5 8.5 0 0 1 9.4 4a8.5 8.5 0 1 0 10.6 10.6Z"/></svg>
           </button>
           <div id="bell-wrap" class="relative">
-            <button id="bell" type="button" class="bell-btn" aria-label="Posts viralizando" aria-haspopup="true" aria-expanded="false">
+            <button id="bell" type="button" class="bell-btn" aria-label="Notificações" aria-haspopup="true" aria-expanded="false">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10a6 6 0 1 1 12 0c0 4.2 1.4 6 2.2 6.8.3.3.1.8-.3.8H4.1c-.4 0-.6-.5-.3-.8C4.6 16 6 14.2 6 10Z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/></svg>
               <span id="bell-badge" class="bell-badge hidden"></span>
             </button>
-            <div id="bell-panel" class="bell-panel" role="dialog" aria-label="Posts viralizando">
+            <div id="bell-panel" class="bell-panel" role="dialog" aria-label="Notificações">
               <div class="flex items-center justify-between gap-3">
-                <p class="font-display text-lg text-white">Posts viralizando</p>
+                <p class="font-display text-lg text-white">Notificações</p>
                 <button id="bell-test" type="button" class="bell-test" title="Enviar uma notificação de teste para este aparelho">Testar</button>
               </div>
               <p id="bell-note" class="mt-1 text-[11px] text-mute"></p>
@@ -188,8 +188,16 @@
               <ol id="post-ranking" class="rank-list"><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li></ol>
             </article>
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4">
-              <h2 class="font-display text-xl text-white">Alertas recentes</h2>
-              <p class="mb-3 text-xs text-mute">O que foi enviado ao Telegram</p>
+              <h2 class="font-display text-xl text-white">Histórico de alertas</h2>
+              <p class="mb-3 text-xs text-mute">Tudo o que o robô e o painel avisaram, mesmo o que não apitou</p>
+              <div id="alert-filters" class="chip-row mb-2" role="group" aria-label="Filtrar alertas">
+                <button type="button" class="chip on" data-alert-group="">Todos</button>
+                <button type="button" class="chip" data-alert-group="views">Views</button>
+                <button type="button" class="chip" data-alert-group="queda">Queda</button>
+                <button type="button" class="chip" data-alert-group="ban">Restrição</button>
+                <button type="button" class="chip" data-alert-group="falha">Falhas</button>
+                <button type="button" class="chip" data-alert-group="acesso" data-admin-only>Acessos</button>
+              </div>
               <ul id="alert-list" class="alert-list"><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li></ul>
             </article>
           </div>
@@ -390,8 +398,50 @@
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
-              <button id="test-note" data-admin-only class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar notificação</button>
             </div>          </form>
+          <article id="notify-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h2 class="font-display text-2xl text-white">Notificações</h2>
+              <div class="flex flex-wrap gap-2">
+                <button id="notify-enable" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink">Ativar neste aparelho</button>
+                <button id="notify-test" type="button" class="rounded-full border border-neon/40 px-4 py-1.5 text-sm">Testar</button>
+              </div>
+            </div>
+            <p id="notify-status" class="text-xs text-mute">—</p>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <section class="space-y-2">
+                <h3 class="text-sm text-white">O que avisa</h3>
+                <p class="text-xs text-mute">Desligado não apita nem aparece no sininho; continua no Histórico de alertas.</p>
+                <div id="notify-types" class="notify-types"></div>
+              </section>
+              <section class="space-y-3">
+                <h3 class="text-sm text-white">Marcos de views</h3>
+                <label class="block text-sm text-mute" for="notify-post-step">Avisar a cada … views de um post</label>
+                <select id="notify-post-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+                <label class="block text-sm text-mute" for="notify-day-step">Avisar a cada … views no total do dia</label>
+                <select id="notify-day-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+                <p id="notify-goal" class="text-xs text-mute"></p>
+                <h3 class="pt-2 text-sm text-white">Não perturbe</h3>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
+                  <span>
+                    <span class="block text-sm text-white">Silenciar no horário</span>
+                    <span class="block text-xs text-mute">Horário de Brasília. Os alertas ficam no histórico.</span>
+                  </span>
+                  <input id="quiet-on" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
+                </label>
+                <div class="flex items-center gap-3">
+                  <label class="text-sm text-mute" for="quiet-from">De</label>
+                  <input id="quiet-from" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+                  <label class="text-sm text-mute" for="quiet-to">até</label>
+                  <input id="quiet-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+                </div>
+              </section>
+            </div>
+            <section class="space-y-2">
+              <h3 class="text-sm text-white">Aparelhos</h3>
+              <ul id="notify-devices" class="space-y-2"></ul>
+            </section>
+          </article>
           <article id="reading-card" data-user-only class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Atualizar dados</h2>
             <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">

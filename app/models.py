@@ -369,7 +369,7 @@ class AppSetting(IntPK, Base):
     # Com o token do Apify do admin salvo, as contas dele são lidas pelo Apify neste ritmo (os coletores
     # ficam de reserva); robo_interval_min passa a valer só quando não há Apify.
     apify_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
-    # Web Push: chave VAPID gerada no primeiro uso e o último alerta viral já empurrado.
+    # Web Push: chave VAPID gerada no primeiro uso e o último alerta (de qualquer tipo) já empurrado.
     vapid_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     push_last_alert_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -392,6 +392,8 @@ class UserSetting(IntPK, Base):
     # Leitura automática de quem não é admin (o admin usa app_settings): ligada e o intervalo dela.
     apify_auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     apify_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default="60")
+    # Notificações (JSON, ver services.NOTIFY_DEFAULTS): tipos ligados, marcos de views e não perturbe.
+    notify_prefs: Mapped[str | None] = mapped_column(Text, nullable=True)
     apify_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     apify_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     apify_detail: Mapped[str | None] = mapped_column(Text, nullable=True)

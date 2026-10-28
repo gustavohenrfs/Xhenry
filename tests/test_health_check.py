@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from conftest import admin_row
+from conftest import AlertLog, admin_row
 from app import services
 from app.database import SessionLocal
 from app.models import DailyMetric, Folder, HealthCheck, HealthStatus, SyncKind, SyncRun, XAccount
@@ -76,10 +76,7 @@ def x_api(monkeypatch):
 
 @pytest.fixture
 def telegram(monkeypatch):
-    sent: list[str] = []
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(services, "send_telegram", lambda _t, _c, text: sent.append(text))
-    return sent
+    return AlertLog()  # o alerta de restrição vai para o histórico e o push
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import admin_row
+from conftest import AlertLog, admin_row
 from app import services, watchdog
 from app.database import SessionLocal
 from app.models import AlertSent, SyncKind, SyncRun, SyncStatus
@@ -42,10 +42,7 @@ def clean(client):
 
 @pytest.fixture
 def sent(monkeypatch):
-    messages: list[str] = []
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(services, "send_telegram", lambda _t, _c, text: messages.append(text))
-    return messages
+    return AlertLog()
 
 
 def beat(minutes_ago: int, **stats) -> None:

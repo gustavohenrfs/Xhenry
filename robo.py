@@ -36,9 +36,15 @@ O Chrome não aceita proxy com usuário e senha, então cada coletor ganha um
 repassador local (ProxyRelay): o Chrome fala com 127.0.0.1 sem senha e o
 repassador abre o túnel no proxy de verdade com a senha (http, https ou socks5).
 
-Alertas no Telegram:
+Alertas: o robô só grava em alerts_sent (com o dono, owner_id; NULL = sistema,
+vai para o admin) e o painel avisa por push e mostra no sininho e no histórico,
+conforme as Notificações de cada usuário. Nada vai para o Telegram (lá ficaram
+só o "Esqueceu a senha?" e o aviso do backup).
 - Views de um post: Viralizando, POST BOMBANDO, 100K e 1M (VIEW_LEVELS). Cada
   nível sai uma vez por post; se o post pular níveis, só o maior é avisado.
+- Marcos do usuário (user_settings.notify_prefs): a cada post_step views num
+  post e a cada day_step views no total do dia; e a meta do dia batida
+  (impression_goal). Só o maior marco alcançado sai.
 - Queda de views: a partir de QUEDA_HORA, se as views de hoje ficarem mais de
   QUEDA_LIMITE abaixo das de ontem. Uma vez por conta por dia.
 - Coletor limitado (429), bloqueado, com verificação de humanidade (Cloudflare),
@@ -75,7 +81,7 @@ user_settings.apify_interval_min (padrão 60); sempre que houver pedido do
 na hora pelo read_now (app/reader.py), sem esperar o cron. Sem token, nada é lido e o painel dele
 mostra "Token do Apify em falta" (user_settings.apify_status = sem_token). Os
 alertas dessas contas vão só para o painel do dono (alerts_sent.owner_id: sininho,
-push e Alertas), nunca para o Telegram do admin.
+push e Alertas).
 
 Fica na raiz do repositório do painel e lê o mesmo .env (DATABASE_URL,
 TELEGRAM_TOKEN ou TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID). Precisa de
@@ -448,32 +454,6 @@ def iter_timeline(session: Any, username: str) -> list[Any]:
         return []
 
 
-def telegram_creds() -> tuple[str, str]:
-    token = (os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-    chat = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-    return token, chat
-
-
-def send_telegram(text: str) -> bool:
-    token, chat = telegram_creds()
-    if not token or not chat:
-        log.warning("Telegram não configurado (TELEGRAM_TOKEN / TELEGRAM_CHAT_ID)")
-        return False
-    payload = json.dumps({"chat_id": chat, "text": text}).encode()
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            return 200 <= response.status < 300
-    except urllib.error.URLError as exc:
-        log.warning("Telegram falhou: %s", exc)
-        return False
-
-
 def already_alerted(cur, key: str) -> bool:
     cur.execute("SELECT 1 FROM alerts_sent WHERE dedupe_key = %s LIMIT 1", (key,))
     return cur.fetchone() is not None
@@ -490,15 +470,10 @@ def mark_alerted(cur, key: str, kind: str, text: str, owner_id: int | None = Non
     )
 
 
-def alert_once(cur, key: str, kind: str, text: str, owner_id: int | None = None, telegram: bool = True) -> bool:
-    """Envia e registra em alerts_sent; a mesma chave nunca sai duas vezes.
-
-    owner_id = dono da conta (NULL nos alertas do sistema). telegram=False (contas de quem lê pelo
-    Apify): só registra, e o painel do dono mostra no sininho, no push e em Alertas.
-    """
+def alert_once(cur, key: str, kind: str, text: str, owner_id: int | None = None) -> bool:
+    """Registra em alerts_sent; a mesma chave nunca sai duas vezes. owner_id = dono da conta (NULL nos
+    alertas do sistema). O painel (app/push.py) avisa por push e mostra no sininho e em Alertas."""
     if already_alerted(cur, key):
-        return False
-    if telegram and not send_telegram(text):
         return False
     mark_alerted(cur, key, kind, text, owner_id)
     return True
@@ -525,7 +500,7 @@ def views_drop(hoje: int, ontem: int) -> int | None:
     return round((1 - hoje / ontem) * 100)
 
 
-def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | None = None, telegram: bool = True) -> bool:
+def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | None = None) -> bool:
     now = now or datetime.now(BR_TZ)
     if now.hour < QUEDA_HORA:
         return False
@@ -547,7 +522,7 @@ def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | 
         f"📅 Ontem: {ontem}\n"
         f"🔻 Queda: {pct}%"
     )
-    sent = alert_once(cur, f"queda:{account['id']}:{today.isoformat()}", "queda", text, account.get("owner_id"), telegram)
+    sent = alert_once(cur, f"queda:{account['id']}:{today.isoformat()}", "queda", text, account.get("owner_id"))
     if sent:
         log.info("alerta queda @%s: %s -> %s (-%s%%)", username, ontem, hoje, pct)
     return sent
@@ -572,18 +547,19 @@ def alert_errors(cur, errors: list[tuple[str, str, str]]) -> bool:
 
 
 def alert_offline(step: str, exc: BaseException) -> None:
-    """Banco fora: não há alerts_sent, então o dedupe por hora fica num arquivo."""
+    """Banco fora: sem alerts_sent não há como avisar o painel; fica no log do cron (uma vez por hora)
+    e o vigia do painel avisa "Robô parado" quando o batimento atrasar."""
     hour = datetime.now(BR_TZ).strftime("%Y-%m-%dT%H")
     try:
         if OFFLINE_STAMP.read_text(encoding="utf-8").strip() == hour:
             return
     except OSError:
         pass
-    if send_telegram(error_summary([("robô", step, f"{type(exc).__name__}: {exc}")])):
-        try:
-            OFFLINE_STAMP.write_text(hour, encoding="utf-8")
-        except OSError:
-            log.warning("não gravou %s", OFFLINE_STAMP)
+    log.error("%s", error_summary([("robô", step, f"{type(exc).__name__}: {exc}")]))
+    try:
+        OFFLINE_STAMP.write_text(hour, encoding="utf-8")
+    except OSError:
+        log.warning("não gravou %s", OFFLINE_STAMP)
 
 
 def record_run(cur, started: datetime, status: str, error: str | None, stats: dict[str, Any]) -> None:
@@ -1103,7 +1079,7 @@ def save_followers(cur, account: dict[str, Any], today: date, followers: int | N
     cur.execute("UPDATE x_accounts SET followers_at = NOW() WHERE id = %s", (account["id"],))
 
 
-def save_tweets(cur, account: dict[str, Any], tweets: list[Any], midnight: datetime, telegram: bool = True) -> int:
+def save_tweets(cur, account: dict[str, Any], tweets: list[Any], midnight: datetime) -> int:
     """Grava os posts de hoje, avisa os níveis de views, refaz o dia e marca a conta como lida."""
     username = account["username"]
     account_id = account["id"]
@@ -1129,7 +1105,7 @@ def save_tweets(cur, account: dict[str, Any], tweets: list[Any], midnight: datet
         if level is not None:
             suffix, _, title = level
             when = local.strftime("%d/%m/%Y %H:%M")
-            link = f"https://x.com/{username}/status/{tid}"
+            link = link_of(username, tid)
             text = (
                 f"{title}\n"
                 f"👤 Conta: {display} (@{username})\n"
@@ -1139,12 +1115,103 @@ def save_tweets(cur, account: dict[str, Any], tweets: list[Any], midnight: datet
                 f"🔁 Retweets: {metrics['retweet_count']}\n"
                 f"🔗 Link do Post: {link}"
             )
-            if alert_once(cur, view_alert_key(account_id, tid, suffix), "viral", text, owner_id, telegram):
+            if alert_once(cur, view_alert_key(account_id, tid, suffix), "viral", text, owner_id):
                 log.info("alerta views (%s) @%s tweet %s (%s)", suffix or "viral", username, tid, views)
+        check_post_milestone(cur, account, tid, views, link_of(username, tid))
     recompute_today(cur, account_id, today)
-    check_views_drop(cur, account, today, telegram=telegram)
+    check_views_drop(cur, account, today)
+    check_day_totals(cur, owner_id, today)
     mark_collected(cur, account_id)
     return saved
+
+
+def link_of(username: str, tweet_id: str) -> str:
+    return f"https://x.com/{username}/status/{tweet_id}"
+
+
+_NOTIFY_COLUMN: list[bool] = []
+
+
+def has_notify_prefs(cur) -> bool:
+    """Painel antigo, sem user_settings.notify_prefs: sem marcos (sem erro que desfaça a transação)."""
+    if not _NOTIFY_COLUMN:
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = 'user_settings' AND column_name = 'notify_prefs'"
+        )
+        _NOTIFY_COLUMN.append(cur.fetchone() is not None)
+    return _NOTIFY_COLUMN[0]
+
+
+def notify_prefs(cur, owner_id: int | None) -> dict[str, Any]:
+    """Passo dos marcos (por post e do dia) e a meta do dia do dono; 0 = desligado."""
+    prefs = {"post_step": 0, "day_step": 0, "goal": 0}
+    if owner_id is None or not has_notify_prefs(cur):
+        return prefs
+    cur.execute("SELECT notify_prefs, impression_goal FROM user_settings WHERE owner_id = %s", (owner_id,))
+    row = cur.fetchone()
+    if row is None:
+        return prefs
+    try:
+        saved = json.loads(row["notify_prefs"] or "{}")
+    except ValueError:
+        saved = {}
+    prefs["post_step"] = as_int(saved.get("post_step"))
+    prefs["day_step"] = as_int(saved.get("day_step"))
+    prefs["goal"] = as_int(row["impression_goal"])
+    return prefs
+
+
+def milestone(views: int, step: int) -> int:
+    """Quantos passos inteiros as views já passaram (0 = nenhum)."""
+    return views // step if step > 0 else 0
+
+
+def check_post_milestone(cur, account: dict[str, Any], tweet_id: str, views: int, link: str) -> bool:
+    """A cada post_step views num post (10 mil, 20 mil…): só o maior marco alcançado sai."""
+    owner_id = account.get("owner_id")
+    step = notify_prefs(cur, owner_id)["post_step"]
+    reached = milestone(views, step)
+    if not reached:
+        return False
+    username = account["username"]
+    text = (
+        f"📈 Post passou de {fmt_int(reached * step)} views\n"
+        f"👤 Conta: {account.get('display_name') or username} (@{username})\n"
+        f"👁 Views: {fmt_int(views)}\n"
+        f"🔗 Link do Post: {link}"
+    )
+    return alert_once(cur, f"marco_post:{account['id']}:{tweet_id}:{step}:{reached}", "marco_post", text, owner_id)
+
+
+def day_views(cur, owner_id: int, today: date) -> int:
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(d.views), 0) AS total
+        FROM daily_metrics d JOIN x_accounts a ON a.id = d.account_id
+        WHERE a.owner_id = %s AND d.metric_date = %s AND COALESCE(a.is_archived, FALSE) IS FALSE
+        """,
+        (owner_id, today),
+    )
+    return as_int(cur.fetchone()["total"])
+
+
+def check_day_totals(cur, owner_id: int | None, today: date) -> None:
+    """Total de views do dia de todas as contas do dono: meta batida (uma vez por dia) e marcos a cada
+    day_step (só o maior alcançado)."""
+    if owner_id is None:
+        return
+    prefs = notify_prefs(cur, owner_id)
+    if not prefs["goal"] and not prefs["day_step"]:
+        return
+    total = day_views(cur, owner_id, today)
+    day = today.isoformat()
+    if prefs["goal"] and total >= prefs["goal"]:
+        alert_once(cur, f"meta:{owner_id}:{day}", "meta",
+                   f"🎯 Meta do dia batida\n👁 Views hoje: {fmt_int(total)}\n🏁 Meta: {fmt_int(prefs['goal'])}", owner_id)
+    reached = milestone(total, prefs["day_step"])
+    if reached:
+        alert_once(cur, f"marco_dia:{owner_id}:{day}:{prefs['day_step']}:{reached}", "marco_dia",
+                   f"📊 Dia passou de {fmt_int(reached * prefs['day_step'])} views\n👁 Views hoje: {fmt_int(total)}", owner_id)
 
 
 # ---- Apify (contas de quem não é admin) ----
@@ -1288,7 +1355,7 @@ def set_apify_status(cur, owner_id: int, status: str, detail: str | None) -> Non
     )
 
 
-def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datetime, telegram: bool) -> int:
+def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datetime) -> int:
     """Lê as contas pelo Apify (lotes de APIFY_MAX_ACCOUNTS) e grava como os coletores: posts de hoje,
     alertas de views, o dia refeito e seguidores (em toda leitura: vêm junto com os posts).
 
@@ -1320,7 +1387,7 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
                 handle = account["username"].lower()
                 if handle in followers:
                     save_followers(cur, account, midnight.date(), followers[handle])
-                saved += save_tweets(cur, account, by_author.get(handle, []), midnight, telegram=telegram)
+                saved += save_tweets(cur, account, by_author.get(handle, []), midnight)
         conn.commit()
     return saved
 
@@ -1345,7 +1412,7 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
     if not token:
         with conn.cursor() as cur:
             set_apify_status(cur, owner_id, "sem_token", NO_APIFY_TOKEN)
-            alert_once(cur, f"apify:{owner_id}:sem_token:{day}", "apify", f"🔑 {NO_APIFY_TOKEN}", owner_id, telegram=False)
+            alert_once(cur, f"apify:{owner_id}:sem_token:{day}", "apify", f"🔑 {NO_APIFY_TOKEN}", owner_id)
             # Sem token a fila não anda; marca como vista para não reavisar a cada minuto.
             for account in accounts:
                 mark_collected(cur, account["id"])
@@ -1353,12 +1420,12 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
         log.info("apify: usuário %s sem token (%s contas esperando)", owner_id, len(accounts))
         return {"owner": owner_id, "contas": 0, "erro": "sem_token"}
     try:
-        saved = apify_read(conn, token, accounts, midnight, telegram=False)
+        saved = apify_read(conn, token, accounts, midnight)
     except ApifyError as exc:
         conn.rollback()
         with conn.cursor() as cur:
             set_apify_status(cur, owner_id, "erro", str(exc))
-            alert_once(cur, f"apify:{owner_id}:erro:{day}", "apify", f"⚠️ Leitura pelo Apify falhou: {exc}", owner_id, telegram=False)
+            alert_once(cur, f"apify:{owner_id}:erro:{day}", "apify", f"⚠️ Leitura pelo Apify falhou: {exc}", owner_id)
             for account in accounts:  # tenta de novo no próximo intervalo, não a cada minuto
                 mark_collected(cur, account["id"])
         conn.commit()
@@ -1781,7 +1848,7 @@ def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: d
     log.info("início pelo Apify%s — %s contas, tweets depois de %s", " (Atualizar Dados)" if manual else "",
              len(accounts), midnight.isoformat())
     try:
-        saved = apify_read(conn, admin["token"], accounts, midnight, telegram=True)
+        saved = apify_read(conn, admin["token"], accounts, midnight)
     except ApifyError as exc:
         conn.rollback()
         reason = str(exc)

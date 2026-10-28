@@ -78,34 +78,6 @@ def db():
         yield session
 
 
-def test_try_send_dedupes_by_key(db, monkeypatch):
-    sent: list[str] = []
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(services, "send_telegram", lambda _t, _c, text: sent.append(text))
-    assert services.try_send(db, "teste:1", "teste", "primeira") is True
-    assert services.try_send(db, "teste:1", "teste", "repetida") is False
-    assert services.try_send(db, "teste:2", "teste", "outra chave") is True
-    assert sent == ["primeira", "outra chave"]
-
-
-def test_try_send_without_creds_does_nothing(db, monkeypatch):
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("", ""))
-    assert services.try_send(db, "teste:3", "teste", "x") is False
-    assert db.query(AlertSent).count() == 0
-
-
-def test_failed_send_is_not_recorded_so_it_retries(db, monkeypatch):
-    def refuse(*_args):
-        raise HTTPException(502, "fora do ar")
-
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(services, "send_telegram", refuse)
-    assert services.try_send(db, "teste:4", "teste", "x") is False
-    assert db.query(AlertSent).count() == 0
-    monkeypatch.setattr(services, "send_telegram", lambda *_args: None)
-    assert services.try_send(db, "teste:4", "teste", "x") is True
-
-
 @pytest.fixture
 def logged_in():
     app.dependency_overrides[current_user] = admin_row
@@ -143,17 +115,6 @@ def test_telegram_comes_only_from_env(logged_in, monkeypatch):
             row.telegram_token = row.telegram_chat_id = None
             row.impression_goal = 500
             session.commit()
-
-
-def test_test_notification_sends_viral_sample(logged_in, monkeypatch):
-    sent: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(checks, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(checks, "send_telegram", lambda *args: sent.append(args))
-    resp = logged_in.post("/api/telegram/test")
-    assert resp.status_code == 200 and resp.json() == {"ok": True}
-    token, chat, text = sent[0]
-    assert (token, chat) == ("bot", "chat")
-    assert "Post viralizando" in text and "Curtidas" in text and "Retweets" in text
 
 
 def test_recent_alerts_newest_first():

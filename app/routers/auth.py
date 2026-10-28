@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Invite, User
-from app.services import admin_email, as_utc, now_utc, send_telegram, telegram_creds
+from app.services import admin_email, admin_user_id, as_utc, now_utc, record_alert, send_telegram, telegram_creds
 
 log = logging.getLogger("xhenry")
 router = APIRouter()
@@ -281,10 +281,8 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, An
     db.commit()
     db.refresh(user)
     if not user.is_approved:
-        try:
-            send_telegram(*telegram_creds(db), new_request_message(user))
-        except HTTPException as exc:
-            log.warning("aviso de novo pedido não enviado: %s", exc.detail)
+        # Push e histórico do admin (Notificações → Novo pedido de acesso).
+        record_alert(db, f"acesso:{user.id}", "acesso", new_request_message(user), admin_user_id(db))
     return public_user(user)
 
 

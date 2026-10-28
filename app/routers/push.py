@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +14,7 @@ from app.database import get_db
 from app.models import PushSubscription, User
 from app.push import PushUnavailable, public_key, send_one, test_payload
 from app.routers.auth import approved_user
+from app.services import as_utc
 
 router = APIRouter(dependencies=[Depends(approved_user)])
 # Sem login: o service worker não enxerga o token do localStorage. Ver renew().
@@ -83,6 +87,34 @@ def renew(payload: RenewIn, db: Session = Depends(get_db)) -> dict[str, bool]:
         row.user_agent = payload.user_agent
     db.commit()
     return {"ok": True}
+
+
+@router.get("/api/push/devices")
+def devices(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    """Notificações → Aparelhos: os navegadores inscritos deste usuário (o endereço de push não sai)."""
+    rows = db.scalars(
+        select(PushSubscription).where(PushSubscription.owner_id == user.id).order_by(PushSubscription.id.desc())
+    ).all()
+    return [
+        {
+            "id": row.id,
+            "user_agent": row.user_agent,
+            "created_at": as_utc(row.created_at).isoformat() if row.created_at else None,
+            # Só os últimos caracteres: a tela marca "este aparelho" sem receber a URL secreta inteira.
+            "tail": row.endpoint[-16:],
+        }
+        for row in rows
+    ]
+
+
+@router.delete("/api/push/devices/{device_id}", status_code=204)
+def remove_device(device_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> Response:
+    row = db.get(PushSubscription, device_id)
+    if row is None or row.owner_id != user.id:
+        raise HTTPException(404, "Aparelho não encontrado.")
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.post("/api/push/unsubscribe")

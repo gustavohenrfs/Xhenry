@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import AlertLog
 from app import services, watchdog
 from app.database import SessionLocal
 from app.models import AlertSent, Folder, SyncKind, SyncRun, SyncStatus, XAccount
@@ -22,15 +23,12 @@ def tables():
 
 @pytest.fixture
 def sent(monkeypatch):
-    """Telegram configurado; guarda as mensagens. Começa sem batimentos nem alertas."""
-    messages: list[str] = []
-    monkeypatch.setattr(services, "telegram_creds", lambda _db: ("bot", "chat"))
-    monkeypatch.setattr(services, "send_telegram", lambda _t, _c, text: messages.append(text))
+    """Alertas gravados (vão para o push e o histórico). Começa sem batimentos nem alertas."""
     with SessionLocal() as db:
         db.query(SyncRun).delete()
         db.query(AlertSent).delete()
         db.commit()
-    return messages
+    return AlertLog()
 
 
 def beat(minutes_ago: int, status: SyncStatus = SyncStatus.OK) -> None:

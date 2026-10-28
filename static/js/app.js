@@ -158,7 +158,8 @@ function showPending(user) {
   showAuth(false);
   document.getElementById("pending-screen").classList.remove("off");
   clearInterval(pendingTimer);
-  pendingTimer = setInterval(() => checkApproval(false), 30000);
+  // A cada 3 s: o admin aprova e o painel abre sozinho em seguida, sem clique.
+  pendingTimer = setInterval(() => checkApproval(false), 3000);
 }
 async function checkApproval(manual) {
   try {
@@ -642,8 +643,11 @@ function renderRanking(posts) {
 }
 const ALERT_KINDS = {
   viral: ["Viral", "#7cf0b5"], queda: ["Queda", "#ffb4c4"], ban: ["Restrição", "#ffb4c4"],
-  coletor: ["Coletor", "#ffc46b"], erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"]
+  coletor: ["Coletor", "#ffc46b"], erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"],
+  apify: ["Apify", "#ffc46b"], marco_post: ["Marco do post", "#7cf0b5"], marco_dia: ["Marco do dia", "#4fe3ff"],
+  meta: ["Meta batida", "#ffd36b"], acesso: ["Pedido de acesso", "#d6ccff"]
 };
+let alertGroup = "";
 const VIEW_LEVEL_TAGS = [
   [/MILHÃO/i, "👑 1M de views", "#ff63c3"],
   [/100K/i, "💯 100K de views", "#ffd36b"],
@@ -652,7 +656,7 @@ const VIEW_LEVEL_TAGS = [
 function renderAlerts(alerts) {
   const host = document.getElementById("alert-list");
   if (!alerts.length) {
-    host.replaceChildren(el("li", "text-sm text-mute", "Nenhum alerta enviado ainda."));
+    host.replaceChildren(el("li", "text-sm text-mute", alertGroup ? "Nenhum alerta deste tipo ainda." : "Nenhum alerta ainda."));
     return;
   }
   host.replaceChildren(...alerts.map((alert) => {
@@ -676,12 +680,19 @@ function renderAlerts(alerts) {
 }
 async function loadAlerts() {
   try {
-    renderAlerts(await api("/api/alerts?limit=8"));
+    renderAlerts(await api("/api/alerts?limit=8" + (alertGroup ? "&group=" + alertGroup : "")));
   } catch (error) {
     if (error.message === SESSION_EXPIRED) return;
     document.getElementById("alert-list").replaceChildren(el("li", "text-sm text-mute", "Não deu para ler os alertas: " + (error.message || "erro") + "."));
   }
 }
+document.getElementById("alert-filters").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-alert-group]");
+  if (!chip) return;
+  alertGroup = chip.dataset.alertGroup;
+  document.querySelectorAll("#alert-filters .chip").forEach((item) => item.classList.toggle("on", item === chip));
+  loadAlerts();
+});
 function agoText(iso) {
   if (!iso) return "nunca";
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -806,6 +817,120 @@ function paintApify(apify) {
   status.textContent = apifyStatusText(apify);
   status.classList.toggle("text-amber-300", Boolean(issue) && !(isAdmin() && !apify.token_set));
 }
+// ---------- Configurações → Notificações ----------
+function stepLabel(value, unit) {
+  return value ? "A cada " + num(value) + " " + unit : "Desligado";
+}
+function deviceName(agent) {
+  const ua = String(agent || "");
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox"
+    : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Navegador";
+  const system = /iPhone|iPad/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows"
+    : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+  return browser + (system ? " no " + system : "");
+}
+function paintNotifyStatus() {
+  const status = document.getElementById("notify-status");
+  const enable = document.getElementById("notify-enable");
+  if (!notifySupported()) {
+    status.textContent = isIos() && !isStandalone()
+      ? "No iPhone, instale o app (Compartilhar → Adicionar à Tela de Início) para receber notificações."
+      : "Este navegador não recebe notificações. Use Chrome, Edge ou o app instalado.";
+    enable.classList.add("hidden");
+    return;
+  }
+  const permission = Notification.permission;
+  enable.classList.toggle("hidden", permission === "granted" && Boolean(pushEndpoint()));
+  status.textContent = permission === "denied"
+    ? "Notificações bloqueadas neste navegador. Libere nas permissões do site e volte aqui."
+    : permission === "granted" && pushEndpoint() ? "Este aparelho recebe as notificações."
+    : "Este aparelho ainda não recebe notificações.";
+}
+function notifySelect(id, steps, value, unit) {
+  const select = document.getElementById(id);
+  select.replaceChildren(...steps.map((step) => {
+    const option = document.createElement("option");
+    option.value = String(step);
+    option.textContent = stepLabel(step, unit);
+    return option;
+  }));
+  select.value = String(value);
+}
+function paintNotify(data) {
+  const prefs = data.prefs;
+  document.getElementById("notify-types").replaceChildren(...data.types.map((type) => {
+    const row = el("label", "notify-type");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = prefs.kinds[type.key] !== false;
+    input.addEventListener("change", () => saveNotify({ kinds: { [type.key]: input.checked } }));
+    row.append(el("b", "", type.emoji), el("span", "", type.label), input);
+    return row;
+  }));
+  notifySelect("notify-post-step", data.post_steps, prefs.post_step, "views");
+  notifySelect("notify-day-step", data.day_steps, prefs.day_step, "views no dia");
+  document.getElementById("notify-goal").textContent = "A meta do dia (" + num(data.goal) + " views) avisa uma vez quando o total passa dela; mude a meta em Configurações.";
+  document.getElementById("quiet-on").checked = Boolean(prefs.quiet.on);
+  document.getElementById("quiet-from").value = prefs.quiet.from;
+  document.getElementById("quiet-to").value = prefs.quiet.to;
+  ["quiet-from", "quiet-to"].forEach((id) => { document.getElementById(id).disabled = !prefs.quiet.on; });
+  paintNotifyStatus();
+}
+async function loadNotify() {
+  try {
+    paintNotify(await api("/api/notifications"));
+    loadDevices();
+  } catch (error) { if (error.message !== SESSION_EXPIRED) toast(error.message || "Não leu as notificações."); }
+}
+async function saveNotify(body) {
+  try {
+    paintNotify(await api("/api/notifications", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
+    toast("Notificações salvas.");
+  } catch (error) {
+    toast(error.message || "Não salvou.");
+    loadNotify();
+  }
+}
+async function loadDevices() {
+  const host = document.getElementById("notify-devices");
+  try {
+    const devices = await api("/api/push/devices");
+    const mine = pushEndpoint();
+    host.replaceChildren(...(devices.length ? devices.map((device) => {
+      const row = el("li", "device-row");
+      const text = el("div", "min-w-0 flex-1");
+      const here = mine && mine.endsWith(device.tail);
+      text.append(el("p", "truncate text-sm text-white", deviceName(device.user_agent) + (here ? " · este aparelho" : "")),
+        el("p", "text-xs text-mute", device.created_at ? "Desde " + stampBR(device.created_at) : ""));
+      const remove = collectorButton("Remover", async () => {
+        if (!(await showConfirm("Remover este aparelho?", "Ele para de receber as notificações até você ativar de novo nele."))) return;
+        try {
+          await api("/api/push/devices/" + device.id, { method: "DELETE" });
+          if (here) setPushEndpoint("");
+          toast("Aparelho removido.");
+          loadDevices();
+          paintNotifyStatus();
+        } catch (error) { toast(error.message || "Não removeu."); }
+      });
+      row.append(text, remove);
+      return row;
+    }) : [el("li", "text-sm text-mute", "Nenhum aparelho recebe notificações ainda. Clique em Ativar neste aparelho.")]));
+  } catch (error) { host.replaceChildren(); }
+}
+document.getElementById("notify-post-step").addEventListener("change", (event) => saveNotify({ post_step: Number(event.target.value) }));
+document.getElementById("notify-day-step").addEventListener("change", (event) => saveNotify({ day_step: Number(event.target.value) }));
+document.getElementById("quiet-on").addEventListener("change", (event) => saveNotify({ quiet: { on: event.target.checked } }));
+["quiet-from", "quiet-to"].forEach((id) => document.getElementById(id).addEventListener("change", (event) => {
+  if (event.target.value) saveNotify({ quiet: { [id === "quiet-from" ? "from" : "to"]: event.target.value } });
+}));
+document.getElementById("notify-enable").addEventListener("click", async () => {
+  if (notifySupported() && Notification.permission === "granted") await enablePush();  // já liberado: só inscreve
+  else await askNotifications();
+  paintNotifyStatus();
+  loadDevices();
+});
+document.getElementById("notify-test").addEventListener("click", () => testNotification());
+
 function paintReading(apify) {
   paintApify(apify);
   document.getElementById("apify-auto").checked = Boolean(apify.auto);
@@ -1946,13 +2071,14 @@ async function loadSettings() {
     if (isAdmin()) {
       const tg = document.getElementById("tg-status");
       tg.textContent = settings.telegram_ready
-        ? "Telegram: usa o bot do .env do VPS, o mesmo do robô."
-        : "Telegram: falta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS (os alertas e a recuperação de senha dependem dele).";
+        ? "Telegram: usado só no \"Esqueceu a senha?\" e no aviso de falha do backup. Os alertas vêm pelas Notificações."
+        : "Telegram: falta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS (o \"Esqueceu a senha?\" e o aviso do backup dependem dele).";
       tg.classList.toggle("text-amber-300", !settings.telegram_ready);
       loadRobo();
     }
     paintApify(Object.assign({ token_set: settings.apify_token_set }, settings.apify));
     if (!isAdmin()) api("/api/apify").then(paintReading).catch(() => {});
+    loadNotify();
     paintKeyField("xai-key", "xai_api_key", settings.xai_key_set, "xai-...");
     paintKeyField("x-token", "x_bearer_token", settings.x_token_set, "AAAA...");
     paintKeyField("apify-token", "apify_token", settings.apify_token_set, "apify_api_...");
@@ -2447,12 +2573,6 @@ document.addEventListener("click", async (event) => {
     if (key === "apify_token") loadApify();
   } catch (error) { toast(error.message || "Não apagou."); }
 });
-document.getElementById("test-note").addEventListener("click", async () => {
-  try {
-    await api("/api/telegram/test", { method: "POST" });
-    toast("Notificação de teste enviada.");
-  } catch (error) { toast(error.message || "O teste falhou."); }
-});
 
 // Change Password
 document.getElementById("password-form").addEventListener("submit", async (event) => {
@@ -2930,7 +3050,7 @@ async function askNotifications() {
   try { await Notification.requestPermission(); } catch { /* navegador antigo: ignora */ }
   if (Notification.permission === "granted") {
     await enablePush();
-    showNotice("Notificações ligadas", "Você vai ver aqui cada post que viralizar, bombar, passar de 100K ou de 1M.", "/", "xhenry-hello").catch(() => {});
+    showNotice("Notificações ligadas", "Views, marcos, quedas e falhas chegam aqui. Escolha o que avisa em Configurações → Notificações.", "/", "xhenry-hello").catch(() => {});
   }
   paintBellPermission();
 }
@@ -2973,9 +3093,10 @@ async function testNotification() {
   }
 }
 function viralWho(item) {
-  if (!item.username) return item.display_name || "Conta removida";
+  if (!item.username) return item.display_name || (VIEW_LEVELS.includes(item.level) ? "Conta removida" : "XHenry");
   return (item.display_name ? item.display_name + " " : "") + "@" + item.username;
 }
+const VIEW_LEVELS = ["viral", "bombando", "100k", "1m"];
 function viralTitle(item) {
   return (item.emoji || "🚀") + " " + (item.title || "Post viralizando");
 }
@@ -2988,14 +3109,14 @@ function renderBell() {
   paintTabBadge("alerts", unread);
   const host = document.getElementById("bell-list");
   if (!viralItems.length) {
-    host.replaceChildren(el("li", "bell-empty text-sm text-mute", "Nenhum post viralizou ainda. Quando um passar do limite, ele aparece aqui."));
+    host.replaceChildren(el("li", "bell-empty text-sm text-mute", "Nenhuma notificação ainda. Views, quedas, marcos e falhas aparecem aqui (ajuste em Configurações → Notificações)."));
     return;
   }
   const seen = storedId(VIRAL_SEEN_KEY);
   host.replaceChildren(...viralItems.map((item) => {
     const li = el("li", "bell-item lvl-" + (item.level || "viral") + (item.id > seen ? " is-new" : ""));
     const avatar = el("div", "post-avatar bell-avatar");
-    const initial = (item.username || "?").slice(0, 1).toUpperCase();
+    const initial = item.username ? item.username.slice(0, 1).toUpperCase() : (item.emoji || "🔔");
     if (item.profile_image_url) {
       const img = el("img");
       img.src = item.profile_image_url;

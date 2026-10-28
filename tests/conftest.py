@@ -122,3 +122,42 @@ def admin_row():
         db.refresh(user)
         db.expunge(user)
         return user
+
+
+class AlertLog:
+    """Textos dos alertas gravados em alerts_sent desde a criação (ou o último clear()), na ordem: o que
+    antes os testes pegavam do Telegram. Alertas hoje só vão para o histórico e o push."""
+
+    def __init__(self):
+        self.mark = self._newest()
+
+    @staticmethod
+    def _newest() -> int:
+        from app.database import SessionLocal
+        from app.models import AlertSent
+
+        with SessionLocal() as db:
+            return db.query(AlertSent.id).order_by(AlertSent.id.desc()).limit(1).scalar() or 0
+
+    def _texts(self) -> list[str]:
+        from app.database import SessionLocal
+        from app.models import AlertSent
+
+        with SessionLocal() as db:
+            rows = db.query(AlertSent.detail).filter(AlertSent.id > self.mark).order_by(AlertSent.id).all()
+        return [row[0] or "" for row in rows]
+
+    def clear(self) -> None:
+        self.mark = self._newest()
+
+    def __iter__(self):
+        return iter(self._texts())
+
+    def __len__(self) -> int:
+        return len(self._texts())
+
+    def __getitem__(self, index):
+        return self._texts()[index]
+
+    def __eq__(self, other) -> bool:
+        return self._texts() == list(other)
