@@ -1307,19 +1307,36 @@ body[data-role="admin"] [data-user-only] { display: none !important; }
 /* Botão esperando o servidor (app.js marca o botão clicado em toda escrita): spinner no lugar do texto. */
 /* Campo de chave: pontinhos sem ser type=password (senão o navegador oferece login salvo na tela toda). */
 .masked:not(:placeholder-shown) { -webkit-text-security: disc; text-security: disc; }
-/* Interruptor, lista ou horário salvando sozinho: travado e pulsando até o servidor responder. */
-.is-saving { opacity: .55; pointer-events: none; animation: saving-pulse 1s ease-in-out infinite; }
-@keyframes saving-pulse { 50% { opacity: .3; } }
-button.is-busy { position: relative; color: transparent !important; pointer-events: none; }
-button.is-busy > * { visibility: hidden; }
+/* Esperando o servidor: um feixe de laser (a mesma assinatura das bordas dos cartões) contorna o botão
+   clicado; o texto continua no lugar e o botão não aceita outro clique. */
+@property --busy-turn { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+button.is-busy { position: relative; isolation: isolate; pointer-events: none; cursor: progress; }
 button.is-busy::after {
-  content: ""; position: absolute; inset: 0; margin: auto; width: 1.05em; height: 1.05em;
-  border-radius: 999px; border: 2px solid var(--accent); border-right-color: transparent;
-  animation: btn-spin .7s linear infinite;
+  content: ""; position: absolute; inset: -2px; z-index: 1; border-radius: inherit; padding: 2px; pointer-events: none;
+  background: conic-gradient(from var(--busy-turn), transparent 0 58%, var(--accent-2) 76%, var(--accent) 90%, #fff 97%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  filter: drop-shadow(0 0 6px rgb(var(--c-neon) / .55));
+  animation: busy-orbit 1.1s linear infinite;
 }
-button.bg-neon.is-busy::after, button.bg-red-600.is-busy::after { border-color: var(--on-accent); border-right-color: transparent; }
-@keyframes btn-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { button.is-busy::after { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; } }
+/* Botão cheio (rosa ou vermelho): o feixe corre por fora, em ciano e branco, para aparecer sobre a cor. */
+button.bg-neon.is-busy::after, button.bg-red-600.is-busy::after {
+  inset: -3px;
+  background: conic-gradient(from var(--busy-turn), transparent 0 58%, var(--accent-2) 80%, #fff 96%, transparent 100%);
+}
+@keyframes busy-orbit { to { --busy-turn: 360deg; } }
+/* Interruptor, lista ou horário salvando sozinho: travado, com um anel que respira em volta. */
+.is-saving { pointer-events: none; border-radius: 1rem; animation: saving-ring 1.2s ease-in-out infinite; }
+@keyframes saving-ring {
+  0%, 100% { box-shadow: 0 0 0 1px rgb(var(--c-neon) / .35), 0 0 0 0 rgb(var(--c-neon) / 0); }
+  50% { box-shadow: 0 0 0 1px rgb(var(--c-neon) / .7), 0 0 18px 2px rgb(var(--c-neon) / .28); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Sem movimento: o feixe fica parado como um contorno inteiro e o anel não respira. */
+  button.is-busy::after { animation: none !important; background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+  .is-saving { animation: none !important; box-shadow: 0 0 0 1px rgb(var(--c-neon) / .6); }
+}
+.danger-zone { padding-top: 1.25rem; border-top: 1px solid var(--bad-line); }
 .invite-link {
   display: block; width: 100%; margin-top: .5rem; padding: .55rem .75rem; border-radius: .85rem;
   border: 1px dashed var(--line-strong); background: var(--field); color: var(--fg);

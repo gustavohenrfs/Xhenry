@@ -271,7 +271,8 @@ function busyField() {
   const field = changed;
   if (!field || Date.now() - changedAt > 1500 || !field.isConnected || field.disabled) return null;
   changed = null;
-  const shown = field.closest("label") || field;
+  // O anel vai no cartãozinho do interruptor (label) ou no próprio campo (lista, horário).
+  const shown = field.closest("label.rounded-2xl, .notify-type") || field;
   field.disabled = true;
   shown.classList.add("is-saving");
   return () => { field.disabled = false; shown.classList.remove("is-saving"); };

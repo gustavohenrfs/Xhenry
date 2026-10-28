@@ -21,9 +21,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=20">
+  <link rel="stylesheet" href="/static/css/styles.css?v=21">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=37"></script>
+  <script defer src="/static/js/app.js?v=38"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -360,7 +360,7 @@
         </section>
         <section id="pane-settings" class="pane">
           <div class="grid gap-4 lg:grid-cols-2">
-          <form id="profile-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
+          <form id="profile-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Perfil</h2>
             <div class="flex items-center gap-4">
               <div id="profile-avatar" data-user-avatar class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-neon/40 text-lg text-neon"></div>
@@ -373,6 +373,19 @@
             <input id="profile-name" required maxlength="120" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar perfil</button>
           </form>
+          <section id="security-card" class="glow space-y-5 rounded-3xl border border-neon/25 bg-card p-6">
+            <form id="password-form" class="space-y-3">
+              <h2 class="font-display text-2xl text-white">Trocar senha</h2>
+              <label class="block text-sm text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
+              <input id="new-password" type="password" autocomplete="new-password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
+              <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Atualizar senha</button>
+            </form>
+            <div data-user-only class="danger-zone space-y-2">
+              <h2 class="font-display text-xl text-white">Excluir conta</h2>
+              <p class="text-sm text-mute">Apaga a sua conta e todas as suas pastas, contas e alertas. Não tem volta.</p>
+              <button id="delete-account-btn" type="button" class="rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir minha conta</button>
+            </div>
+          </section>
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
             <p id="tg-status" data-admin-only class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
@@ -399,49 +412,6 @@
             <div class="flex flex-wrap gap-2 pt-2">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
             </div>          </form>
-          <article id="notify-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <h2 class="font-display text-2xl text-white">Notificações</h2>
-              <div class="flex flex-wrap gap-2">
-                <button id="notify-enable" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink">Ativar neste aparelho</button>
-                <button id="notify-test" type="button" class="rounded-full border border-neon/40 px-4 py-1.5 text-sm">Testar</button>
-              </div>
-            </div>
-            <p id="notify-status" class="text-xs text-mute">—</p>
-            <div class="grid gap-4 lg:grid-cols-2">
-              <section class="space-y-2">
-                <h3 class="text-sm text-white">O que avisa</h3>
-                <p class="text-xs text-mute">Desligado não apita nem aparece no sininho; continua no Histórico de alertas.</p>
-                <div id="notify-types" class="notify-types"></div>
-              </section>
-              <section class="space-y-3">
-                <h3 class="text-sm text-white">Marcos de views</h3>
-                <label class="block text-sm text-mute" for="notify-post-step">Avisar a cada … views de um post</label>
-                <select id="notify-post-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
-                <label class="block text-sm text-mute" for="notify-day-step">Avisar a cada … views no total do dia</label>
-                <select id="notify-day-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
-                <p id="notify-goal" class="text-xs text-mute"></p>
-                <h3 class="pt-2 text-sm text-white">Não perturbe</h3>
-                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
-                  <span>
-                    <span class="block text-sm text-white">Silenciar no horário</span>
-                    <span class="block text-xs text-mute">Horário de Brasília. Os alertas ficam no histórico.</span>
-                  </span>
-                  <input id="quiet-on" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
-                </label>
-                <div class="flex items-center gap-3">
-                  <label class="text-sm text-mute" for="quiet-from">De</label>
-                  <input id="quiet-from" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-                  <label class="text-sm text-mute" for="quiet-to">até</label>
-                  <input id="quiet-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-                </div>
-              </section>
-            </div>
-            <section class="space-y-2">
-              <h3 class="text-sm text-white">Aparelhos</h3>
-              <ul id="notify-devices" class="space-y-2"></ul>
-            </section>
-          </article>
           <article id="reading-card" data-user-only class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Atualizar dados</h2>
             <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
@@ -498,21 +468,49 @@
             <p id="robo-status" class="text-xs text-mute">—</p>
             <p class="text-xs text-mute">Com o token do Apify salvo, o robô lê as suas contas pelo Apify e os coletores ficam em espera: só entram se o Apify falhar. Sem token, lê só pelos coletores. O botão Atualizar dados (no topo do Dashboard) lê na hora, mesmo com a leitura automática desligada; o robô pega o pedido em até 1 minuto.</p>
           </article>
-
-          <!-- Change Password Form -->
-          <form id="password-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
-            <h2 class="font-display text-2xl text-white">Trocar senha</h2>
-            <label class="block text-sm text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
-            <input id="new-password" type="password" autocomplete="new-password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
-            <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Atualizar senha</button>
-          </form>
-
-          <!-- Delete Account -->
-          <div data-user-only class="glow rounded-3xl border border-red-500/40 bg-card p-6">
-            <h2 class="font-display text-2xl text-white">Excluir conta</h2>
-            <p class="mt-2 text-sm text-mute">Esta ação é irreversível. Todos os seus dados serão apagados permanentemente.</p>
-            <button id="delete-account-btn" type="button" class="mt-4 rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir minha conta</button>
-          </div>
+          <article id="notify-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h2 class="font-display text-2xl text-white">Notificações</h2>
+              <div class="flex flex-wrap gap-2">
+                <button id="notify-enable" type="button" class="rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink">Ativar neste aparelho</button>
+                <button id="notify-test" type="button" class="rounded-full border border-neon/40 px-4 py-1.5 text-sm">Testar</button>
+              </div>
+            </div>
+            <p id="notify-status" class="text-xs text-mute">—</p>
+            <div class="grid gap-4 lg:grid-cols-2">
+              <section class="space-y-2">
+                <h3 class="text-sm text-white">O que avisa</h3>
+                <p class="text-xs text-mute">Desligado não apita nem aparece no sininho; continua no Histórico de alertas.</p>
+                <div id="notify-types" class="notify-types"></div>
+              </section>
+              <section class="space-y-3">
+                <h3 class="text-sm text-white">Marcos de views</h3>
+                <label class="block text-sm text-mute" for="notify-post-step">Avisar a cada … views de um post</label>
+                <select id="notify-post-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+                <label class="block text-sm text-mute" for="notify-day-step">Avisar a cada … views no total do dia</label>
+                <select id="notify-day-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+                <p id="notify-goal" class="text-xs text-mute"></p>
+                <h3 class="pt-2 text-sm text-white">Não perturbe</h3>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
+                  <span>
+                    <span class="block text-sm text-white">Silenciar no horário</span>
+                    <span class="block text-xs text-mute">Horário de Brasília. Os alertas ficam no histórico.</span>
+                  </span>
+                  <input id="quiet-on" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
+                </label>
+                <div class="flex items-center gap-3">
+                  <label class="text-sm text-mute" for="quiet-from">De</label>
+                  <input id="quiet-from" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+                  <label class="text-sm text-mute" for="quiet-to">até</label>
+                  <input id="quiet-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+                </div>
+              </section>
+            </div>
+            <section class="space-y-2">
+              <h3 class="text-sm text-white">Aparelhos</h3>
+              <ul id="notify-devices" class="space-y-2"></ul>
+            </section>
+          </article>
           </div>
         </section>
 
