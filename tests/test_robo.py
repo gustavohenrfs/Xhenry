@@ -378,3 +378,17 @@ def test_apify_fetch_returns_items(monkeypatch):
     monkeypatch.setattr(robo.urllib.request, "urlopen", answer)
     assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM]
     assert sent["body"]["twitterHandles"] == ["fulana"]
+
+
+@pytest.mark.parametrize(("item", "repost"), [
+    ({"text": "RT @outra: post de ontem"}, True),
+    ({"text": "  RT @outra: com espaço"}, True),
+    ({"isRetweet": True, "text": "sem prefixo"}, True),
+    ({"retweetedTweet": {"id": "1", "createdAt": "Mon Oct 27 10:00:00 +0000 2026"}, "text": "x"}, True),
+    ({"retweeted_status": {"id": "1"}, "text": "x"}, True),
+    ({"text": "post normal de hoje", "isRetweet": False, "retweetedTweet": None}, False),
+    ({"text": "citando", "isQuote": True, "quotedTweet": {"id": "9"}}, False),
+    ({"text": "falando de RT @fulano no meio"}, False),
+])
+def test_is_repost(item, repost):
+    assert robo.is_repost(item) is repost

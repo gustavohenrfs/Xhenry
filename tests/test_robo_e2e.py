@@ -686,3 +686,29 @@ def test_without_admin_token_collectors_work_as_before(w, monkeypatch):
     w.run()
     assert w.opens(), "sem Apify, os coletores seguem o próprio intervalo"
     assert w.last_beat()[1]["via"] == "coletores"
+
+
+def test_apify_skips_reposts(w, monkeypatch):
+    """Repost feito hoje de um post de ontem: o Apify manda com a data de hoje, mas não é post da conta."""
+    import robo
+
+    admin_token(w, "tok-admin")
+    today = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    author = {"userName": "conta2", "followers": 9100}
+    items = [
+        {"id": "880", "createdAt": today, "text": "post de hoje", "viewCount": 50, "author": author},
+        {"id": "881", "createdAt": today, "text": "RT @outra: post de ontem", "viewCount": 90000, "author": author},
+        {"id": "882", "createdAt": today, "text": "sem prefixo", "isRetweet": True, "viewCount": 70000,
+         "retweetedTweet": {"id": "5", "createdAt": "Mon Oct 27 10:00:00 +0000 2026"}, "author": author},
+    ]
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: items if token == "tok-admin" else [])
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.sent.clear()
+    w.run()
+    saved = w.q("select tweet_id from tweet_samples where account_id=:a and tweet_id like '88%' order by tweet_id",
+                a=w.ids["conta2"])
+    assert saved == [("880",)], "só o post de hoje entra"
+    assert w.q("select followers_count from daily_metrics where account_id=:a and metric_date=current_date",
+               a=w.ids["conta2"]) == [(9100,)]
+    assert not [m for m in w.sent if "881" in m or "882" in m], "repost não dispara alerta de views"
+    admin_token(w, None)

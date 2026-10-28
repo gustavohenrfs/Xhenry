@@ -1204,6 +1204,22 @@ def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
     return [item for item in body if isinstance(item, dict)]
 
 
+REPOST_FIELDS = ("retweetedTweet", "retweeted_tweet", "retweeted_status", "retweetedStatus", "retweet")
+
+
+def is_repost(item: dict[str, Any]) -> bool:
+    """Repost (retweet) que a conta fez: o Apify devolve com a data do repost, mas com o texto e os
+    números do post original, que pode ser de outro dia ou de outra conta. Nunca é post da conta, então
+    não entra (nem com a data do original: contaria as views de outra pessoa ou o mesmo post duas
+    vezes). Citação (quote) é post da própria conta e continua valendo."""
+    if item.get("isRetweet") is True or item.get("is_retweet") is True:
+        return True
+    if any(isinstance(item.get(name), dict) and item.get(name) for name in REPOST_FIELDS):
+        return True
+    text = pick(item, "text", "full_text", "fullText", default="") or ""
+    return str(text).lstrip().startswith("RT @")
+
+
 def apify_author(item: dict[str, Any]) -> tuple[str, int | None]:
     """(@ em minúsculas, seguidores) do autor do post."""
     author = item.get("author") if isinstance(item.get("author"), dict) else {}
@@ -1282,9 +1298,11 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             handle, count = apify_author(item)
             if not handle or not tweet_id_of(item):
                 continue  # {"noResults": true} e afins
-            by_author.setdefault(handle, []).append(item)
             if count is not None:
-                followers[handle] = count
+                followers[handle] = count  # o repost também traz os seguidores da conta
+            if is_repost(item):
+                continue
+            by_author.setdefault(handle, []).append(item)
         with conn.cursor() as cur:
             for account in batch:
                 handle = account["username"].lower()
