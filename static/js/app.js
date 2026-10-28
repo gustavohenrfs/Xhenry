@@ -191,13 +191,9 @@ function paintUser(user) {
     const url = user && user.avatar_url;
     if (url && (String(url).startsWith("https://") || String(url).startsWith("data:") || String(url).startsWith("/"))) {
       const img = document.createElement("img");
-      if (String(url).startsWith("data:")) {
-        img.src = url;
-      } else if (String(url).startsWith("/")) {
-        img.src = url + "?v=" + Date.now();
-      } else {
-        img.src = url;
-      }
+      // A foto vem de /api/avatar/{id}?v=… (o v muda quando a foto muda): o cache do navegador vale.
+      img.src = url;
+      img.decoding = "async";
       img.alt = "";
       img.className = "h-full w-full rounded-full object-cover";
       el.append(img);
@@ -600,8 +596,8 @@ function renderMix(kpis) {
     cutout: "72%",
     plugins: { legend: { display: false }, tooltip: { enabled: parts.length > 0 } }
   };
-  if (mixChart) { mixChart.data = mixData; mixChart.options = options; mixChart.update(); }
-  else mixChart = new Chart(document.getElementById("mix-chart"), { type: "doughnut", data: mixData, options });
+  if (mixChart) updateChart(mixChart, mixData, options);
+  else mixChart = markChart(new Chart(document.getElementById("mix-chart"), { type: "doughnut", data: mixData, options }));
 }
 function renderTopPost(post) {
   const host = document.getElementById("top-post-body");
@@ -614,6 +610,8 @@ function renderTopPost(post) {
   if (post.profile_image_url) {
     const img = el("img");
     img.src = post.profile_image_url;
+    img.loading = "lazy";
+    img.decoding = "async";
     img.alt = "";
     img.referrerPolicy = "no-referrer";
     img.addEventListener("error", () => { img.remove(); avatar.textContent = initial; });
@@ -984,9 +982,11 @@ document.getElementById("apify-banner-go").addEventListener("click", () => {
 function userAvatar(user) {
   const box = el("span", "user-avatar");
   const url = String(user.avatar_url || "");
-  if (url.startsWith("data:") || url.startsWith("https://")) {
+  if (url.startsWith("data:") || url.startsWith("https://") || url.startsWith("/api/avatar/")) {
     const img = document.createElement("img");
     img.src = url;
+    img.loading = "lazy";
+    img.decoding = "async";
     img.alt = "";
     box.append(img);
   } else box.textContent = (user.nome_exibicao || user.email || "?").slice(0, 1).toUpperCase();
@@ -1092,6 +1092,20 @@ async function cancelInvite(invite) {
 }
 document.getElementById("invite-new").addEventListener("click", newInvite);
 
+// Gráfico só atualiza (e anima) quando os números ou o tema mudaram: o painel ao vivo e o auto-refresh
+// não fazem as barras e linhas "pularem" à toa.
+function chartSig(data) {
+  return JSON.stringify([currentTheme(), data.labels, (data.datasets || []).map((set) => [set.label, set.data])]);
+}
+function markChart(chart) { chart.$sig = chartSig(chart.data); return chart; }
+function updateChart(chart, data, options) {
+  const sig = chartSig(data);
+  if (chart.$sig === sig) return;
+  chart.$sig = sig;
+  chart.data = data;
+  chart.options = options;
+  chart.update();
+}
 function chartOptions() {
   return {
     responsive: true,
@@ -1186,8 +1200,8 @@ function renderGrowth(data) {
     }
   };
   // Atualiza no lugar e anima do valor antigo para o novo (sem recriar o gráfico).
-  if (lineChart) { lineChart.data = { labels, datasets }; lineChart.options = options; lineChart.update(); }
-  else lineChart = new Chart(document.getElementById("line-chart"), { type: "line", data: { labels, datasets }, options });
+  if (lineChart) updateChart(lineChart, { labels, datasets }, options);
+  else lineChart = markChart(new Chart(document.getElementById("line-chart"), { type: "line", data: { labels, datasets }, options }));
 }
 function renderCharts(data) {
   if (!window.Chart) return;
@@ -1228,8 +1242,8 @@ function renderCharts(data) {
     }
   };
   // Atualiza os gráficos no lugar (sem destruir/recriar), para não piscar no auto-refresh.
-  if (barChart) { barChart.data = barData; barChart.options = barOptions; barChart.update(); }
-  else barChart = new Chart(canvas, { type: "bar", data: barData, options: barOptions });
+  if (barChart) updateChart(barChart, barData, barOptions);
+  else barChart = markChart(new Chart(canvas, { type: "bar", data: barData, options: barOptions }));
 }
 // Top 3 horários do build_suggestions (vem junto no /api/dashboard, com o mesmo período e pasta).
 const WEEK_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -3165,6 +3179,8 @@ function renderBell() {
     if (item.profile_image_url) {
       const img = el("img");
       img.src = item.profile_image_url;
+      img.loading = "lazy";
+      img.decoding = "async";
       img.alt = "";
       img.referrerPolicy = "no-referrer";
       img.addEventListener("error", () => { img.remove(); avatar.textContent = initial; });

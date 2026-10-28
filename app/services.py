@@ -821,8 +821,13 @@ def account_payload(db: Session, account: XAccount, start: date, end: date) -> d
 
 def account_card(account: XAccount, samples: list, latest: DailyMetric | None, detail: str | None) -> dict[str, Any]:
     """Cartão de uma conta a partir dos posts do período já carregados (sem consultar o banco)."""
-    impressions = sum(int(row.impression_count or row.view_count or 0) for row in samples) if samples else None
-    views = sum(int(row.view_count or 0) for row in samples)
+    impressions = views = likes = retweets = replies = 0
+    for row in samples:  # uma passada só
+        views += int(row.view_count or 0)
+        impressions += int(row.impression_count or row.view_count or 0)
+        likes += int(row.like_count or 0)
+        retweets += int(row.retweet_count or 0)
+        replies += int(row.reply_count or 0)
     status = account.last_health_status.value if account.last_health_status else None
     checked_at = as_utc(account.last_health_checked_at).isoformat() if account.last_health_checked_at else None
     return {
@@ -839,10 +844,10 @@ def account_card(account: XAccount, samples: list, latest: DailyMetric | None, d
         "checked_at": checked_at,
         "followers": latest.followers_count if latest else None,
         "following": latest.following_count if latest else None,
-        "likes": sum(int(row.like_count or 0) for row in samples),
-        "retweets": sum(int(row.retweet_count or 0) for row in samples),
-        "replies": sum(int(row.reply_count or 0) for row in samples),
-        "impressions": impressions,
+        "likes": likes,
+        "retweets": retweets,
+        "replies": replies,
+        "impressions": impressions if samples else None,
         "views": views,
         "posts": len(samples),
     }
@@ -916,8 +921,11 @@ def suggestions_from(all_rows: list, start: date, end: date, everything=None) ->
     zones: dict[str | None, ZoneInfo] = {}
     in_period = []
     for row in all_rows:
-        tz = zones.get(row.timezone_used) or zones.setdefault(row.timezone_used, zone(row.timezone_used))
-        if start <= as_utc(row.posted_at).astimezone(tz).date() <= end:
+        day = getattr(row, "used_day", None)
+        if day is None:
+            tz = zones.get(row.timezone_used) or zones.setdefault(row.timezone_used, zone(row.timezone_used))
+            day = as_utc(row.posted_at).astimezone(tz).date()
+        if start <= day <= end:
             in_period.append(row)
     if len(in_period) < 3 and everything is not None:
         all_rows = everything()
@@ -997,6 +1005,39 @@ SAMPLE_COLUMNS = (
 Loaded = list[tuple[XAccount, Any, date]]
 
 
+class Sample:
+    """Um post já pronto para as contas do dashboard: números em int e a hora local calculada uma vez
+    só (antes cada post era convertido de fuso várias vezes por montagem)."""
+
+    __slots__ = (
+        "account_id", "tweet_id", "posted_at", "timezone_used", "hour_local", "weekday", "text_preview",
+        "view_count", "impression_count", "like_count", "retweet_count", "reply_count", "quote_count",
+        "bookmark_count", "local", "used_day",
+    )
+
+    def __init__(self, row: tuple, tz: ZoneInfo, tz_name: str, zones: dict[str | None, ZoneInfo]) -> None:
+        # Desempacota a tupla na ordem de SAMPLE_COLUMNS (bem mais rápido que ler a linha por nome).
+        (self.account_id, self.tweet_id, posted, used_tz, self.hour_local, self.weekday, self.text_preview,
+         views, self.impression_count, likes, rts, replies, quotes, bookmarks) = row
+        posted = posted if posted.tzinfo is not None else posted.replace(tzinfo=timezone.utc)
+        self.posted_at = posted
+        self.timezone_used = used_tz
+        self.view_count = views or 0
+        self.like_count = likes or 0
+        self.retweet_count = rts or 0
+        self.reply_count = replies or 0
+        self.quote_count = quotes or 0
+        self.bookmark_count = bookmarks or 0
+        local = posted.astimezone(tz)
+        self.local = local
+        # Dia no fuso gravado no próprio post (sugestões de horário); quase sempre o mesmo da conta.
+        if used_tz == tz_name or not used_tz:
+            self.used_day = local.date()
+        else:
+            other = zones.get(used_tz) or zones.setdefault(used_tz, zone(used_tz))
+            self.used_day = posted.astimezone(other).date()
+
+
 def load_samples(db: Session, accounts: list[XAccount], since: date | None = None) -> Loaded:
     """Posts das contas numa consulta só, cada um com a conta e o dia local (fuso da conta).
 
@@ -1006,13 +1047,18 @@ def load_samples(db: Session, accounts: list[XAccount], since: date | None = Non
     if not by_id:
         return []
     zones = {account.id: zone(account.timezone) for account in accounts}
+    used: dict[str | None, ZoneInfo] = {}
     query = select(*SAMPLE_COLUMNS).where(TweetSample.account_id.in_(by_id)).order_by(TweetSample.id)
     if since is not None:
         query = query.where(TweetSample.posted_at >= datetime.combine(since - timedelta(days=1), time.min, timezone.utc))
-    return [
-        (by_id[row.account_id], row, as_utc(row.posted_at).astimezone(zones[row.account_id]).date())
-        for row in db.execute(query)
-    ]
+    loaded = []
+    append = loaded.append
+    for row in db.execute(query):  # Row já desempacota como tupla
+        account_id = row[0]
+        account = by_id[account_id]
+        sample = Sample(row, zones[account_id], account.timezone, used)
+        append((account, sample, sample.local.date()))
+    return loaded
 
 
 def within(loaded: Loaded, start: date, end: date) -> list[tuple[XAccount, Any]]:
@@ -1022,8 +1068,16 @@ def within(loaded: Loaded, start: date, end: date) -> list[tuple[XAccount, Any]]
 
 def window_totals(pairs: list[tuple[XAccount, TweetSample]]) -> dict[str, Any]:
     """Somas de um período, views por post e taxa de interação (interações ÷ views, em %)."""
+    views = likes = retweets = replies = quotes = bookmarks = 0
+    for _, row in pairs:  # uma passada só (eram seis)
+        views += int(row.view_count or 0)
+        likes += int(row.like_count or 0)
+        retweets += int(row.retweet_count or 0)
+        replies += int(row.reply_count or 0)
+        quotes += int(row.quote_count or 0)
+        bookmarks += int(row.bookmark_count or 0)
     totals: dict[str, Any] = {
-        key: sum(int(getattr(row, column) or 0) for _, row in pairs) for key, column in SAMPLE_FIELDS
+        "views": views, "likes": likes, "retweets": retweets, "replies": replies, "quotes": quotes, "bookmarks": bookmarks,
     }
     posts = len(pairs)
     interactions = sum(totals[key] for key in ("likes", "retweets", "replies", "quotes", "bookmarks"))
@@ -1094,7 +1148,8 @@ def post_payload(account: XAccount, row: TweetSample, total_views: int) -> dict[
 
 
 def local_posted(account: XAccount, row: TweetSample) -> datetime:
-    return as_utc(row.posted_at).astimezone(zone(account.timezone))
+    local = getattr(row, "local", None)  # Sample já traz a hora local
+    return local if local is not None else as_utc(row.posted_at).astimezone(zone(account.timezone))
 
 
 def growth_payload(

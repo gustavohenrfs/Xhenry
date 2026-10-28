@@ -3,7 +3,8 @@
 Cada resposta fica guardada já em JSON, com a "versão dos dados" de quando foi montada:
 - um contador que sobe a cada escrita pela API (POST/PUT/PATCH/DELETE, ver ForgetOnWrite em main.py);
 - o maior collected_at de tweet_samples e daily_metrics (o robo.py grava NOW() em toda leitura);
-- o maior id de sync_runs (verificações de saúde, inclusive as do vigia).
+- o maior id de sync_runs (verificações de saúde, inclusive as do vigia);
+- o maior id de tweet_samples e daily_metrics (linha nova no mesmo segundo de outra).
 Se a versão mudou, monta de novo. Mesmo sem mudança, vive no máximo TTL_SECONDS, porque "hoje"
 depende da hora. Vale para um processo uvicorn só (o Cloaker já exige isso); com mais de um, cada
 processo teria o próprio cache.
@@ -44,6 +45,10 @@ def data_version(db: Session) -> tuple:
             select(func.max(TweetSample.collected_at)).scalar_subquery(),
             select(func.max(DailyMetric.collected_at)).scalar_subquery(),
             select(func.max(SyncRun.id)).scalar_subquery(),
+            # O maior id muda a cada linha nova, mesmo gravada no mesmo segundo de outra (o carimbo de
+            # tempo do SQLite é por segundo; gravações seguidas pareciam a mesma versão).
+            select(func.max(TweetSample.id)).scalar_subquery(),
+            select(func.max(DailyMetric.id)).scalar_subquery(),
         )
     ).one()
     return (_generation, *(str(value) for value in stamps))

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Folder, Invite, User, XAccount
-from app.routers.auth import admin_user, public_base_url, revoke_sessions
+from app.routers.auth import admin_user, avatar_link, public_base_url, revoke_sessions
 from app.services import as_utc, now_utc
 
 router = APIRouter(dependencies=[Depends(admin_user)])
@@ -38,7 +38,7 @@ def user_row(user: User, accounts: int) -> dict[str, Any]:
         "id": user.id,
         "email": user.email,
         "nome_exibicao": user.nome_exibicao or user.name,
-        "avatar_url": user.avatar_url,
+        "avatar_url": avatar_link(user),
         "is_admin": bool(user.is_admin),
         "is_approved": bool(user.is_approved),
         "created_at": iso(user.created_at),

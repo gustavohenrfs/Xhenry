@@ -13,7 +13,7 @@ import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -185,12 +185,45 @@ def normalize_email(value: str) -> str:
     return email
 
 
+# Foto do perfil: guardada pequena (WebP 256 px) e servida por /api/avatar com cache de um ano; as
+# respostas JSON levam só o link (antes a imagem inteira em base64 ia em todo /api/me).
+AVATAR_SIZE = 256
+AVATAR_MAX_BYTES = 60_000
+
+
+def small_avatar(raw: bytes) -> bytes:
+    """Qualquer JPEG/PNG vira WebP quadrado de AVATAR_SIZE px (centro da imagem)."""
+    from io import BytesIO
+
+    from PIL import Image, ImageOps
+
+    try:
+        image = ImageOps.exif_transpose(Image.open(BytesIO(raw)))
+        image = ImageOps.fit(image.convert("RGB"), (AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
+    except Exception as exc:
+        raise HTTPException(400, "A imagem é muito grande ou o formato é inválido") from exc
+    out = BytesIO()
+    image.save(out, "WEBP", quality=82, method=6)
+    return out.getvalue()
+
+
+def avatar_version(data_uri: str) -> str:
+    return hashlib.sha1(data_uri.encode()).hexdigest()[:12]
+
+
+def avatar_link(user: Any) -> str | None:
+    url = user.avatar_url or ""
+    if url.startswith("data:"):
+        return f"/api/avatar/{user.id}?v={avatar_version(url)}"
+    return url or None
+
+
 def public_user(user: Any) -> dict[str, Any]:
     return {
         "id": user.id,
         "email": user.email,
         "nome_exibicao": user.nome_exibicao or user.name,
-        "avatar_url": user.avatar_url,
+        "avatar_url": avatar_link(user),
         "logo_url": user.logo_url,
         "is_admin": bool(user.is_admin),
         "is_approved": bool(user.is_approved),
@@ -332,12 +365,30 @@ async def update_me(
         kind = (avatar.content_type or "").lower()
         if kind not in {"image/jpeg", "image/jpg", "image/png"}:
             raise HTTPException(400, "A imagem é muito grande ou o formato é inválido")
-        mime = "image/png" if kind == "image/png" else "image/jpeg"
-        b64 = base64.b64encode(raw).decode("ascii")
-        row.avatar_url = f"data:{mime};base64,{b64}"
+        b64 = base64.b64encode(small_avatar(raw)).decode("ascii")
+        row.avatar_url = f"data:image/webp;base64,{b64}"
     db.commit()
     db.refresh(row)
     return public_user(row)
+
+
+@router.get("/api/avatar/{user_id}")
+def avatar(user_id: int, v: str = "", db: Session = Depends(get_db)) -> Response:
+    """Foto do perfil com cache de um ano. Sem login (a tag <img> não manda o token), mas só com o v
+    certo, que vem do /api/me: o id sozinho não abre a foto de ninguém. Foto antiga, grande, vira
+    WebP pequena na primeira vez que é pedida."""
+    row = db.get(User, user_id)
+    url = (row.avatar_url or "") if row is not None else ""
+    if not url.startswith("data:") or not hmac.compare_digest(v, avatar_version(url)):
+        raise HTTPException(404, "Foto não encontrada.")
+    header, _, b64 = url.partition(",")
+    raw = base64.b64decode(b64)
+    mime = header[5:].split(";")[0] or "image/jpeg"
+    if mime != "image/webp" or len(raw) > AVATAR_MAX_BYTES:
+        raw, mime = small_avatar(raw), "image/webp"
+        row.avatar_url = "data:image/webp;base64," + base64.b64encode(raw).decode("ascii")
+        db.commit()
+    return Response(raw, media_type=mime, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @router.post("/api/change-password")

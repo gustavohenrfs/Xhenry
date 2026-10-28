@@ -111,3 +111,15 @@ def test_logged_in_can_create_and_delete_folder(client):
         assert client.delete(f"/api/folders/{created.json()['id']}").status_code == 204
     finally:
         app.dependency_overrides.clear()
+
+
+def test_page_needs_no_third_party_server(client):
+    """Fontes e Chart.js saem do próprio painel, com cache de um ano (nada de Google ou jsDelivr)."""
+    html = client.get("/").text
+    assert "fonts.googleapis" not in html and "jsdelivr" not in html
+    for path in ("/static/vendor/chart-4.4.6.umd.min.js?v=1", "/static/fonts/outfit-latin.woff2?v=1",
+                 "/static/fonts/space-grotesk-latin.woff2?v=1", "/static/img/logo-128.webp"):
+        resp = client.get(path)
+        assert resp.status_code == 200, path
+        if "?v=" in path:
+            assert "immutable" in resp.headers["cache-control"], path
