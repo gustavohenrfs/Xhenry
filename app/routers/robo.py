@@ -15,7 +15,7 @@ from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,8 @@ from app.models import Collector, SyncKind, SyncRun, User
 from app.routers.auth import admin_user, approved_user
 from app.services import (
     admin_apify_active,
+    apply_pause,
+    pause_payload,
     as_utc,
     get_settings,
     now_utc,
@@ -42,15 +44,23 @@ ROBO_INTERVALS = (5, 10, 15, 30, 60, 120, 180, 360, 720, 1440)
 APIFY_INTERVALS = (15, 30, 60, 120, 180, 360, 720, 1440)
 
 
+class PauseIn(BaseModel):
+    on: bool | None = None
+    from_: str | None = Field(default=None, alias="from", max_length=5)
+    to: str | None = Field(default=None, max_length=5)
+
+
 class ApifyIn(BaseModel):
     auto: bool | None = None
     interval_min: int | None = None
+    pause: PauseIn | None = None
 
 
 class RoboIn(BaseModel):
     enabled: bool | None = None
     interval_min: int | None = None
     apify_interval_min: int | None = None
+    pause: PauseIn | None = None
 
 
 def robo_payload(db: Session) -> dict[str, Any]:
@@ -95,6 +105,7 @@ def robo_payload(db: Session) -> dict[str, Any]:
             "checked_at": as_utc(apify.apify_checked_at).isoformat() if apify and apify.apify_checked_at else None,
         },
         "requested_at": as_utc(requested).isoformat() if requested else None,
+        "pause": pause_payload(apify) if apify else {"on": True, "from": "00:00", "to": "06:00"},
         # Leitura na hora (app/reader.py) em andamento: a tela espera ela acabar.
         "running": bool(admin and reader.running(admin.id)),
         "asked_at": now_utc().isoformat(),
@@ -119,6 +130,10 @@ def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]
         if payload.apify_interval_min not in APIFY_INTERVALS:
             raise HTTPException(400, "Intervalo do Apify inválido.")
         row.apify_interval_min = payload.apify_interval_min
+    if payload.pause is not None:
+        admin = db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id).limit(1))
+        if admin is not None:
+            apply_pause(user_settings(db, admin.id), payload.pause.on, payload.pause.from_, payload.pause.to)
     if payload.enabled is not None:
         if payload.enabled and not row.robo_enabled:
             row.robo_run_requested_at = now_utc()  # religou: lê já, sem esperar o intervalo
@@ -201,6 +216,7 @@ def read_apify(user: User = Depends(approved_user), db: Session = Depends(get_db
         **payload["apify"],
         "intervals": list(APIFY_INTERVALS),
         "running": reader.running(user.id),
+        "pause": pause_payload(user_settings(db, user.id)),
     }
 
 
@@ -214,6 +230,8 @@ def write_apify(payload: ApifyIn, user: User = Depends(approved_user), db: Sessi
         row.apify_interval_min = payload.interval_min
     if payload.auto is not None:
         row.apify_auto = payload.auto
+    if payload.pause is not None:
+        apply_pause(row, payload.pause.on, payload.pause.from_, payload.pause.to)
     db.commit()
     return read_apify(user, db)
 

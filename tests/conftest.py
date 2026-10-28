@@ -161,3 +161,14 @@ class AlertLog:
 
     def __eq__(self, other) -> bool:
         return self._texts() == list(other)
+
+
+@pytest.fixture(autouse=True)
+def daytime(monkeypatch):
+    """A pausa da madrugada (00:00 às 06:00, ligada por padrão) depende da hora: os testes rodam como
+    se fosse de dia. Quem testa a pausa passa a hora de propósito (now=)."""
+    from app import services, watchdog
+
+    real = services.paused_now
+    monkeypatch.setattr(watchdog, "paused_now", lambda row, now=None: real(row, now) if now is not None else False)
+    monkeypatch.setattr(watchdog, "last_pause_end", lambda row, now=None: None)

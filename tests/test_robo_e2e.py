@@ -86,6 +86,8 @@ class World:
         self.overlap = False
         self.delay = 0.0          # segundos de "leitura" da timeline
         self.config_delay = 0.0   # config.json lento: alarga a janela da corrida entre leituras
+        self.clock = "12:00"       # hora de Brasília que o robô enxerga (pausa e resumo)
+        self.summary_day = None    # dia do resumo das 23:59 (None = fora do horário)
 
     def run(self):
         import robo
@@ -269,6 +271,9 @@ def w(tmp_path_factory):
         mp.setenv("ROBO_COLLECTOR_REST_MIN", "0")
         mp.setattr(robo, "TIMELINE_RETRY_PAUSE", 0)
         mp.setattr(robo, "pause", lambda: world.pauses.append(1))
+        # Pausa da madrugada e resumo dependem do relógio: de dia, salvo nos testes deles.
+        mp.setattr(robo, "br_clock", lambda now=None: world.clock)
+        mp.setattr(robo, "summary_day", lambda now=None: world.summary_day)
         mp.setattr(robo, "ProxyRelay", FakeRelay)
         yield world
     world.engine.dispose()
@@ -829,3 +834,77 @@ def test_milestones_and_daily_goal(w, monkeypatch):
     assert w.q("select count(*) from alerts_sent where kind in ('marco_post','marco_dia','meta')")[0][0] == before,         "mesmos números: nada repete"
     w.sql(f"update user_settings set notify_prefs=NULL where owner_id={owner}")
     admin_token(w, None)
+
+
+# ---- Pausa da madrugada e resumo do fim do dia ----
+
+def test_night_pause_waits_but_the_button_reads(w, monkeypatch):
+    import robo
+
+    friend = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or [])
+    due_round(w)
+    w.sql(f"update x_accounts set collected_at = now() - interval '5 hours' where owner_id={friend}")
+    w.sql(f"update user_settings set apify_auto=true, apify_run_requested_at=NULL, pause_on=true, "
+          f"pause_from='00:00', pause_to='06:00' where owner_id={friend}")
+    w.sql(f"update user_settings set pause_on=true, pause_from='00:00', pause_to='06:00' where owner_id={admin_id(w)}")
+    w.clock = "03:00"
+    w.run()
+    assert not calls and not w.opens(), "madrugada: nem Apify nem coletores sozinhos"
+    w.sql(f"update user_settings set apify_run_requested_at=now() where owner_id={friend}")
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.run()
+    assert "tok-amiga" in calls and w.opens(), "o Atualizar dados lê mesmo na pausa"
+    w.clock = "06:00"
+    due_round(w)
+    w.run()
+    assert w.opens(), "acabou a pausa: a leitura automática volta sozinha"
+    w.clock = "12:00"
+
+
+def test_summary_reads_at_2355_and_congratulates_at_2359(w, monkeypatch):
+    import robo
+
+    friend = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
+    friend_handle, friend_acc = w.q("select username, id from x_accounts where owner_id=:o", o=friend)[0]
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    calls = []
+
+    def fetch(token, handles):
+        calls.append(token)
+        return [{"id": "7001", "createdAt": posted, "viewCount": 4321,
+                 "author": {"userName": friend_handle, "followers": 1}}] if token == "tok-amiga" else []
+
+    monkeypatch.setattr(robo, "apify_fetch", fetch)
+    due_round(w)
+    w.sql(f"update x_accounts set collected_at = now() where owner_id={friend}")  # dentro do intervalo
+    w.sql("update user_settings set summary_read_on = NULL, notify_prefs = NULL")
+    w.sql(f"update user_settings set apify_run_requested_at = NULL where owner_id={friend}")
+    w.clock = "23:56"
+    w.run()
+    assert "tok-amiga" in calls, "23:55: lê tudo para o resumo, mesmo dentro do intervalo"
+    assert w.opens() and w.last_beat()[1]["manual"] is True, "o admin também lê (coletores, sem Apify)"
+    calls.clear()
+    w.clock = "23:57"
+    due_round(w)
+    w.sql("update sync_runs set finished_at = now()")
+    w.run()
+    assert "tok-amiga" not in calls, "a leitura do resumo é uma vez por dia"
+    w.clock = "23:59"
+    w.summary_day = datetime.now(timezone.utc).astimezone(robo.BR_TZ).date()
+    w.sent.clear()
+    w.run()
+    total = w.q("select coalesce(sum(d.views),0) from daily_metrics d join x_accounts a on a.id=d.account_id "
+                "where a.owner_id=:o and d.metric_date=:d", o=friend, d=w.summary_day)[0][0]
+    rows = dict(w.q("select owner_id, detail from alerts_sent where kind='resumo'"))
+    assert rows[friend].startswith(f"🎉 Parabéns! Hoje você fechou o dia com {robo.fmt_int(total)} views")
+    assert admin_id(w) in rows, "o admin também recebe o resumo"
+    w.run()
+    assert w.q("select count(*) from alerts_sent where kind='resumo'")[0][0] == len(rows), "uma vez por dia"
+    w.sql(f"update user_settings set notify_prefs='{{\"kinds\": {{\"resumo\": false}}}}' where owner_id={friend}")
+    w.sql("delete from alerts_sent where kind='resumo'")
+    w.run()
+    assert friend not in dict(w.q("select owner_id, detail from alerts_sent where kind='resumo'")), "desligado: sem resumo"
+    w.clock, w.summary_day = "12:00", None
+    w.sql("update user_settings set notify_prefs = NULL")

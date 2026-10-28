@@ -86,6 +86,10 @@ def ensure_user_auth_columns() -> None:
             "apify_auto": "BOOLEAN NOT NULL DEFAULT TRUE",
             "apify_interval_min": "INTEGER NOT NULL DEFAULT 60",
             "notify_prefs": "TEXT",
+            "pause_on": "BOOLEAN NOT NULL DEFAULT TRUE",
+            "pause_from": "VARCHAR(5) NOT NULL DEFAULT '00:00'",
+            "pause_to": "VARCHAR(5) NOT NULL DEFAULT '06:00'",
+            "summary_read_on": "DATE",
         }
         for column, ddl in added.items():
             if column not in user_setting_cols:
@@ -241,6 +245,50 @@ def admin_apify_active(db: Session) -> bool:
         .limit(1)
     )
     return bool((token or "").strip())
+
+
+def in_window(start: str, end: str, clock: str) -> bool:
+    """clock entre start e end (HH:MM), atravessando a meia-noite se start > end."""
+    if start == end:
+        return False
+    return start <= clock < end if start < end else (clock >= start or clock < end)
+
+
+def pause_payload(row: UserSetting) -> dict[str, Any]:
+    return {"on": bool(row.pause_on), "from": row.pause_from or "00:00", "to": row.pause_to or "06:00"}
+
+
+def apply_pause(row: UserSetting, on: bool | None, start: str | None, end: str | None) -> None:
+    """Grava a pausa da madrugada (horários HH:MM); 400 se algum horário não vale."""
+    for value in (start, end):
+        if value is not None and not HHMM.match(value):
+            raise HTTPException(400, "Horário inválido. Use HH:MM.")
+    if start is not None:
+        row.pause_from = start
+    if end is not None:
+        row.pause_to = end
+    if on is not None:
+        row.pause_on = on
+
+
+def paused_now(row: UserSetting | None, now: datetime | None = None) -> bool:
+    if row is None or not row.pause_on:
+        return False
+    clock = (now or now_utc()).astimezone(zone(DEFAULT_TZ)).strftime("%H:%M")
+    return in_window(row.pause_from or "00:00", row.pause_to or "06:00", clock)
+
+
+def last_pause_end(row: UserSetting | None, now: datetime | None = None) -> datetime | None:
+    """Fim da pausa mais recente (já passado): o vigia conta o silêncio a partir dele."""
+    if row is None or not row.pause_on:
+        return None
+    now = now or now_utc()
+    local = now.astimezone(zone(DEFAULT_TZ))
+    hour, minute = (int(part) for part in (row.pause_to or "06:00").split(":"))
+    end = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if end > local:
+        end -= timedelta(days=1)
+    return end.astimezone(timezone.utc)
 
 
 def robot_interval(db: Session, settings: AppSetting) -> int:
@@ -1555,6 +1603,7 @@ NOTIFY_TYPES = [
     ("marco_post", "Marcos de views de um post", "📈", False),
     ("marco_dia", "Marcos de views do dia", "📊", False),
     ("meta", "Meta do dia batida", "🎯", False),
+    ("resumo", "Resumo do fim do dia (23:59)", "🎉", False),
     ("queda", "Queda de views", "📉", False),
     ("ban", "Possível restrição da conta", "⚠️", False),
     ("falha", "Falhas de leitura (Apify, coletores, robô)", "🛠️", False),
@@ -1628,6 +1677,7 @@ ALERT_TITLES = {
     "marco_post": ("📈", "Marco de views do post"),
     "marco_dia": ("📊", "Marco de views do dia"),
     "meta": ("🎯", "Meta do dia batida"),
+    "resumo": ("🎉", "Resumo do dia"),
     "acesso": ("👤", "Novo pedido de acesso"),
     "coletor": ("🛠️", "Coletor com problema"),
     "erro": ("❌", "Erro na leitura"),
@@ -1643,7 +1693,7 @@ def alert_item(db: Session, row: AlertSent) -> dict[str, Any]:
         return viral_item(db, row)
     lines = [line.strip() for line in (row.detail or "").splitlines() if line.strip()]
     emoji, title = ALERT_TITLES.get(row.kind, ("🔔", "Alerta"))
-    if lines and row.kind in {"marco_post", "marco_dia", "meta"}:
+    if lines and row.kind in {"marco_post", "marco_dia", "meta", "resumo"}:
         title = re.sub(r"^\W+\s*", "", lines[0]) or title  # "Post passou de 10.000 views"
     found = re.search(r"Conta:\s*(.*?)\s*\(@(\w+)\)", row.detail or "")
     link = re.search(r"https://x\.com/\S+", row.detail or "")

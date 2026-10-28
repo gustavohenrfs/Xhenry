@@ -45,6 +45,14 @@ só o "Esqueceu a senha?" e o aviso do backup).
 - Marcos do usuário (user_settings.notify_prefs): a cada post_step views num
   post e a cada day_step views no total do dia; e a meta do dia batida
   (impression_goal). Só o maior marco alcançado sai.
+- Resumo do fim do dia (notify_prefs.kinds.resumo, ligado por padrão): às 23:55
+  uma leitura de todas as contas do usuário (summary_read_on marca o dia) e às
+  23:59 "Parabéns! Hoje você fechou o dia com X views" (summary_round; se o cron
+  perder 23:59, sai até 00:04 com o dia anterior).
+
+Pausa da madrugada (user_settings.pause_on/pause_from/pause_to, padrão 00:00 às
+06:00, horário de Brasília): a leitura automática não roda, nem pelo Apify nem
+pelos coletores; "Atualizar Dados" e a leitura do resumo continuam.
 - Queda de views: a partir de QUEDA_HORA, se as views de hoje ficarem mais de
   QUEDA_LIMITE abaixo das de ontem. Uma vez por conta por dia.
 - Coletor limitado (429), bloqueado, com verificação de humanidade (Cloudflare),
@@ -1299,13 +1307,56 @@ def apify_author(item: dict[str, Any]) -> tuple[str, int | None]:
     return str(handle).lower(), (as_int(raw) if raw is not None else None)
 
 
+SUMMARY_READ_FROM, SUMMARY_AT, SUMMARY_LATE = "23:55", "23:59", "00:05"
+
+
+def br_clock(now: datetime | None = None) -> str:
+    return (now or datetime.now(timezone.utc)).astimezone(BR_TZ).strftime("%H:%M")
+
+
+def in_window(start: str, end: str, clock: str) -> bool:
+    """clock entre start e end (HH:MM), atravessando a meia-noite se start > end."""
+    if start == end:
+        return False
+    return start <= clock < end if start < end else (clock >= start or clock < end)
+
+
+def paused(row: dict[str, Any], now: datetime | None = None) -> bool:
+    """Pausa da madrugada do usuário: a leitura automática espera; o botão e o resumo não."""
+    if row.get("pause_on") is False:
+        return False
+    return in_window(row.get("pause_from") or "00:00", row.get("pause_to") or "06:00", br_clock(now))
+
+
+def summary_wanted(raw_prefs: str | None) -> bool:
+    try:
+        kinds = (json.loads(raw_prefs or "{}") or {}).get("kinds") or {}
+    except ValueError:
+        kinds = {}
+    return kinds.get("resumo", True) is not False
+
+
+def summary_read_due(row: dict[str, Any], now: datetime | None = None) -> bool:
+    """Leitura das 23:55 para o resumo: uma vez por dia, só de quem quer o resumo."""
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(BR_TZ).date()
+    return (summary_wanted(row.get("notify_prefs")) and SUMMARY_READ_FROM <= br_clock(now) < SUMMARY_AT
+            and row.get("summary_read_on") != today)
+
+
+def mark_summary_read(cur, owner_id: int, now: datetime | None = None) -> None:
+    today = (now or datetime.now(timezone.utc)).astimezone(BR_TZ).date()
+    cur.execute("UPDATE user_settings SET summary_read_on = %s WHERE owner_id = %s", (today, owner_id))
+
+
 def apify_users(cur) -> list[dict[str, Any]]:
     """Usuários aprovados que não são o admin e têm alguma conta ativa."""
     cur.execute(
         """
         SELECT u.id, s.apify_token, s.apify_run_requested_at,
                COALESCE(s.apify_auto, TRUE) AS apify_auto,
-               COALESCE(s.apify_interval_min, %s) AS apify_interval_min
+               COALESCE(s.apify_interval_min, %s) AS apify_interval_min,
+               s.pause_on, s.pause_from, s.pause_to, s.notify_prefs, s.summary_read_on
         FROM users u
         LEFT JOIN user_settings s ON s.owner_id = u.id
         WHERE u.is_approved IS TRUE
@@ -1395,9 +1446,15 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
 def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str, Any]:
     """Lê pelo Apify as contas vencidas de um usuário, numa chamada só. Devolve o resumo."""
     owner_id = user["id"]
-    requested = user["apify_run_requested_at"] is not None
-    if not requested and user.get("apify_auto") is False:
-        return {"owner": owner_id, "contas": 0}  # leitura automática desligada: só pelo botão
+    summary = summary_read_due(user)
+    if summary:
+        # Leitura das 23:55 para o resumo: marca antes, para um erro não repetir a cada minuto.
+        with conn.cursor() as cur:
+            mark_summary_read(cur, owner_id)
+        conn.commit()
+    requested = user["apify_run_requested_at"] is not None or summary
+    if not requested and (user.get("apify_auto") is False or paused(user)):
+        return {"owner": owner_id, "contas": 0}  # automática desligada ou pausa da madrugada: só pelo botão
     with conn.cursor() as cur:
         accounts = apify_accounts(cur, owner_id, requested, user.get("apify_interval_min"))
     conn.commit()
@@ -1436,6 +1493,72 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
     conn.commit()
     log.info("apify: usuário %s — %s contas, %s posts de hoje", owner_id, len(accounts), saved)
     return {"owner": owner_id, "contas": len(accounts), "tweets": saved}
+
+
+def summary_day(now: datetime | None = None) -> date | None:
+    """Dia do resumo: hoje a partir das 23:59; o de ontem até 00:04 (o cron pode ter perdido o minuto)."""
+    local = (now or datetime.now(timezone.utc)).astimezone(BR_TZ)
+    clock = local.strftime("%H:%M")
+    if clock >= SUMMARY_AT:
+        return local.date()
+    if clock < SUMMARY_LATE:
+        return local.date() - timedelta(days=1)
+    return None
+
+
+def summary_text(total: int, top: dict[str, Any] | None) -> str:
+    if total <= 0:
+        return "🌙 Dia encerrado\nHoje as suas contas não tiveram views lidas."
+    text = f"🎉 Parabéns! Hoje você fechou o dia com {fmt_int(total)} views"
+    if top and top["views"]:
+        who = top["display_name"] or top["username"]
+        text += f"\n🏆 Melhor conta: {who} (@{top['username']}) com {fmt_int(as_int(top['views']))} views"
+    return text
+
+
+def summary_round(connect, now: datetime | None = None) -> int:
+    """23:59: o total de views do dia de cada usuário que quer o resumo (só uma vez por dia)."""
+    day = summary_day(now)
+    if day is None:
+        return 0
+    sent = 0
+    with connect() as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    """
+                    SELECT u.id, s.notify_prefs
+                    FROM users u LEFT JOIN user_settings s ON s.owner_id = u.id
+                    WHERE u.is_approved IS TRUE
+                      AND EXISTS (SELECT 1 FROM x_accounts a WHERE a.owner_id = u.id AND a.is_active IS TRUE
+                                  AND COALESCE(a.is_archived, FALSE) IS FALSE)
+                    """
+                )
+                users = [row for row in cur.fetchall() if summary_wanted(row["notify_prefs"])]
+            except Exception as exc:
+                conn.rollback()
+                log.warning("resumo do dia: sem as tabelas novas (%s)", type(exc).__name__)
+                return 0
+            for user in users:
+                if already_alerted(cur, f"resumo:{user['id']}:{day.isoformat()}"):
+                    continue
+                total = day_views(cur, user["id"], day)
+                cur.execute(
+                    """
+                    SELECT a.username, a.display_name, d.views
+                    FROM daily_metrics d JOIN x_accounts a ON a.id = d.account_id
+                    WHERE a.owner_id = %s AND d.metric_date = %s AND COALESCE(a.is_archived, FALSE) IS FALSE
+                    ORDER BY d.views DESC NULLS LAST LIMIT 1
+                    """,
+                    (user["id"], day),
+                )
+                if alert_once(cur, f"resumo:{user['id']}:{day.isoformat()}", "resumo",
+                              summary_text(total, cur.fetchone()), user["id"]):
+                    sent += 1
+        conn.commit()
+    if sent:
+        log.info("resumo do dia %s: %s usuários", day.isoformat(), sent)
+    return sent
 
 
 def apify_round(connect, midnight: datetime) -> list[dict[str, Any]]:
@@ -1784,7 +1907,8 @@ def run_round() -> int:
     # conta respeita o próprio intervalo) e sem depender da leitura automática do admin.
     connect = lambda: psycopg.connect(database_url(), row_factory=dict_row, connect_timeout=10)  # noqa: E731
     apify = ThreadPoolExecutor(max_workers=1, thread_name_prefix="apify")
-    apify_job = apify.submit(apify_round, connect, midnight)
+    # Depois das leituras do Apify (inclusive a das 23:55), o resumo das 23:59.
+    apify_job = apify.submit(lambda: (apify_round(connect, midnight), summary_round(connect)))
     try:
         return collectors_round(conn, started, midnight)
     finally:
@@ -1796,6 +1920,28 @@ def run_round() -> int:
 
 
 APIFY_ADMIN_INTERVAL_DEFAULT = 30
+
+
+def admin_schedule(conn) -> dict[str, Any] | None:
+    """Pausa da madrugada e leitura do resumo do admin (valem com ou sem Apify). None em painel antigo."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.id, s.pause_on, s.pause_from, s.pause_to, s.notify_prefs, s.summary_read_on
+                FROM users u LEFT JOIN user_settings s ON s.owner_id = u.id
+                WHERE u.is_admin IS TRUE ORDER BY u.id LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        log.warning("sem a pausa da madrugada (%s); atualize o painel", type(exc).__name__)
+        return None
+    if row is None:
+        return None
+    return {"id": row["id"], "paused": paused(row), "summary_due": summary_read_due(row)}
 JUST_FAILED = timedelta(minutes=3)
 
 
@@ -1921,11 +2067,22 @@ def collectors_round(conn, started: datetime, midnight: datetime) -> int:
             tests = pending_tests(conn)
             run, manual = round_plan(conn)
             admin = admin_apify(conn)
+            schedule = admin_schedule(conn)
         except Exception as exc:
             log.exception("não leu as opções do robô")
             alert_offline("banco", exc)
             return 1
         apify_error = None
+        if schedule and schedule["summary_due"]:
+            # 23:55: lê tudo para o resumo das 23:59, como o "Atualizar Dados" (Apify, senão coletores).
+            with conn.cursor() as cur:
+                mark_summary_read(cur, schedule["id"])
+            conn.commit()
+            run, manual = True, True
+        elif schedule and schedule["paused"] and not manual:
+            run = False  # pausa da madrugada: só o botão
+            if admin is not None:
+                admin["due"] = False
         if admin is not None:
             # Com Apify, os coletores não seguem o próprio intervalo: só entram se a chamada falhar,
             # e aí leem tudo, como no "Atualizar Dados".

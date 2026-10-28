@@ -14,6 +14,10 @@ const ROLE_KEY = "user_role";
 const USER_KEY = "user_id";
 const ADMIN_TABS = ["collectors", "users"];
 try { const role = localStorage.getItem(ROLE_KEY); if (role) document.body.dataset.role = role; } catch { /* sem storage */ }
+// O navegador só oferece login salvo na tela de entrada: o resto dos campos não preenche sozinho.
+document.querySelectorAll("input:not([autocomplete]), textarea:not([autocomplete])").forEach((field) => {
+  if (!field.closest("#auth-form")) field.setAttribute("autocomplete", "off");
+});
 let lineChart = null;
 let barChart = null;
 let mixChart = null;
@@ -231,6 +235,7 @@ function setAuthMode(mode) {
   field("auth-password", mode !== "forgot");
   field("auth-password2", reset);
   document.getElementById("auth-password-label").textContent = reset ? "Nova senha" : "Senha";
+  document.getElementById("auth-password").autocomplete = register || reset ? "new-password" : "current-password";
   document.getElementById("auth-title").textContent = AUTH_MODES[mode].title;
   document.querySelector("#auth-form button[type=submit]").textContent = AUTH_MODES[mode].submit;
   document.getElementById("forgot-link").classList.toggle("hidden", mode !== "login" || !state.config.password_reset);
@@ -254,7 +259,23 @@ async function loadConfig(invite) {
 let pressed = null;
 let pressedAt = 0;
 let confirmOrigin = null;
+let changed = null;
+let changedAt = 0;
 function markPressed(button) { pressed = button; pressedAt = Date.now(); }
+document.addEventListener("change", (event) => {
+  const field = event.target;
+  if (field.matches && field.matches("input[type=checkbox], input[type=time], select")) { changed = field; changedAt = Date.now(); }
+}, true);
+// Campo que salvou ao mudar: travado (e o rótulo dele pulsando) até a resposta.
+function busyField() {
+  const field = changed;
+  if (!field || Date.now() - changedAt > 1500 || !field.isConnected || field.disabled) return null;
+  changed = null;
+  const shown = field.closest("label") || field;
+  field.disabled = true;
+  shown.classList.add("is-saving");
+  return () => { field.disabled = false; shown.classList.remove("is-saving"); };
+}
 document.addEventListener("click", (event) => { const b = event.target.closest && event.target.closest("button"); if (b) markPressed(b); }, true);
 document.addEventListener("submit", (event) => {
   const b = event.submitter || event.target.querySelector("button[type=submit], button:not([type])");
@@ -263,7 +284,7 @@ document.addEventListener("submit", (event) => {
 function busyButton(method) {
   if (!method || method.toUpperCase() === "GET") return null;
   const b = pressed;
-  if (!b || Date.now() - pressedAt > 3000 || !b.isConnected || b.id === "refresh-all" || b.classList.contains("is-busy")) return null;
+  if (!b || Date.now() - pressedAt > 3000 || !b.isConnected || b.id === "refresh-all" || b.classList.contains("is-busy")) return busyField();
   pressed = null;
   const wasDisabled = b.disabled;
   b.classList.add("is-busy");
@@ -645,7 +666,7 @@ const ALERT_KINDS = {
   viral: ["Viral", "#7cf0b5"], queda: ["Queda", "#ffb4c4"], ban: ["Restrição", "#ffb4c4"],
   coletor: ["Coletor", "#ffc46b"], erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"],
   apify: ["Apify", "#ffc46b"], marco_post: ["Marco do post", "#7cf0b5"], marco_dia: ["Marco do dia", "#4fe3ff"],
-  meta: ["Meta batida", "#ffd36b"], acesso: ["Pedido de acesso", "#d6ccff"]
+  meta: ["Meta batida", "#ffd36b"], acesso: ["Pedido de acesso", "#d6ccff"], resumo: ["Resumo do dia", "#ff63c3"]
 };
 let alertGroup = "";
 const VIEW_LEVEL_TAGS = [
@@ -935,18 +956,21 @@ function paintReading(apify) {
   paintApify(apify);
   document.getElementById("apify-auto").checked = Boolean(apify.auto);
   fillIntervals(document.getElementById("apify-every"), apify.intervals, apify.interval_min, !apify.auto);
-  const next = apify.auto ? "Leitura automática a cada " + intervalLabel(apify.interval_min) + "." : "Leitura automática desligada: só pelo botão Atualizar dados.";
+  if (apify.pause) paintPause("reading", apify.pause);
+  const next = apify.auto ? "Leitura automática a cada " + intervalLabel(apify.interval_min) + "." + pauseText(apify.pause || {}) : "Leitura automática desligada: só pelo botão Atualizar dados.";
   document.getElementById("reading-status").textContent = next + " " + apifyStatusText(apify);
 }
 async function saveReading(body) {
   try {
     const apify = await api("/api/apify", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     paintReading(apify);
-    toast(body.auto === false ? "Leitura automática desligada." : body.auto ? "Leitura automática ligada." : "Intervalo salvo: a cada " + intervalLabel(apify.interval_min) + ".");
+    if (body.pause) toast(apify.pause.on ? "Pausa salva: de " + apify.pause.from + " às " + apify.pause.to + "." : "Pausa da madrugada desligada.");
+    else toast(body.auto === false ? "Leitura automática desligada." : body.auto ? "Leitura automática ligada." : "Intervalo salvo: a cada " + intervalLabel(apify.interval_min) + ".");
   } catch (error) { toast(error.message || "Não salvou."); }
 }
 document.getElementById("apify-auto").addEventListener("change", (event) => saveReading({ auto: event.target.checked }));
 document.getElementById("apify-every").addEventListener("change", (event) => saveReading({ interval_min: Number(event.target.value) }));
+watchPause("reading", saveReading);
 async function loadApify() {
   try { paintApify(await api("/api/apify")); } catch { /* o aviso só aparece quando dá para ler */ }
 }
@@ -2650,7 +2674,25 @@ function fillIntervals(select, intervals, value, disabled) {
   select.value = String(value);
   select.disabled = disabled;
 }
+function paintPause(prefix, pause) {
+  document.getElementById(prefix + "-pause-on").checked = Boolean(pause.on);
+  ["from", "to"].forEach((end) => {
+    const field = document.getElementById(prefix + "-pause-" + end);
+    field.value = pause[end];
+    field.disabled = !pause.on;
+  });
+}
+function pauseText(pause) {
+  return pause.on ? " Pausa de " + pause.from + " às " + pause.to + "." : "";
+}
+function watchPause(prefix, save) {
+  document.getElementById(prefix + "-pause-on").addEventListener("change", (event) => save({ pause: { on: event.target.checked } }));
+  ["from", "to"].forEach((end) => document.getElementById(prefix + "-pause-" + end).addEventListener("change", (event) => {
+    if (event.target.value) save({ pause: { [end]: event.target.value } });
+  }));
+}
 function paintRobo(robo) {
+  paintPause("robo", robo.pause);
   const toggle = document.getElementById("robo-enabled");
   toggle.checked = robo.enabled;
   fillIntervals(document.getElementById("robo-interval"), robo.intervals, robo.interval_min, !robo.enabled);
@@ -2679,7 +2721,8 @@ async function saveRobo(body) {
     const robo = await api("/api/robo", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     paintRobo(robo);
     const every = body.apify_interval_min ? robo.apify.interval_min : robo.interval_min;
-    toast(body.enabled === false ? "Leitura automática desligada." : body.enabled ? "Leitura automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(every) + ".");
+    if (body.pause) toast(robo.pause.on ? "Pausa salva: de " + robo.pause.from + " às " + robo.pause.to + "." : "Pausa da madrugada desligada.");
+    else toast(body.enabled === false ? "Leitura automática desligada." : body.enabled ? "Leitura automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(every) + ".");
   } catch (error) {
     toast(error.message || "Não salvou o robô.");
     loadRobo();
@@ -2687,6 +2730,7 @@ async function saveRobo(body) {
 }
 document.getElementById("robo-enabled").addEventListener("change", (event) => saveRobo({ enabled: event.target.checked }));
 document.getElementById("robo-interval").addEventListener("change", (event) => saveRobo({ interval_min: Number(event.target.value) }));
+watchPause("robo", saveRobo);
 document.getElementById("robo-apify-interval").addEventListener("change", (event) => saveRobo({ apify_interval_min: Number(event.target.value) }));
 
 const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô não está pegando os pedidos
@@ -2840,7 +2884,7 @@ function showPrompt(title, defaultValue = "") {
     const titleEl = document.getElementById("confirm-title");
     const messageEl = document.getElementById("confirm-message");
     titleEl.textContent = title;
-    messageEl.innerHTML = `<input id="prompt-input" type="text" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" value="${defaultValue.replace(/"/g, '&quot;')}">`;
+    messageEl.innerHTML = `<input id="prompt-input" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" value="${defaultValue.replace(/"/g, '&quot;')}">`;
     document.getElementById("confirm-modal").classList.remove("hidden");
   });
 }

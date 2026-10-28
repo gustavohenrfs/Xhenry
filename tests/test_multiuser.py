@@ -331,6 +331,7 @@ def test_watchdog_waits_the_apify_interval(monkeypatch):
         settings.robo_run_requested_at = None
         row = services.user_settings(db, admin.id)
         row.apify_token = "tok"
+        row.pause_on = False  # o teste passa a hora real (now): sem a pausa da madrugada no meio
         db.commit()
         now = datetime.now(timezone.utc)
         monkeypatch.setattr(watchdog, "last_robot_beat", lambda _db: now - timedelta(minutes=40))

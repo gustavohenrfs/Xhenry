@@ -33,8 +33,12 @@ from app.push import push_new_alerts
 from app.services import (
     as_utc,
     check_handle,
+    admin_user_id,
     get_settings,
+    last_pause_end,
     now_utc,
+    paused_now,
+    user_settings,
     owned_accounts,
     robot_interval,
     token_configured,
@@ -86,6 +90,13 @@ def check_silence(db: Session, now: datetime | None = None) -> bool:
     pending = settings.robo_run_requested_at
     if pending is not None and now - as_utc(pending) < PENDING_GRACE:
         return False  # acabou de religar ou de pedir leitura: o robô pega no próximo minuto
+    admin_id = admin_user_id(db)
+    admin_row = user_settings(db, admin_id) if admin_id else None
+    if paused_now(admin_row, now):
+        return False  # pausa da madrugada: o robô fica quieto de propósito
+    pause_end = last_pause_end(admin_row, now)
+    if pause_end is not None and pause_end > last:
+        last = pause_end  # o silêncio só conta depois que a pausa acabou
     quiet = now - last
     if quiet <= silence_limit(robot_interval(db, settings)):
         return False

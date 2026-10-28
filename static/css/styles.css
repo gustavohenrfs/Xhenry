@@ -1305,6 +1305,11 @@ body[data-role="admin"] [data-user-only] { display: none !important; }
 .key-link:hover, .key-link:focus-visible { color: var(--accent); }
 
 /* Botão esperando o servidor (app.js marca o botão clicado em toda escrita): spinner no lugar do texto. */
+/* Campo de chave: pontinhos sem ser type=password (senão o navegador oferece login salvo na tela toda). */
+.masked:not(:placeholder-shown) { -webkit-text-security: disc; text-security: disc; }
+/* Interruptor, lista ou horário salvando sozinho: travado e pulsando até o servidor responder. */
+.is-saving { opacity: .55; pointer-events: none; animation: saving-pulse 1s ease-in-out infinite; }
+@keyframes saving-pulse { 50% { opacity: .3; } }
 button.is-busy { position: relative; color: transparent !important; pointer-events: none; }
 button.is-busy > * { visibility: hidden; }
 button.is-busy::after {

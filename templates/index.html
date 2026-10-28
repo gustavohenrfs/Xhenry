@@ -21,9 +21,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=19">
+  <link rel="stylesheet" href="/static/css/styles.css?v=20">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=36"></script>
+  <script defer src="/static/js/app.js?v=37"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -381,19 +381,19 @@
                 <label class="text-sm text-mute" for="apify-token">Token do Apify (leitura das suas contas)</label>
                 <span class="key-actions"><a class="key-link" href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener noreferrer">Criar token ↗</a><button type="button" data-clear-key="apify_token" class="hidden text-xs text-neon hover:underline">Apagar</button></span>
               </div>
-              <input id="apify-token" type="password" autocomplete="off" spellcheck="false" placeholder="apify_api_..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <input id="apify-token" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" spellcheck="false" placeholder="apify_api_..." class="masked w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
               <p id="apify-status" class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Apify: lendo…</p>
             </div>
             <div class="flex items-center justify-between gap-3">
               <label class="text-sm text-mute" for="x-token">Bearer Token da API do X (botão Verificar)</label>
               <span class="key-actions"><a class="key-link" href="https://developer.x.com/en/portal/dashboard" target="_blank" rel="noopener noreferrer">Criar token ↗</a><button type="button" data-clear-key="x_bearer_token" class="hidden text-xs text-neon hover:underline">Apagar</button></span>
             </div>
-            <input id="x-token" type="password" autocomplete="off" spellcheck="false" placeholder="AAAA..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <input id="x-token" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" spellcheck="false" placeholder="AAAA..." class="masked w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex items-center justify-between gap-3">
               <label class="text-sm text-mute" for="xai-key">Chave da xAI (análise do post)</label>
               <span class="key-actions"><a class="key-link" href="https://console.x.ai" target="_blank" rel="noopener noreferrer">Criar chave ↗</a><button type="button" data-clear-key="xai_api_key" class="hidden text-xs text-neon hover:underline">Apagar</button></span>
             </div>
-            <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <input id="xai-key" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other" spellcheck="false" placeholder="xai-..." class="masked w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <label class="block text-sm text-mute" for="goal">Meta de views do dia (todas as contas)</label>
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
@@ -453,6 +453,19 @@
             </label>
             <label class="block text-sm text-mute" for="apify-every">Ler pelo Apify a cada</label>
             <select id="apify-every" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+            <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
+              <span>
+                <span class="block text-sm text-white">Pausar de madrugada</span>
+                <span class="block text-xs text-mute">A leitura automática para nesse horário (Brasília) para não gastar crédito à toa e volta sozinha depois. O Atualizar dados continua lendo.</span>
+              </span>
+              <input id="reading-pause-on" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
+            </label>
+            <div class="flex items-center gap-3">
+              <label class="text-sm text-mute" for="reading-pause-from">De</label>
+              <input id="reading-pause-from" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <label class="text-sm text-mute" for="reading-pause-to">até</label>
+              <input id="reading-pause-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            </div>
             <p id="reading-status" class="text-xs text-mute">—</p>
             <p class="text-xs text-mute">O botão Atualizar dados (no topo do Dashboard) lê na hora pelo Apify, mesmo com a leitura automática desligada. Cada leitura usa créditos da sua conta do Apify.</p>
           </article>
@@ -469,6 +482,19 @@
             <select id="robo-apify-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
             <label class="block text-sm text-mute" for="robo-interval">Coletores a cada (sem Apify)</label>
             <select id="robo-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+            <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
+              <span>
+                <span class="block text-sm text-white">Pausar de madrugada</span>
+                <span class="block text-xs text-mute">A leitura automática para nesse horário (Brasília) para não gastar crédito à toa e volta sozinha depois. O Atualizar dados continua lendo.</span>
+              </span>
+              <input id="robo-pause-on" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
+            </label>
+            <div class="flex items-center gap-3">
+              <label class="text-sm text-mute" for="robo-pause-from">De</label>
+              <input id="robo-pause-from" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <label class="text-sm text-mute" for="robo-pause-to">até</label>
+              <input id="robo-pause-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            </div>
             <p id="robo-status" class="text-xs text-mute">—</p>
             <p class="text-xs text-mute">Com o token do Apify salvo, o robô lê as suas contas pelo Apify e os coletores ficam em espera: só entram se o Apify falhar. Sem token, lê só pelos coletores. O botão Atualizar dados (no topo do Dashboard) lê na hora, mesmo com a leitura automática desligada; o robô pega o pedido em até 1 minuto.</p>
           </article>
@@ -477,7 +503,7 @@
           <form id="password-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Trocar senha</h2>
             <label class="block text-sm text-mute" for="new-password">Nova senha (mín. 8 caracteres)</label>
-            <input id="new-password" type="password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
+            <input id="new-password" type="password" autocomplete="new-password" required minlength="8" maxlength="128" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Nova senha">
             <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Atualizar senha</button>
           </form>
 
@@ -585,13 +611,13 @@
       </div>
       <h2 id="auth-title" class="mt-6 text-sm text-white">Entrar</h2>
       <label id="auth-name-label" class="mt-4 hidden text-sm text-mute" for="auth-name">Nome</label>
-      <input id="auth-name" maxlength="120" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Seu nome">
+      <input id="auth-name" autocomplete="name" maxlength="120" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="Seu nome">
       <label id="auth-email-label" class="mt-4 block text-sm text-mute" for="auth-email">Email</label>
-      <input id="auth-email" type="email" required maxlength="320" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="voce@email.com">
+      <input id="auth-email" type="email" autocomplete="username" required maxlength="320" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="voce@email.com">
       <label id="auth-password-label" class="mt-4 block text-sm text-mute" for="auth-password">Senha</label>
-      <input id="auth-password" type="password" required minlength="8" maxlength="128" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
+      <input id="auth-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128" class="mt-2 w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
       <label id="auth-password2-label" class="mt-4 block hidden text-sm text-mute" for="auth-password2">Repita a nova senha</label>
-      <input id="auth-password2" type="password" minlength="8" maxlength="128" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
+      <input id="auth-password2" type="password" autocomplete="new-password" minlength="8" maxlength="128" class="mt-2 hidden w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon" placeholder="mínimo 8 caracteres">
       <button type="button" id="forgot-link" class="mt-1 hidden text-xs text-neon hover:underline">Esqueceu a senha?</button>
       <p id="auth-info" class="mt-3 hidden text-sm text-white"></p>
       <p id="auth-error" class="mt-3 hidden text-sm text-neon"></p>

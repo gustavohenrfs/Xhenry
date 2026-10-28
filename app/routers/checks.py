@@ -71,7 +71,7 @@ def write_settings(payload: SettingsIn, user: User = Depends(approved_user), db:
 
 # Filtro do histórico (Alertas recentes): grupo da tela → tipos de alerts_sent.
 ALERT_FILTERS = {
-    "views": {"viral", "marco_post", "marco_dia", "meta"},
+    "views": {"viral", "marco_post", "marco_dia", "meta", "resumo"},
     "queda": {"queda"},
     "ban": {"ban"},
     "falha": {"coletor", "erro", "silencio", "apify"},

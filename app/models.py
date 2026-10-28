@@ -394,6 +394,12 @@ class UserSetting(IntPK, Base):
     apify_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default="60")
     # Notificações (JSON, ver services.NOTIFY_DEFAULTS): tipos ligados, marcos de views e não perturbe.
     notify_prefs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Pausa da madrugada da leitura automática (horário de Brasília); o botão continua lendo.
+    pause_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    pause_from: Mapped[str] = mapped_column(String(5), nullable=False, default="00:00", server_default="00:00")
+    pause_to: Mapped[str] = mapped_column(String(5), nullable=False, default="06:00", server_default="06:00")
+    # Dia em que o robô já fez a leitura das 23:55 para o resumo do fim do dia.
+    summary_read_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     apify_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     apify_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     apify_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
