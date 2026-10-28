@@ -80,6 +80,13 @@ def ensure_user_auth_columns() -> None:
         if "owner_id" not in account_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE x_accounts ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE"))
+    if "user_settings" in tables:
+        user_setting_cols = {col["name"] for col in insp.get_columns("user_settings")}
+        added = {"apify_auto": "BOOLEAN NOT NULL DEFAULT TRUE", "apify_interval_min": "INTEGER NOT NULL DEFAULT 60"}
+        for column, ddl in added.items():
+            if column not in user_setting_cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {column} {ddl}"))
     # Multiusuário: dono do alerta e da inscrição de push (NULL = sistema / ainda sem dono).
     for table in ("alerts_sent", "push_subscriptions"):
         if table in tables and "owner_id" not in {col["name"] for col in insp.get_columns(table)}:
@@ -815,19 +822,19 @@ def suggestion_payload(samples: list[TweetSample], basis: str) -> dict[str, Any]
         return {
             "basis": basis,
             "items": [],
-            "note": "Sem tweets coletados. Verifique as contas para montar o histórico.",
+            "note": "Sem posts lidos. Verifique as contas para montar o histórico.",
         }
     if all(item["avg_views"] == 0 for item in top):
         return {
             "basis": basis,
             "items": [],
-            "note": "Os posts coletados ainda estão sem views. Sem horário recomendado.",
+            "note": "Os posts lidos ainda estão sem views. Sem horário recomendado.",
         }
-    note = "Horários com maior média de views nos posts coletados."
+    note = "Horários com maior média de views nos posts lidos."
     if any(item["samples"] < 3 for item in top):
         note += " Amostra pequena: trate como indício, não como regra."
     if basis == "all":
-        note += " Poucos posts no período; a sugestão usa todo o histórico coletado."
+        note += " Poucos posts no período; a sugestão usa todo o histórico lido."
     return {"basis": basis, "items": top, "note": note}
 
 
@@ -1581,6 +1588,8 @@ def settings_payload(db: Session, user: User) -> dict[str, Any]:
             "detail": row.apify_detail,
             "checked_at": as_utc(checked).isoformat() if checked else None,
             "requested_at": as_utc(row.apify_run_requested_at).isoformat() if row.apify_run_requested_at else None,
+            "auto": bool(row.apify_auto),
+            "interval_min": row.apify_interval_min,
         },
     }
 

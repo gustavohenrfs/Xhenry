@@ -247,8 +247,35 @@ async function loadConfig(invite) {
     // Sem config: fica o padrão fechado (sem cadastro, sem recuperação).
   }
 }
+// Botão que disparou uma escrita (salvar, excluir, aprovar…): gira até o servidor responder e não aceita
+// clique duplo. Vale para o último botão clicado ou enviado nos últimos 3 s; confirmações devolvem o botão
+// que abriu o modal (confirmOrigin).
+let pressed = null;
+let pressedAt = 0;
+let confirmOrigin = null;
+function markPressed(button) { pressed = button; pressedAt = Date.now(); }
+document.addEventListener("click", (event) => { const b = event.target.closest && event.target.closest("button"); if (b) markPressed(b); }, true);
+document.addEventListener("submit", (event) => {
+  const b = event.submitter || event.target.querySelector("button[type=submit], button:not([type])");
+  if (b) markPressed(b);
+}, true);
+function busyButton(method) {
+  if (!method || method.toUpperCase() === "GET") return null;
+  const b = pressed;
+  if (!b || Date.now() - pressedAt > 3000 || !b.isConnected || b.id === "refresh-all" || b.classList.contains("is-busy")) return null;
+  pressed = null;
+  const wasDisabled = b.disabled;
+  b.classList.add("is-busy");
+  b.setAttribute("aria-busy", "true");
+  b.disabled = true;
+  return () => { b.classList.remove("is-busy"); b.removeAttribute("aria-busy"); b.disabled = wasDisabled; };
+}
 // Envia o Bearer e lança o detail do servidor em caso de erro; devolve o Response cru.
 async function apiResponse(path, options) {
+  const release = busyButton(options && options.method);
+  try { return await sendApi(path, options); } finally { if (release) release(); }
+}
+async function sendApi(path, options) {
   const opts = Object.assign({}, options);
   const headers = new Headers(opts.headers || {});
   if (token() && !headers.has("Authorization")) headers.set("Authorization", "Bearer " + token());
@@ -419,7 +446,7 @@ function heroCard(kpis, series) {
   card.append(
     top,
     countTo(el("p", "mt-1 font-mono text-5xl tracking-tight text-white"), "views", kpis.views, num),
-    el("p", "mt-1 text-xs text-mute", label ? label + ": " + num(prevOf("views")) + " views" : "Desde o primeiro post coletado")
+    el("p", "mt-1 text-xs text-mute", label ? label + ": " + num(prevOf("views")) + " views" : "Desde o primeiro post lido")
   );
   const goal = state.data.goal;
   if (goal && goal.target) {
@@ -556,7 +583,7 @@ function renderMix(kpis) {
 function renderTopPost(post) {
   const host = document.getElementById("top-post-body");
   if (!post) {
-    host.replaceChildren(el("p", "text-sm text-mute", "Nenhum post coletado no período. Clique em Atualizar dados para ler as contas agora."));
+    host.replaceChildren(el("p", "text-sm text-mute", "Nenhum post lido no período. Clique em Atualizar dados para ler as contas agora."));
     return;
   }
   const initial = post.username.slice(0, 1).toUpperCase();
@@ -593,7 +620,7 @@ function renderTopPost(post) {
 function renderRanking(posts) {
   const host = document.getElementById("post-ranking");
   if (!posts || !posts.length) {
-    host.replaceChildren(el("li", "text-sm text-mute", "Nenhum post coletado no período."));
+    host.replaceChildren(el("li", "text-sm text-mute", "Nenhum post lido no período."));
     return;
   }
   host.replaceChildren(...posts.map((post, index) => {
@@ -702,8 +729,8 @@ function renderHealth(health) {
   const late = health.late_after_min >= 120 ? Math.round(health.late_after_min / 60) + " h" : health.late_after_min + " min";
   note.textContent = (health.apify && health.apify.active ? "Lendo pelo Apify a cada " + intervalLabel(health.apify.interval_min) + ", coletores em espera. " : "")
     + (health.enabled
-      ? "Atrasada é a conta sem coleta há mais de " + late + "."
-      : "Coleta automática desligada: só coleta quando você clica em Atualizar dados.");
+      ? "Atrasada é a conta sem leitura há mais de " + late + "."
+      : "Leitura automática desligada: só lê quando você clica em Atualizar dados.");
   const gauge = el("div", "gauge-wrap");
   gauge.append(ring(health.fresh, health.accounts), el("p", "gauge-label font-mono text-lg text-white", health.fresh + "/" + health.accounts));
   const behind = health.stale.length;
@@ -734,7 +761,7 @@ function renderHealth(health) {
   if (c.next_free_at) parts.push(el("p", "mt-2 text-xs text-mute", "Próximo coletor livre em " + stampBR(c.next_free_at)));
   if (behind) {
     const list = el("ul", "mt-4 flex flex-wrap gap-2");
-    health.stale.slice(0, 6).forEach((item) => list.append(el("li", "stale-chip", "@" + item.username + " " + (item.collected_at ? agoText(item.collected_at) : "sem coleta"))));
+    health.stale.slice(0, 6).forEach((item) => list.append(el("li", "stale-chip", "@" + item.username + " " + (item.collected_at ? agoText(item.collected_at) : "sem leitura"))));
     if (behind > 6) list.append(el("li", "stale-chip", "+" + (behind - 6)));
     parts.push(list);
   }
@@ -745,11 +772,11 @@ async function loadHealth() {
     renderHealth(await api("/api/robo/health"));
   } catch (error) {
     if (error.message === SESSION_EXPIRED) return;
-    document.getElementById("health-note").textContent = "Não deu para ler a saúde da coleta: " + (error.message || "erro") + ".";
+    document.getElementById("health-note").textContent = "Não deu para ler a saúde da leitura: " + (error.message || "erro") + ".";
     document.getElementById("health-body").replaceChildren();  // tira o esqueleto de carregamento
   }
 }
-// Saúde da coleta e pedidos de acesso são do admin; quem lê pelo Apify vê o estado da leitura dele.
+// Saúde da leitura e pedidos de acesso são do admin; quem lê pelo Apify vê o estado da leitura dele.
 function roleSideLoads() {
   if (isAdmin()) { loadHealth(); loadUsersBadge(); } else loadApify();
 }
@@ -779,6 +806,22 @@ function paintApify(apify) {
   status.textContent = apifyStatusText(apify);
   status.classList.toggle("text-amber-300", Boolean(issue) && !(isAdmin() && !apify.token_set));
 }
+function paintReading(apify) {
+  paintApify(apify);
+  document.getElementById("apify-auto").checked = Boolean(apify.auto);
+  fillIntervals(document.getElementById("apify-every"), apify.intervals, apify.interval_min, !apify.auto);
+  const next = apify.auto ? "Leitura automática a cada " + intervalLabel(apify.interval_min) + "." : "Leitura automática desligada: só pelo botão Atualizar dados.";
+  document.getElementById("reading-status").textContent = next + " " + apifyStatusText(apify);
+}
+async function saveReading(body) {
+  try {
+    const apify = await api("/api/apify", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    paintReading(apify);
+    toast(body.auto === false ? "Leitura automática desligada." : body.auto ? "Leitura automática ligada." : "Intervalo salvo: a cada " + intervalLabel(apify.interval_min) + ".");
+  } catch (error) { toast(error.message || "Não salvou."); }
+}
+document.getElementById("apify-auto").addEventListener("change", (event) => saveReading({ auto: event.target.checked }));
+document.getElementById("apify-every").addEventListener("change", (event) => saveReading({ interval_min: Number(event.target.value) }));
 async function loadApify() {
   try { paintApify(await api("/api/apify")); } catch { /* o aviso só aparece quando dá para ler */ }
 }
@@ -923,7 +966,7 @@ function renderGrowth(data) {
   const label = data.compare_label || "";
   document.getElementById("growth-note").textContent = hourly
     ? "Views acumuladas ao longo do dia, pela hora do post"
-    : "Views por dia dos posts coletados";
+    : "Views por dia dos posts lidos";
   const total = hourly ? g.current.filter((v) => v !== null).pop() || 0 : g.current.reduce((a, b) => a + b, 0);
   const stats = [growthStat("Total", num(total))];
   if (g.best) stats.push(growthStat(hourly ? "Melhor hora" : "Melhor dia", (hourly ? g.best.label : g.best.label.slice(8, 10) + "/" + g.best.label.slice(5, 7)) + ", " + num(g.best.views)));
@@ -1299,12 +1342,12 @@ function renderLastCollect(iso) {
   const el = document.getElementById("last-collect");
   if (!el) return;
   el.classList.remove("text-amber-300");
-  if (!iso) { el.textContent = "Última coleta: nenhuma ainda"; return; }
+  if (!iso) { el.textContent = "Última leitura: nenhuma ainda"; return; }
   const when = new Date(iso);
   const mins = Math.max(0, Math.round((Date.now() - when.getTime()) / 60000));
   const stamp = when.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   const ago = mins < 1 ? "agora" : mins < 60 ? "há " + mins + " min" : mins < 1440 ? "há " + Math.floor(mins / 60) + " h" : "há " + Math.floor(mins / 1440) + " d";
-  el.textContent = "Última coleta: " + stamp + " (" + ago + ")";
+  el.textContent = "Última leitura: " + stamp + " (" + ago + ")";
   if (mins > 90) el.classList.add("text-amber-300");
 }
 // Dashboard na hora: cada período já visto fica em memória (dashCache) e aparece assim que é
@@ -1460,7 +1503,7 @@ async function setArchived(account, archived) {
 async function archiveAccount(account) {
   const ok = await showConfirm(
     "Arquivar conta",
-    "@" + account.username + " sai do dashboard e o robô para de coletar. O histórico fica guardado na aba Arquivadas."
+    "@" + account.username + " sai do dashboard e o robô para de ler. O histórico fica guardado na aba Arquivadas."
   );
   if (!ok) return;
   try {
@@ -1909,6 +1952,7 @@ async function loadSettings() {
       loadRobo();
     }
     paintApify(Object.assign({ token_set: settings.apify_token_set }, settings.apify));
+    if (!isAdmin()) api("/api/apify").then(paintReading).catch(() => {});
     paintKeyField("xai-key", "xai_api_key", settings.xai_key_set, "xai-...");
     paintKeyField("x-token", "x_bearer_token", settings.x_token_set, "AAAA...");
     paintKeyField("apify-token", "apify_token", settings.apify_token_set, "apify_api_...");
@@ -1943,7 +1987,7 @@ function archivedCard(account) {
 
   const dates = document.createElement("p");
   dates.className = "mt-2 text-xs text-mute";
-  const span = account.first_post_at ? "posts de " + dateBR(account.first_post_at) + " a " + dateBR(account.last_post_at) : "nenhum post coletado";
+  const span = account.first_post_at ? "posts de " + dateBR(account.first_post_at) + " a " + dateBR(account.last_post_at) : "nenhum post lido";
   dates.textContent = "Arquivada em " + dateBR(account.archived_at) + " · " + span;
 
   const grid = document.createElement("dl");
@@ -2005,7 +2049,7 @@ async function loadArchived() {
     const accounts = await api("/api/accounts/archived");
     archivedCharts.forEach((chart) => chart.destroy());
     archivedCharts = [];
-    host.replaceChildren(...(accounts.length ? accounts.map(archivedCard) : [emptyState("archived", "Nenhuma conta arquivada", "Arquivar tira a conta do Dashboard e da coleta, mas o histórico fica guardado aqui.")]));
+    host.replaceChildren(...(accounts.length ? accounts.map(archivedCard) : [emptyState("archived", "Nenhuma conta arquivada", "Arquivar tira a conta do Dashboard e da leitura, mas o histórico fica guardado aqui.")]));
   } catch (error) {
     host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
@@ -2468,7 +2512,7 @@ deleteConfirmBtn.addEventListener("click", async () => {
   }
 });
 
-// Robô: a aba Configurações liga/desliga a coleta automática e escolhe o intervalo; o robo.py lê isso
+// Robô: a aba Configurações liga/desliga a leitura automática e escolhe o intervalo; o robo.py lê isso
 // em app_settings a cada minuto (cron). "Atualizar dados" grava um pedido e espera a rodada terminar.
 function intervalLabel(minutes) {
   return minutes < 60 ? minutes + " min" : minutes / 60 + (minutes === 60 ? " hora" : " horas");
@@ -2501,8 +2545,8 @@ function paintRobo(robo) {
     else if (run.status === "partial") text += " · com falhas";
     parts.push(text);
   } else parts.push("O robô ainda não rodou.");
-  if (robo.requested_at) parts.push("Coleta pedida às " + stampBR(robo.requested_at) + ", aguardando o robô.");
-  else if (!robo.enabled) parts.push("Coleta automática desligada.");
+  if (robo.requested_at) parts.push("Leitura pedida às " + stampBR(robo.requested_at) + ", aguardando o robô.");
+  else if (!robo.enabled) parts.push("Leitura automática desligada.");
   else if (robo.next_run_at) parts.push("Próxima: por volta de " + stampBR(robo.next_run_at) + ".");
   document.getElementById("robo-status").textContent = parts.join(" ");
 }
@@ -2515,7 +2559,7 @@ async function saveRobo(body) {
     const robo = await api("/api/robo", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     paintRobo(robo);
     const every = body.apify_interval_min ? robo.apify.interval_min : robo.interval_min;
-    toast(body.enabled === false ? "Coleta automática desligada." : body.enabled ? "Coleta automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(every) + ".");
+    toast(body.enabled === false ? "Leitura automática desligada." : body.enabled ? "Leitura automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(every) + ".");
   } catch (error) {
     toast(error.message || "Não salvou o robô.");
     loadRobo();
@@ -2528,18 +2572,18 @@ document.getElementById("robo-apify-interval").addEventListener("change", (event
 const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô não está pegando os pedidos
 const ROBO_RUN_MS = 12 * 60000;     // uma rodada manual pode levar alguns minutos (um Chrome por coletor)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const READ_POLL_MS = 2000;
 async function refreshByApify(btn) {
-  btn.textContent = "Pedindo ao Apify...";
+  btn.textContent = "Lendo pelo Apify...";
   let apify = await api("/api/apify/run", { method: "POST" });
   paintApify(apify);
   const started = Date.now();
-  while (apify.requested_at) {
-    // O robô pega o pedido em até 1 minuto; a chamada ao Apify leva de segundos a 2 minutos.
+  while (apify.running || apify.requested_at) {
+    // O painel lê na hora (sem Postgres, o robô pega o pedido em até 1 minuto); o Apify leva segundos.
     if (Date.now() - started > ROBO_RUN_MS) throw new Error("A leitura está demorando. Os dados aparecem sozinhos quando ela terminar.");
-    await wait(5000);
+    await wait(READ_POLL_MS);
     apify = await api("/api/apify");
     paintApify(apify);
-    if (Date.now() - started > 20000) btn.textContent = "Lendo pelo Apify...";
   }
   await load();
   if (apify.status === "ok") toast("Leitura feita: " + (apify.detail || "dados atualizados") + ".");
@@ -2555,26 +2599,36 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     btn.textContent = orig;
     return;
   }
-  btn.textContent = "Chamando os coletores...";
+  btn.textContent = "Atualizando...";
   try {
     const asked = await api("/api/robo/run", { method: "POST" });
-    const askedAt = Date.parse(asked.requested_at);
+    const askedAt = Date.parse(asked.asked_at || asked.requested_at);
     const started = Date.now();
     let robo = asked;
+    // Com o Apify ativo o painel já está lendo; sem ele (ou se o Apify falhar) o robô chama os coletores.
+    const say = (r) => {
+      btn.textContent = r.running ? "Lendo pelo Apify..." : r.requested_at
+        ? (r.apify && r.apify.active ? "Apify falhou, chamando os coletores..." : "Chamando os coletores...")
+        : "Lendo...";
+    };
+    say(robo);
+    let pickedFrom = Date.now();
     for (;;) {
-      await wait(5000);
+      await wait(READ_POLL_MS);
       robo = await api("/api/robo");
       const finished = robo.last_run ? Date.parse(robo.last_run.finished_at) : 0;
-      if (!robo.requested_at && finished >= askedAt) break;
-      if (robo.requested_at) {
-        if (Date.now() - started > ROBO_PICKUP_MS) throw new Error("O robô não pegou o pedido. Confira no VPS se o cron roda o robo.py a cada minuto.");
-      } else btn.textContent = "Coletando...";
-      if (Date.now() - started > ROBO_RUN_MS) throw new Error("A coleta está demorando. Os dados aparecem sozinhos quando ela terminar.");
+      if (!robo.running && !robo.requested_at && finished >= askedAt) break;
+      say(robo);
+      if (robo.running) pickedFrom = Date.now();  // o prazo do cron só conta depois da leitura na hora
+      else if (robo.requested_at && Date.now() - pickedFrom > ROBO_PICKUP_MS) {
+        throw new Error("O robô não pegou o pedido. Confira no VPS se o cron roda o robo.py a cada minuto.");
+      }
+      if (Date.now() - started > ROBO_RUN_MS) throw new Error("A leitura está demorando. Os dados aparecem sozinhos quando ela terminar.");
     }
     await load();
     const run = robo.last_run;
     const via = run.via === "apify" ? " pelo Apify" : run.apify_error ? " pelos coletores (o Apify falhou)" : "";
-    toast(run.status === "failed" ? "A coleta falhou. Veja o aviso no Telegram." : "Coleta feita" + via + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
+    toast(run.status === "failed" ? "A leitura falhou. Veja o aviso no Telegram." : "Leitura feita" + via + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
     if (state.tab === "settings") paintRobo(robo);
   } catch (error) { toast(error.message || "Falha ao atualizar."); }
   btn.disabled = false;
@@ -2650,6 +2704,7 @@ document.addEventListener("click", (event) => {
 let confirmResolve = null;
 let promptResolve = null;
 function showConfirm(title, message) {
+  confirmOrigin = pressed;
   return new Promise((resolve) => {
     confirmResolve = resolve;
     document.getElementById("confirm-title").textContent = title;
@@ -2659,6 +2714,7 @@ function showConfirm(title, message) {
 }
 
 function showPrompt(title, defaultValue = "") {
+  confirmOrigin = pressed;
   return new Promise((resolve) => {
     promptResolve = resolve;
     const titleEl = document.getElementById("confirm-title");
@@ -2677,6 +2733,7 @@ document.getElementById("confirm-cancel").addEventListener("click", () => {
 
 document.getElementById("confirm-ok").addEventListener("click", () => {
   document.getElementById("confirm-modal").classList.add("hidden");
+  if (confirmOrigin) markPressed(confirmOrigin);  // o spinner vai no botão que abriu a confirmação
   if (confirmResolve) confirmResolve(true);
   if (promptResolve) {
     const input = document.getElementById("prompt-input");
@@ -3474,7 +3531,7 @@ function renderDrawer(account, detail) {
       li.append(link, el("span", "font-mono text-sm text-white", num(post.views)), el("span", "text-[11px] text-mute", num(post.likes) + " ♥"));
       posts.append(li);
     });
-    extra.append(drawerSection("Melhores posts", detail.top_posts.length ? posts : el("p", "text-sm text-mute", "Nenhum post coletado no período.")));
+    extra.append(drawerSection("Melhores posts", detail.top_posts.length ? posts : el("p", "text-sm text-mute", "Nenhum post lido no período.")));
     const checks = el("ol", "drawer-list");
     detail.checks.forEach((item) => {
       const li = el("li", "drawer-check");

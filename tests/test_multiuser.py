@@ -340,3 +340,57 @@ def test_watchdog_waits_the_apify_interval(monkeypatch):
         row.apify_token = None
         db.commit()
         assert watchdog.check_silence(db, now) is True, "só com coletores (5 min), 40 min é robô parado"
+
+
+def test_friend_reading_schedule_and_instant_read(client, monkeypatch):
+    from app import reader
+
+    friend = bearer(make_user())
+    state = client.get("/api/apify", headers=friend).json()
+    assert state["auto"] is True and state["interval_min"] == 60 and 15 in state["intervals"] and state["running"] is False
+    assert client.put("/api/apify", json={"interval_min": 7}, headers=friend).status_code == 400
+    saved = client.put("/api/apify", json={"auto": False, "interval_min": 120}, headers=friend).json()
+    assert saved["auto"] is False and saved["interval_min"] == 120
+    client.put("/api/settings", json={"apify_token": "tok"}, headers=friend)
+    with SessionLocal() as db:
+        db.query(UserSetting).filter(UserSetting.apify_token == "tok").update({"apify_run_requested_at": None})
+        db.commit()
+    started: list[tuple[int, bool]] = []
+    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin: started.append((owner_id, is_admin)) or True)
+    monkeypatch.setattr(reader, "running", lambda owner_id: True)
+    state = client.post("/api/apify/run", headers=friend).json()
+    assert started and started[0][1] is False, "lê na hora pelo painel"
+    assert state["requested_at"] is None and state["running"] is True, "sem pedido para o cron (não lê duas vezes)"
+
+
+def test_admin_refresh_reads_now_when_apify_is_active(client, monkeypatch):
+    from app import reader
+
+    admin = admin_headers()
+    started: list[tuple[int, bool]] = []
+    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin: started.append((owner_id, is_admin)) or True)
+    try:
+        with SessionLocal() as db:
+            get_settings(db).robo_run_requested_at = None
+            db.commit()
+        client.put("/api/settings", json={"apify_token": "tok-admin"}, headers=admin)
+        with SessionLocal() as db:
+            get_settings(db).robo_run_requested_at = None
+            db.commit()
+        robo = client.post("/api/robo/run", headers=admin).json()
+        assert started and started[0][1] is True and robo["requested_at"] is None and robo["asked_at"]
+        client.put("/api/settings", json={"apify_token": ""}, headers=admin)
+        started.clear()
+        robo = client.post("/api/robo/run", headers=admin).json()
+        assert not started and robo["requested_at"], "sem Apify: pedido para o cron chamar os coletores"
+    finally:
+        client.put("/api/settings", json={"apify_token": ""}, headers=admin)
+        with SessionLocal() as db:
+            get_settings(db).robo_run_requested_at = None
+            db.commit()
+
+
+def test_reader_without_postgres_leaves_it_to_the_cron():
+    from app import reader
+
+    assert reader.available() is False and reader.start(1, False) is False and reader.running(1) is False

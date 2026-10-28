@@ -7,7 +7,7 @@ contas monitoradas nunca são logadas pelo robô. Grava somente tweets de hoje
 
 O cron chama o robô a cada minuto; quem decide se roda é a aba Configurações
 do painel (app_settings):
-- coleta automática ligada: roda quando a última rodada tem mais que o
+- leitura automática ligada: roda quando a última rodada tem mais que o
   intervalo escolhido (5 min a 24 h);
 - desligada: só roda quando alguém clica em "Atualizar Dados";
 - "Atualizar Dados" grava um pedido; o robô apaga o pedido e faz uma rodada
@@ -45,11 +45,11 @@ Alertas no Telegram:
   deslogado ou com proxy fora: uma vez por hora por coletor e motivo.
 - Nenhum coletor disponível: no máximo a cada 6 horas.
 - Todos os coletores no limite de leituras do dia: uma vez por dia.
-- Erro na coleta de uma conta (suspensa, não encontrada, banco): no máximo uma
+- Erro na leitura de uma conta (suspensa, não encontrada, banco): no máximo uma
   mensagem por hora para o mesmo conjunto de falhas.
 
 Botão Testar da aba Coletores: o painel grava collectors.test_requested_at e o
-robô, no minuto seguinte (mesmo com a coleta desligada), lê uma conta com
+robô, no minuto seguinte (mesmo com a leitura desligada), lê uma conta com
 aquele coletor e grava o resultado em test_status/test_detail.
 
 Cada rodada grava um batimento em sync_runs (kind=tweets, account_id NULL).
@@ -67,10 +67,12 @@ como acima, só com os coletores. O batimento grava por onde leu (stats.via).
 Multiusuário: coletores, Telegram e tudo acima valem só para as contas do admin
 (users.is_admin). As contas dos outros usuários aprovados são lidas pelo Apify
 (apify_round), com o token que cada um colou em Configurações
-(user_settings.apify_token), em toda passada do cron, independente da coleta
-automática do admin: cada conta no máximo a cada APIFY_INTERVAL_MIN (padrão 60)
-ou na hora quando o usuário aperta "Atualizar dados"
-(user_settings.apify_run_requested_at). Sem token, nada é lido e o painel dele
+(user_settings.apify_token), em toda passada do cron, independente da leitura
+automática do admin: com a leitura automática do usuário ligada
+(user_settings.apify_auto), cada conta no máximo a cada
+user_settings.apify_interval_min (padrão 60); sempre que houver pedido do
+"Atualizar dados" (user_settings.apify_run_requested_at). O painel também lê
+na hora pelo read_now (app/reader.py), sem esperar o cron. Sem token, nada é lido e o painel dele
 mostra "Token do Apify em falta" (user_settings.apify_status = sem_token). Os
 alertas dessas contas vão só para o painel do dono (alerts_sent.owner_id: sininho,
 push e Alertas), nunca para o Telegram do admin.
@@ -85,7 +87,7 @@ Variáveis próprias (ambiente do cron):
 - ROBO_ENV_FILE: outro .env, se o usuário do cron não puder ler o do painel.
 - ROBO_STATE_DIR: onde ficam a trava e o estado (padrão ~/.xhenry-robo).
 - APIFY_ACTOR: ator do Apify que lê as timelines (padrão apidojo~tweet-scraper).
-- APIFY_INTERVAL_MIN: de quanto em quanto tempo cada conta é lida pelo Apify (60).
+- APIFY_INTERVAL_MIN: intervalo dos usuários sem o próprio (painel antigo; padrão 60).
 """
 
 from __future__ import annotations
@@ -552,7 +554,7 @@ def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | 
 
 
 def error_summary(errors: list[tuple[str, str, str]]) -> str:
-    lines = ["❌ Erro na coleta"]
+    lines = ["❌ Erro na leitura"]
     for who, step, message in errors[:10]:
         lines.append(f"• {who} — {step}: {message[:160]}")
     if len(errors) > 10:
@@ -1102,7 +1104,7 @@ def save_followers(cur, account: dict[str, Any], today: date, followers: int | N
 
 
 def save_tweets(cur, account: dict[str, Any], tweets: list[Any], midnight: datetime, telegram: bool = True) -> int:
-    """Grava os posts de hoje, avisa os níveis de views, refaz o dia e marca a conta como coletada."""
+    """Grava os posts de hoje, avisa os níveis de views, refaz o dia e marca a conta como lida."""
     username = account["username"]
     account_id = account["id"]
     owner_id = account.get("owner_id")
@@ -1152,7 +1154,9 @@ APIFY_ACTOR_DEFAULT = "apidojo~tweet-scraper"
 APIFY_INTERVAL_DEFAULT = 60
 APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
 APIFY_PER_ACCOUNT = 20  # posts pedidos por conta (o mesmo TWEET_LIMIT dos coletores)
-APIFY_MAX_ACCOUNTS = 25  # contas por chamada; o resto vai na passada seguinte
+APIFY_MAX_ACCOUNTS = 25  # contas por chamada; mais que isso vira lotes em paralelo
+APIFY_PARALLEL = 4  # chamadas ao Apify ao mesmo tempo (cada uma é um run do ator)
+APIFY_ROUND_ACCOUNTS = 200  # contas de um usuário numa passada
 NO_APIFY_TOKEN = "Token do Apify em falta. Cole o seu em Configurações para o robô ler as suas contas."
 
 
@@ -1232,7 +1236,9 @@ def apify_users(cur) -> list[dict[str, Any]]:
     """Usuários aprovados que não são o admin e têm alguma conta ativa."""
     cur.execute(
         """
-        SELECT u.id, s.apify_token, s.apify_run_requested_at
+        SELECT u.id, s.apify_token, s.apify_run_requested_at,
+               COALESCE(s.apify_auto, TRUE) AS apify_auto,
+               COALESCE(s.apify_interval_min, %s) AS apify_interval_min
         FROM users u
         LEFT JOIN user_settings s ON s.owner_id = u.id
         WHERE u.is_approved IS TRUE
@@ -1242,12 +1248,13 @@ def apify_users(cur) -> list[dict[str, Any]]:
               WHERE a.owner_id = u.id AND a.is_active IS TRUE AND COALESCE(a.is_archived, FALSE) IS FALSE
           )
         ORDER BY u.id
-        """
+        """,
+        (int(apify_interval().total_seconds() // 60),),
     )
     return list(cur.fetchall())
 
 
-def apify_accounts(cur, owner_id: int, everything: bool) -> list[dict[str, Any]]:
+def apify_accounts(cur, owner_id: int, everything: bool, interval_min: int | None = None) -> list[dict[str, Any]]:
     """Contas do usuário para ler agora: todas com o botão, senão as que passaram do intervalo."""
     cur.execute(
         """
@@ -1260,7 +1267,7 @@ def apify_accounts(cur, owner_id: int, everything: bool) -> list[dict[str, Any]]
         ORDER BY collected_at NULLS FIRST, id
         LIMIT %s
         """,
-        (owner_id, everything, int(apify_interval().total_seconds() // 60), APIFY_MAX_ACCOUNTS),
+        (owner_id, everything, interval_min or int(apify_interval().total_seconds() // 60), APIFY_ROUND_ACCOUNTS),
     )
     return list(cur.fetchall())
 
@@ -1288,10 +1295,15 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     Devolve os posts de hoje gravados. Falha da chamada sobe como ApifyError antes de gravar o lote;
     conta sem post nenhum não é falha.
     """
+    batches = [accounts[start:start + APIFY_MAX_ACCOUNTS] for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS)]
+    if len(batches) > 1:
+        # Vários lotes: as chamadas vão juntas (cada uma é um run do ator); gravar fica numa conexão só.
+        with ThreadPoolExecutor(max_workers=min(APIFY_PARALLEL, len(batches)), thread_name_prefix="apify-lote") as pool:
+            answers = list(pool.map(lambda batch: apify_fetch(token, [a["username"] for a in batch]), batches))
+    else:
+        answers = [apify_fetch(token, [a["username"] for a in batch]) for batch in batches]
     saved = 0
-    for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS):
-        batch = accounts[start:start + APIFY_MAX_ACCOUNTS]
-        items = apify_fetch(token, [account["username"] for account in batch])
+    for batch, items in zip(batches, answers):
         by_author: dict[str, list[dict[str, Any]]] = {}
         followers: dict[str, int] = {}
         for item in items:
@@ -1317,8 +1329,10 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
     """Lê pelo Apify as contas vencidas de um usuário, numa chamada só. Devolve o resumo."""
     owner_id = user["id"]
     requested = user["apify_run_requested_at"] is not None
+    if not requested and user.get("apify_auto") is False:
+        return {"owner": owner_id, "contas": 0}  # leitura automática desligada: só pelo botão
     with conn.cursor() as cur:
-        accounts = apify_accounts(cur, owner_id, requested)
+        accounts = apify_accounts(cur, owner_id, requested, user.get("apify_interval_min"))
     conn.commit()
     if not accounts:
         if requested:  # nada para ler (tudo arquivado): só fecha o pedido
@@ -1467,7 +1481,7 @@ def daily_limit_alert(cur, capped: int) -> None:
     key = f"coletor_limite_dia:{datetime.now(BR_TZ).date().isoformat()}"
     alert_once(cur, key, "coletor", (
         f"🧯 Os {capped} coletores livres já fizeram {daily_max()} leituras hoje (limite por coletor).\n"
-        "A coleta volta amanhã. Para ler mais, cadastre mais coletores ou suba ROBO_COLLECTOR_DAILY_MAX."
+        "A leitura volta amanhã. Para ler mais, cadastre mais coletores ou suba ROBO_COLLECTOR_DAILY_MAX."
     ))
 
 
@@ -1700,7 +1714,7 @@ def run_round() -> int:
         return 1
 
     # Contas dos outros usuários pelo Apify: em paralelo com os coletores, toda passada do cron (cada
-    # conta respeita o próprio intervalo) e sem depender da coleta automática do admin.
+    # conta respeita o próprio intervalo) e sem depender da leitura automática do admin.
     connect = lambda: psycopg.connect(database_url(), row_factory=dict_row, connect_timeout=10)  # noqa: E731
     apify = ThreadPoolExecutor(max_workers=1, thread_name_prefix="apify")
     apify_job = apify.submit(apify_round, connect, midnight)
@@ -1715,16 +1729,17 @@ def run_round() -> int:
 
 
 APIFY_ADMIN_INTERVAL_DEFAULT = 30
+JUST_FAILED = timedelta(minutes=3)
 
 
 def admin_apify(conn) -> dict[str, Any] | None:
-    """Token do Apify do admin e se a leitura venceu (coleta ligada e a última tentativa mais velha que
+    """Token do Apify do admin e se a leitura venceu (leitura ligada e a última tentativa mais velha que
     app_settings.apify_interval_min). None sem token: o admin lê só pelos coletores, como antes."""
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT u.id, s.apify_token, s.apify_checked_at, a.robo_enabled,
+                SELECT u.id, s.apify_token, s.apify_checked_at, s.apify_status, a.robo_enabled,
                        COALESCE(a.apify_interval_min, %s) AS interval_min
                 FROM users u
                 JOIN user_settings s ON s.owner_id = u.id
@@ -1745,10 +1760,11 @@ def admin_apify(conn) -> dict[str, Any] | None:
         return None
     interval = timedelta(minutes=max(1, int(row["interval_min"] or APIFY_ADMIN_INTERVAL_DEFAULT)))
     last = row["apify_checked_at"]
-    due = row["robo_enabled"] is not False and (
-        last is None or datetime.now(timezone.utc) - last >= interval - INTERVAL_SLACK
-    )
-    return {"id": row["id"], "token": row["apify_token"].strip(), "due": due}
+    now = datetime.now(timezone.utc)
+    due = row["robo_enabled"] is not False and (last is None or now - last >= interval - INTERVAL_SLACK)
+    # O painel (read_now) acabou de ver o Apify falhar e deixou o pedido para os coletores.
+    just_failed = row["apify_status"] == "erro" and last is not None and now - last < JUST_FAILED
+    return {"id": row["id"], "token": row["apify_token"].strip(), "due": due, "just_failed": just_failed}
 
 
 def admin_accounts(cur) -> list[dict[str, Any]]:
@@ -1786,6 +1802,47 @@ def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: d
     return None
 
 
+def read_now(owner_id: int) -> str:
+    """"Atualizar dados" do painel (app/reader.py): lê as contas do usuário pelo Apify na hora, sem
+    esperar o cron. Devolve "ok", "erro" (o motivo fica em user_settings) ou "sem_apify".
+
+    Admin: se o Apify falhar, grava o pedido do robô e o cron chama os coletores no minuto seguinte
+    (sem repetir o Apify). Postgres e DATABASE_URL vêm do mesmo .env do painel.
+    """
+    import psycopg
+    from psycopg.rows import dict_row
+
+    started = datetime.now(timezone.utc)
+    midnight = today_start_br()
+    with psycopg.connect(database_url(), row_factory=dict_row, connect_timeout=10) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.id, u.is_admin, s.apify_token, COALESCE(s.apify_interval_min, 60) AS apify_interval_min
+                FROM users u LEFT JOIN user_settings s ON s.owner_id = u.id
+                WHERE u.id = %s
+                """,
+                (owner_id,),
+            )
+            user = cur.fetchone()
+        conn.commit()
+        if user is None or not (user["apify_token"] or "").strip():
+            return "sem_apify"
+        if user["is_admin"]:
+            error = apify_admin_read(conn, {"id": owner_id, "token": user["apify_token"].strip()}, started, midnight, True)
+            if error is not None:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE app_settings SET robo_run_requested_at = NOW() WHERE id = 1")
+                conn.commit()
+                return "erro"
+            return "ok"
+        result = apify_user_round(conn, {
+            "id": owner_id, "apify_token": user["apify_token"], "apify_run_requested_at": started,
+            "apify_auto": True, "apify_interval_min": user["apify_interval_min"],
+        }, midnight)
+        return "erro" if result.get("erro") else "ok"
+
+
 def collectors_round(conn, started: datetime, midnight: datetime) -> int:
     """As contas do admin: pelo Apify quando ele tem token (coletores em espera), senão ou se o Apify
     falhar, pelos coletores, como sempre foi."""
@@ -1805,7 +1862,9 @@ def collectors_round(conn, started: datetime, midnight: datetime) -> int:
         if admin is not None:
             # Com Apify, os coletores não seguem o próprio intervalo: só entram se a chamada falhar,
             # e aí leem tudo, como no "Atualizar Dados".
-            if manual or admin["due"]:
+            if manual and admin["just_failed"]:
+                apify_error = "o Apify acabou de falhar no Atualizar dados"
+            elif manual or admin["due"]:
                 apify_error = apify_admin_read(conn, admin, started, midnight, manual)
             run, manual = apify_error is not None, apify_error is not None or manual
         if not run and not tests:
@@ -1817,7 +1876,7 @@ def collectors_round(conn, started: datetime, midnight: datetime) -> int:
             return 1
         tune_anyx()
         if tests:
-            # Testes primeiro e mesmo com a coleta desligada: quem apertou está olhando a tela.
+            # Testes primeiro e mesmo com a leitura desligada: quem apertou está olhando a tela.
             try:
                 run_tests(conn, anyx, midnight, tests)
             except Exception as exc:
@@ -1834,7 +1893,7 @@ def collectors_round(conn, started: datetime, midnight: datetime) -> int:
                 except Exception:
                     conn.rollback()
         if not run:
-            return 0  # só testes: sem batimento, para não mexer no intervalo da coleta
+            return 0  # só testes: sem batimento, para não mexer no intervalo da leitura
         log.info("início%s — tweets depois de %s", " (Atualizar Dados)" if manual else "", midnight.isoformat())
         try:
             # Cada leitura em paralelo usa a própria conexão com o banco (psycopg não é de várias threads).

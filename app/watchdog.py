@@ -1,10 +1,10 @@
 """Vigia em segundo plano, dentro do uvicorn.
 
-- Avisa no Telegram quando o robo.py para de coletar (sem batimento OK há mais
+- Avisa no Telegram quando o robo.py para de ler (sem batimento OK há mais
   de ROBO_SILENCE_MIN minutos, ou de 2 intervalos + 5 min quando o intervalo
   da aba Configurações é maior). O robô grava um batimento por rodada em
   sync_runs (kind=tweets, account_id NULL). Sem nenhum batimento ainda (robô
-  antigo) ou com a coleta automática desligada, fica quieto.
+  antigo) ou com a leitura automática desligada, fica quieto.
 - Empurra por Web Push cada alerta de views novo do robô (app/push.py) para os
   navegadores inscritos no sininho, com o painel aberto ou não.
 - Se AUTO_CHECK_MINUTES > 0, verifica a saúde das contas nesse intervalo; o
@@ -85,14 +85,14 @@ def check_silence(db: Session, now: datetime | None = None) -> bool:
     now = now or now_utc()
     pending = settings.robo_run_requested_at
     if pending is not None and now - as_utc(pending) < PENDING_GRACE:
-        return False  # acabou de religar ou de pedir coleta: o robô pega no próximo minuto
+        return False  # acabou de religar ou de pedir leitura: o robô pega no próximo minuto
     quiet = now - last
     if quiet <= silence_limit(robot_interval(db, settings)):
         return False
     when = last.astimezone(zone(DEFAULT_TZ)).strftime("%d/%m/%Y %H:%M")
     text = (
         "🔇 Robô parado\n"
-        f"Nenhuma coleta há {int(quiet.total_seconds() // 60)} min (última: {when}).\n"
+        f"Nenhuma leitura há {int(quiet.total_seconds() // 60)} min (última: {when}).\n"
         "Confira o robo.py no VPS: cron, sessão do anyx e conexão com o banco."
     )
     # Uma mensagem por apagão: a chave muda quando o robô volta e para de novo.

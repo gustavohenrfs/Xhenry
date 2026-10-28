@@ -1,7 +1,7 @@
-"""Controle do robo.py pelo painel: coleta automática, intervalo e "Atualizar Dados" (coletar agora).
+"""Controle do robo.py pelo painel: leitura automática, intervalo e "Atualizar Dados" (ler agora).
 
 O robô roda no cron do VPS a cada minuto e lê estas opções em app_settings no começo de cada
-execução: com a coleta automática desligada, só roda quando há pedido do botão; ligada, roda
+execução: com a leitura automática desligada, só roda quando há pedido do botão; ligada, roda
 quando a última rodada tem mais que o intervalo. Ao começar, ele apaga o pedido.
 
 Robô e coletores são só do admin. Os outros usuários leem pelo Apify com o próprio token: para eles
@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import reader
 from app.database import get_db
 from app.models import Collector, SyncKind, SyncRun, User
 from app.routers.auth import admin_user, approved_user
@@ -39,6 +40,11 @@ user_router = APIRouter()
 ROBO_INTERVALS = (5, 10, 15, 30, 60, 120, 180, 360, 720, 1440)
 # Cada leitura pelo Apify cobra no mínimo 50 posts: nada abaixo de 15 min.
 APIFY_INTERVALS = (15, 30, 60, 120, 180, 360, 720, 1440)
+
+
+class ApifyIn(BaseModel):
+    auto: bool | None = None
+    interval_min: int | None = None
 
 
 class RoboIn(BaseModel):
@@ -89,6 +95,9 @@ def robo_payload(db: Session) -> dict[str, Any]:
             "checked_at": as_utc(apify.apify_checked_at).isoformat() if apify and apify.apify_checked_at else None,
         },
         "requested_at": as_utc(requested).isoformat() if requested else None,
+        # Leitura na hora (app/reader.py) em andamento: a tela espera ela acabar.
+        "running": bool(admin and reader.running(admin.id)),
+        "asked_at": now_utc().isoformat(),
         "last_run": last_run,
         "next_run_at": next_run,
     }
@@ -112,23 +121,25 @@ def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]
         row.apify_interval_min = payload.apify_interval_min
     if payload.enabled is not None:
         if payload.enabled and not row.robo_enabled:
-            row.robo_run_requested_at = now_utc()  # religou: coleta já, sem esperar o intervalo
+            row.robo_run_requested_at = now_utc()  # religou: lê já, sem esperar o intervalo
         row.robo_enabled = payload.enabled
     db.commit()
     return robo_payload(db)
 
 
-@router.post("/api/robo/run", dependencies=[Depends(admin_user)])
-def request_run(db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Botão "Atualizar Dados": o robô pega o pedido na próxima passada do cron (até 1 min)."""
-    row = get_settings(db)
-    row.robo_run_requested_at = now_utc()
-    db.commit()
+@router.post("/api/robo/run")
+def request_run(user: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Botão "Atualizar dados": com o Apify ativo, lê na hora (app/reader.py); se ele falhar, ou sem
+    Apify, o robô pega o pedido na próxima passada do cron (até 1 min) e chama os coletores."""
+    if not (admin_apify_active(db) and reader.start(user.id, True)):
+        row = get_settings(db)
+        row.robo_run_requested_at = now_utc()
+        db.commit()
     return robo_payload(db)
 
 
 def collection_health(db: Session, admin: User) -> dict[str, Any]:
-    """Cartão "Saúde da coleta": contas atrasadas e estado dos coletores (só contagens, nada de proxy)."""
+    """Cartão "Saúde da leitura": contas atrasadas e estado dos coletores (só contagens, nada de proxy)."""
     now = now_utc()
     payload = robo_payload(db)
     collectors = db.scalars(select(Collector)).all()
@@ -185,15 +196,36 @@ def read_health(user: User = Depends(admin_user), db: Session = Depends(get_db))
 def read_apify(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Estado da leitura pelo Apify (token definido, último resultado do robô, pedido pendente)."""
     payload = settings_payload(db, user)
-    return {"token_set": payload["apify_token_set"], **payload["apify"]}
+    return {
+        "token_set": payload["apify_token_set"],
+        **payload["apify"],
+        "intervals": list(APIFY_INTERVALS),
+        "running": reader.running(user.id),
+    }
+
+
+@user_router.put("/api/apify")
+def write_apify(payload: ApifyIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Leitura automática de quem lê pelo Apify: ligada ou não e de quanto em quanto tempo."""
+    row = user_settings(db, user.id)
+    if payload.interval_min is not None:
+        if payload.interval_min not in APIFY_INTERVALS:
+            raise HTTPException(400, "Intervalo inválido.")
+        row.apify_interval_min = payload.interval_min
+    if payload.auto is not None:
+        row.apify_auto = payload.auto
+    db.commit()
+    return read_apify(user, db)
 
 
 @user_router.post("/api/apify/run")
 def request_apify_run(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """"Atualizar dados" de quem lê pelo Apify: o robô lê as contas dele no próximo minuto."""
+    """"Atualizar dados" de quem lê pelo Apify: lê na hora (app/reader.py); sem Postgres, o robô lê
+    no próximo minuto."""
     row = user_settings(db, user.id)
     if not (row.apify_token or "").strip():
         raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
-    row.apify_run_requested_at = now_utc()
-    db.commit()
+    if not reader.start(user.id, False):
+        row.apify_run_requested_at = now_utc()
+        db.commit()
     return read_apify(user, db)

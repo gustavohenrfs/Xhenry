@@ -321,7 +321,7 @@ def test_suspended_account_goes_to_the_back(w):
     w.sent.clear()
     w.run()
     assert w.collector("burner1")[0] == "ok"
-    assert any(m.startswith("❌ Erro na coleta") and f"@{first} — lida por @burner1" in m for m in w.sent)
+    assert any(m.startswith("❌ Erro na leitura") and f"@{first} — lida por @burner1" in m for m in w.sent)
     last = w.q("select username from x_accounts order by collected_at desc nulls last limit 3")
     assert last.count((first,)) == 1
     w.behavior.clear()
@@ -711,4 +711,64 @@ def test_apify_skips_reposts(w, monkeypatch):
     assert w.q("select followers_count from daily_metrics where account_id=:a and metric_date=current_date",
                a=w.ids["conta2"]) == [(9100,)]
     assert not [m for m in w.sent if "881" in m or "882" in m], "repost não dispara alerta de views"
+    admin_token(w, None)
+
+
+# ---- Atualizar dados na hora (read_now) e leitura automática por usuário ----
+
+def test_read_now_for_a_friend_reads_everything_right_away(w, monkeypatch):
+    import robo
+
+    owner = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
+    username, account_id = w.q("select username, id from x_accounts where owner_id=:o", o=owner)[0]
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append((token, handles)) or [
+        {"id": "9901", "createdAt": posted, "viewCount": 33, "author": {"userName": username, "followers": 1}}])
+    w.sql(f"update user_settings set apify_run_requested_at=NULL where owner_id={owner}")
+    assert robo.read_now(owner) == "ok"
+    assert calls == [("tok-amiga", [username])], "lê mesmo dentro do intervalo"
+    assert w.q("select count(*) from tweet_samples where account_id=:a and tweet_id='9901'", a=account_id)[0][0] == 1
+    assert w.q("select apify_status, apify_run_requested_at from user_settings where owner_id=:o", o=owner) == [("ok", None)]
+
+
+def test_friend_auto_off_and_own_interval(w, monkeypatch):
+    import robo
+
+    owner = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or [])
+    w.sql(f"update x_accounts set collected_at = now() - interval '20 minutes' where owner_id={owner}")
+    w.sql(f"update user_settings set apify_auto=true, apify_interval_min=15, apify_run_requested_at=NULL where owner_id={owner}")
+    w.run()
+    assert "tok-amiga" in calls, "intervalo do usuário (15 min) venceu"
+    calls.clear()
+    w.sql(f"update x_accounts set collected_at = now() - interval '5 hours' where owner_id={owner}")
+    w.sql(f"update user_settings set apify_auto=false where owner_id={owner}")
+    w.run()
+    assert "tok-amiga" not in calls, "leitura automática desligada: só pelo botão"
+    w.sql(f"update user_settings set apify_run_requested_at=now() where owner_id={owner}")
+    w.run()
+    assert "tok-amiga" in calls, "o botão lê mesmo desligada"
+    w.sql(f"update user_settings set apify_auto=true, apify_interval_min=60 where owner_id={owner}")
+
+
+def test_admin_read_now_failure_goes_to_collectors_without_retrying_apify(w, monkeypatch):
+    import robo
+
+    due_round(w)
+    admin_token(w, "tok-admin")
+    tokens = []
+
+    def refuse(token, handles):
+        tokens.append(token)
+        raise robo.ApifyError("sem resposta do Apify (TimeoutError).")
+
+    monkeypatch.setattr(robo, "apify_fetch", refuse)
+    assert robo.read_now(admin_id(w)) == "erro"
+    assert w.q("select robo_run_requested_at is not null from app_settings where id=1") == [(True,)]
+    tokens.clear()
+    w.run()
+    assert "tok-admin" not in tokens, "o cron não repete o Apify que acabou de falhar"
+    assert w.opens() and w.last_beat()[1]["via"] == "coletores"
     admin_token(w, None)
