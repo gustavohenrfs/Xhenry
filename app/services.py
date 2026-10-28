@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, inspect, select, text
 from sqlalchemy.orm import Session
 
-from app.config import LOCAL_EMAIL, STATUS_LABELS, WEEKDAYS, X_API
+from app.config import DEFAULT_ADMIN_EMAIL, LOCAL_EMAIL, STATUS_LABELS, WEEKDAYS, X_API
 from app.database import engine
 from app.models import (
     DEFAULT_TZ,
@@ -36,8 +36,10 @@ from app.models import (
     SyncKind,
     SyncRun,
     SyncStatus,
+    PushSubscription,
     TweetSample,
     User,
+    UserSetting,
     XAccount,
 )
 
@@ -49,11 +51,16 @@ class TokenMissing(Exception):
 
 
 def bearer_token() -> str:
+    """Bearer da API do X do .env: só o admin usa (os outros colam o próprio em Configurações)."""
     return os.getenv("X_BEARER_TOKEN", "").strip()
 
 
 def token_configured() -> bool:
     return bool(bearer_token())
+
+
+def admin_email() -> str:
+    return (os.getenv("ADMIN_EMAIL") or DEFAULT_ADMIN_EMAIL).strip().lower()
 
 
 def ensure_user_auth_columns() -> None:
@@ -70,6 +77,14 @@ def ensure_user_auth_columns() -> None:
             if column not in account_cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE x_accounts ADD COLUMN {column} {kind}"))
+        if "owner_id" not in account_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE x_accounts ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE"))
+    # Multiusuário: dono do alerta e da inscrição de push (NULL = sistema / ainda sem dono).
+    for table in ("alerts_sent", "push_subscriptions"):
+        if table in tables and "owner_id" not in {col["name"] for col in insp.get_columns(table)}:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER REFERENCES users(id) ON DELETE CASCADE"))
     if "app_settings" in tables:
         setting_cols = {col["name"] for col in insp.get_columns("app_settings")}
         kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
@@ -98,6 +113,9 @@ def ensure_user_auth_columns() -> None:
         "ix_daily_metrics_collected": "daily_metrics (collected_at)",
         "ix_alerts_sent_kind_id": "alerts_sent (kind, id)",
         "ix_sync_runs_heartbeat": "sync_runs (kind, account_id, finished_at)",
+        "ix_x_accounts_owner_id": "x_accounts (owner_id)",
+        "ix_alerts_sent_owner_id": "alerts_sent (owner_id)",
+        "ix_push_subscriptions_owner_id": "push_subscriptions (owner_id)",
     }
     for name, target in indexes.items():
         if target.split(" ")[0] in tables:
@@ -117,6 +135,15 @@ def ensure_user_auth_columns() -> None:
         statements.append("ALTER TABLE users ADD COLUMN logo_url VARCHAR(512)")
     if "token_version" not in cols:
         statements.append("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0")
+    if "is_admin" not in cols:
+        statements.append("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE")
+    if "is_approved" not in cols:
+        statements.append("ALTER TABLE users ADD COLUMN is_approved BOOLEAN NOT NULL DEFAULT FALSE")
+    if "approved_at" not in cols:
+        kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
+        statements.append(f"ALTER TABLE users ADD COLUMN approved_at {kind}")
+    if "invited_by_id" not in cols:
+        statements.append("ALTER TABLE users ADD COLUMN invited_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL")
     with engine.begin() as conn:
         for statement in statements:
             conn.execute(text(statement))
@@ -124,14 +151,72 @@ def ensure_user_auth_columns() -> None:
             conn.execute(text("UPDATE users SET nome_exibicao = name WHERE nome_exibicao IS NULL"))
 
 
-def ensure_owner(db: Session) -> User:
-    user = db.scalar(select(User).where(User.email == LOCAL_EMAIL))
-    if user is None:
-        user = User(email=LOCAL_EMAIL, name="XHenry", nome_exibicao="XHenry")
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
+def ensure_admin(db: Session) -> User:
+    """Garante o admin (ADMIN_EMAIL) e passa para ele o que era do dono antigo, local@suzana.
+
+    Roda a cada startup e não muda nada na segunda vez. Sem o usuário do admin, o local@suzana vira ele
+    (mesma linha, só troca o email); sem nenhum dos dois, cria o admin sem senha, que entra pelo
+    "Esqueceu a senha?" (o link vai para o Telegram do .env, que é dele).
+    """
+    email = admin_email()
+    admin = db.scalar(select(User).where(func.lower(User.email) == email))
+    legacy = db.scalar(select(User).where(User.email == LOCAL_EMAIL)) if email != LOCAL_EMAIL else None
+    if admin is None and legacy is not None:
+        legacy.email = email
+        admin, legacy = legacy, None
+    elif admin is None:
+        admin = User(email=email, name="XHenry", nome_exibicao="XHenry")
+        db.add(admin)
+        db.flush()
+    if legacy is not None:
+        taken = set(db.scalars(select(Folder.name).where(Folder.owner_id == admin.id)).all())
+        for folder in db.scalars(select(Folder).where(Folder.owner_id == legacy.id)).all():
+            if folder.name in taken:
+                folder.name = f"{folder.name} (antiga)"[:120]
+            folder.owner_id = admin.id
+        for model in (AlertSent, PushSubscription):
+            db.execute(model.__table__.update().where(model.owner_id == legacy.id).values(owner_id=admin.id))
+        db.flush()
+    if not admin.is_admin or not admin.is_approved:
+        admin.is_admin = admin.is_approved = True
+        admin.approved_at = admin.approved_at or now_utc()
+    # Um admin só: quem tinha a marca e não é mais o ADMIN_EMAIL perde (troca de email no .env).
+    for other in db.scalars(select(User).where(User.is_admin.is_(True), User.id != admin.id)).all():
+        other.is_admin = False
+    db.commit()
+    backfill_owners(db, admin)
+    return admin
+
+
+def backfill_owners(db: Session, admin: User) -> None:
+    """Preenche os donos que ficaram vazios ou desencontrados: contas pela pasta, alertas pela conta da
+    chave, push e configurações do tempo de um usuário só para o admin."""
+    owner = "(SELECT owner_id FROM folders WHERE folders.id = x_accounts.folder_id)"
+    db.execute(text(f"UPDATE x_accounts SET owner_id = {owner} WHERE owner_id IS NULL OR owner_id <> {owner}"))
+    # Chaves com a conta no 2º pedaço: viral:{conta}:…, queda:{conta}:…, ban:{conta}:…
+    for row in db.scalars(
+        select(AlertSent).where(AlertSent.owner_id.is_(None), AlertSent.kind.in_(["viral", "queda", "ban"]))
+    ).all():
+        parts = row.dedupe_key.split(":")
+        if len(parts) > 1 and parts[1].isdigit():
+            row.owner_id = db.scalar(select(XAccount.owner_id).where(XAccount.id == int(parts[1])))
+    db.execute(
+        PushSubscription.__table__.update().where(PushSubscription.owner_id.is_(None)).values(owner_id=admin.id)
+    )
+    if db.scalar(select(UserSetting).where(UserSetting.owner_id == admin.id)) is None:
+        legacy = db.get(AppSetting, 1)
+        db.add(
+            UserSetting(
+                owner_id=admin.id,
+                impression_goal=legacy.impression_goal if legacy else 500,
+                xai_api_key=legacy.xai_api_key if legacy else None,
+            )
+        )
+    db.commit()
+
+
+def admin_user_id(db: Session) -> int | None:
+    return db.scalar(select(User.id).where(User.is_admin.is_(True)).order_by(User.id).limit(1))
 
 
 def normalize_username(value: str) -> str:
@@ -208,8 +293,7 @@ def error_text(body: Any) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
-def x_get(path: str, params: dict[str, Any]) -> tuple[int, dict]:
-    token = bearer_token()
+def x_get(path: str, params: dict[str, Any], token: str = "") -> tuple[int, dict]:
     if not token:
         raise TokenMissing()
     try:
@@ -235,24 +319,25 @@ def x_get(path: str, params: dict[str, Any]) -> tuple[int, dict]:
     return response.status_code, body
 
 
-def lookup_user(username: str) -> tuple[int, dict]:
+def lookup_user(username: str, token: str = "") -> tuple[int, dict]:
     return x_get(
         f"/users/by/username/{username}",
         {"user.fields": "created_at,description,public_metrics,verified,protected,profile_image_url"},
+        token=token,
     )
 
 
-def user_tweets(user_id: str, exclude: str | None = None) -> tuple[int, dict]:
+def user_tweets(user_id: str, exclude: str | None = None, token: str = "") -> tuple[int, dict]:
     params: dict[str, Any] = {
         "max_results": 10,
         "tweet.fields": "created_at,public_metrics,lang,author_id",
     }
     if exclude:
         params["exclude"] = exclude
-    return x_get(f"/users/{user_id}/tweets", params)
+    return x_get(f"/users/{user_id}/tweets", params, token=token)
 
 
-def search_recent(username: str) -> tuple[int, dict]:
+def search_recent(username: str, token: str = "") -> tuple[int, dict]:
     return x_get(
         "/tweets/search/recent",
         {
@@ -260,6 +345,7 @@ def search_recent(username: str) -> tuple[int, dict]:
             "max_results": 10,
             "tweet.fields": "created_at,public_metrics,lang,author_id",
         },
+        token=token,
     )
 
 
@@ -465,9 +551,9 @@ def save_snapshot_only(db: Session, account: XAccount, metrics: dict | None) -> 
     rebuild_folder_day(db, account.folder_id, day)
 
 
-def collect_health(username: str) -> dict[str, Any]:
+def collect_health(username: str, token: str = "") -> dict[str, Any]:
     """Health check via API oficial. Não grava métricas de tweets."""
-    profile_status, profile_body = lookup_user(username)
+    profile_status, profile_body = lookup_user(username, token)
     data = profile_body.get("data") if isinstance(profile_body.get("data"), dict) else None
     user_id = str(data.get("id")) if data and data.get("id") else None
     protected = bool(data.get("protected")) if data else False
@@ -476,12 +562,12 @@ def collect_health(username: str) -> dict[str, Any]:
     timeline: list[dict] = []
     search_ids: set[str] = set()
     if user_id and profile_status == 200 and not protected:
-        timeline_status, timeline_body = user_tweets(user_id, exclude="retweets,replies")
+        timeline_status, timeline_body = user_tweets(user_id, exclude="retweets,replies", token=token)
         timeline = tweet_rows(timeline_body, user_id)
         if timeline_status == 200 and not timeline:
-            timeline_status, timeline_body = user_tweets(user_id)
+            timeline_status, timeline_body = user_tweets(user_id, token=token)
             timeline = tweet_rows(timeline_body, user_id)
-        search_status, search_body = search_recent(username)
+        search_status, search_body = search_recent(username, token)
         search_ids = {str(row["id"]) for row in tweet_rows(search_body, user_id)}
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
@@ -561,8 +647,8 @@ def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> 
     return status, detail
 
 
-def accounts_for(db: Session, handle: str, folder_id: int | None) -> list[XAccount]:
-    query = select(XAccount).where(
+def accounts_for(db: Session, owner_id: int, handle: str, folder_id: int | None) -> list[XAccount]:
+    query = owned_accounts(owner_id).where(
         XAccount.username == handle, XAccount.is_active.is_(True), XAccount.is_archived.is_(False)
     )
     if folder_id is not None:
@@ -570,14 +656,18 @@ def accounts_for(db: Session, handle: str, folder_id: int | None) -> list[XAccou
     return list(db.scalars(query).all())
 
 
-def check_handle(db: Session, handle: str, folder_id: int | None) -> dict[str, Any]:
-    accounts = accounts_for(db, handle, folder_id)
+NO_X_TOKEN = "Cole o seu Bearer Token da API do X em Configurações para usar o Verificar."
+
+
+def check_handle(db: Session, owner: User, handle: str, folder_id: int | None) -> dict[str, Any]:
+    """Verificação de saúde com o token da API do X de quem pediu; só grava nas contas dele."""
+    accounts = accounts_for(db, owner.id, handle, folder_id)
     if folder_id is not None and not accounts:
         raise HTTPException(404, "Essa conta não está na pasta informada.")
     try:
-        signals = collect_health(handle)
+        signals = collect_health(handle, x_token(db, owner))
     except TokenMissing:
-        raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.") from None
+        raise HTTPException(503, NO_X_TOKEN) from None
     if signals["profile_status"] == 401:
         raise HTTPException(502, "A API do X rejeitou o token (401). Gere outro Bearer no app do projeto.")
     results = []
@@ -756,9 +846,29 @@ def suggestions_from(all_rows: list, start: date, end: date, everything=None) ->
     return suggestion_payload(rows, basis) | {"heatmap": heatmap(rows)}
 
 
-def selected_accounts(db: Session, folder_id: int | None) -> list[XAccount]:
-    """Contas que entram no dashboard e nas verificações: ativas e não arquivadas."""
-    query = select(XAccount).where(XAccount.is_active.is_(True), XAccount.is_archived.is_(False))
+def owned_accounts(owner_id: int):
+    """select das contas de um usuário. O dono vem da pasta, a fonte da verdade."""
+    return select(XAccount).join(Folder, Folder.id == XAccount.folder_id).where(Folder.owner_id == owner_id)
+
+
+def owned_account(db: Session, owner_id: int, account_id: int) -> XAccount:
+    """A conta, se for deste usuário; de outro dono é 404, como se não existisse."""
+    account = db.scalar(owned_accounts(owner_id).where(XAccount.id == account_id))
+    if account is None:
+        raise HTTPException(404, "Conta não encontrada.")
+    return account
+
+
+def owned_folder(db: Session, owner_id: int, folder_id: int) -> Folder:
+    folder = db.scalar(select(Folder).where(Folder.id == folder_id, Folder.owner_id == owner_id))
+    if folder is None:
+        raise HTTPException(404, "Pasta não encontrada.")
+    return folder
+
+
+def selected_accounts(db: Session, owner_id: int, folder_id: int | None) -> list[XAccount]:
+    """Contas do usuário que entram no dashboard e nas verificações: ativas e não arquivadas."""
+    query = owned_accounts(owner_id).where(XAccount.is_active.is_(True), XAccount.is_archived.is_(False))
     if folder_id is not None:
         query = query.where(XAccount.folder_id == folder_id)
     return list(db.scalars(query).all())
@@ -974,12 +1084,16 @@ def growth_payload(
     return payload
 
 
-def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]:
+def dashboard(db: Session, owner_id: int, period: str, folder_id: int | None) -> dict[str, Any]:
     start, end = period_window(period)
-    folders = list(db.scalars(select(Folder).where(Folder.is_archived.is_(False)).order_by(Folder.name)).all())
+    folders = list(
+        db.scalars(
+            select(Folder).where(Folder.owner_id == owner_id, Folder.is_archived.is_(False)).order_by(Folder.name)
+        ).all()
+    )
     if folder_id is not None and all(folder.id != folder_id for folder in folders):
         raise HTTPException(404, "Pasta não encontrada.")
-    accounts = selected_accounts(db, folder_id)
+    accounts = selected_accounts(db, owner_id, folder_id)
     ids = [account.id for account in accounts]
     # Uma consulta só, da janela que o cartão mais antigo precisa (período anterior ou a linha de
     # 14 dias) até o fim; cada janela abaixo é só um filtro em memória.
@@ -1118,7 +1232,7 @@ def dashboard(db: Session, period: str, folder_id: int | None) -> dict[str, Any]
         "previous": previous,
         "top_posts": ranking,
         "top_post": ranking[0] if ranking else None,
-        "goal": {"target": get_settings(db).impression_goal, "today": today_views},
+        "goal": {"target": user_settings(db, owner_id).impression_goal, "today": today_views},
         "growth": growth_payload(pairs, prev_pairs, chart_start, end),
         "folders": folder_cards,
         "accounts": cards,
@@ -1141,12 +1255,10 @@ DETAIL_CHECKS = 10
 DETAIL_POSTS = 5
 
 
-def account_detail(db: Session, account_id: int, period: str) -> dict[str, Any]:
+def account_detail(db: Session, owner_id: int, account_id: int, period: str) -> dict[str, Any]:
     """Gaveta da conta: o cartão dela, views e seguidores por dia, os melhores posts e as últimas
     verificações de saúde. Períodos curtos mostram os últimos 14 dias no gráfico."""
-    account = db.get(XAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "Conta não encontrada.")
+    account = owned_account(db, owner_id, account_id)
     start, end = period_window(period)
     chart_start = min(start, end - timedelta(days=SPARK_DAYS - 1))
     is_total = period.strip().lower() == "total"
@@ -1235,11 +1347,13 @@ def last_check_details(db: Session, ids: list[int]) -> dict[int, str | None]:
     return {account_id: detail for account_id, detail in rows}
 
 
-def archived_payload(db: Session) -> list[dict[str, Any]]:
-    """Contas arquivadas com o histórico inteiro: totais, datas e views/seguidores por dia."""
+def archived_payload(db: Session, owner_id: int) -> list[dict[str, Any]]:
+    """Contas arquivadas do usuário com o histórico inteiro: totais, datas e views/seguidores por dia."""
     start, end = period_window("total")
     accounts = db.scalars(
-        select(XAccount).where(XAccount.is_archived.is_(True)).order_by(XAccount.archived_at.desc(), XAccount.id)
+        owned_accounts(owner_id)
+        .where(XAccount.is_archived.is_(True))
+        .order_by(XAccount.archived_at.desc(), XAccount.id)
     ).all()
     items = []
     for account in accounts:
@@ -1284,9 +1398,26 @@ def telegram_creds(db: Session) -> tuple[str, str]:
     return token, chat
 
 
-def xai_key(db: Session) -> str:
-    row = get_settings(db)
-    return (row.xai_api_key or os.getenv("XAI_API_KEY") or "").strip()
+def user_settings(db: Session, owner_id: int) -> UserSetting:
+    row = db.scalar(select(UserSetting).where(UserSetting.owner_id == owner_id))
+    if row is None:
+        row = UserSetting(owner_id=owner_id, impression_goal=500)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def xai_key(db: Session, user: User) -> str:
+    """Chave da xAI do usuário; a do .env (paga pelo admin) só vale para o admin."""
+    own = (user_settings(db, user.id).xai_api_key or "").strip()
+    return own or ((os.getenv("XAI_API_KEY") or "").strip() if user.is_admin else "")
+
+
+def x_token(db: Session, user: User) -> str:
+    """Bearer da API do X do usuário; o X_BEARER_TOKEN do .env só vale para o admin."""
+    own = (user_settings(db, user.id).x_bearer_token or "").strip()
+    return own or (bearer_token() if user.is_admin else "")
 
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
@@ -1371,20 +1502,32 @@ def viral_item(db: Session, row: AlertSent) -> dict[str, Any]:
     }
 
 
-def try_send(db: Session, key: str, kind: str, text: str) -> bool:
-    token, chat = telegram_creds(db)
-    if not token or not chat:
-        return False
+def try_send(db: Session, key: str, kind: str, text: str, owner_id: int | None = None) -> bool:
+    """Registra o alerta (uma vez por chave) e manda no Telegram do .env quando ele é do admin ou do
+    sistema (owner_id None). Alerta de outro usuário só fica no painel dele (sininho, push, Alertas):
+    o bot é do admin."""
     if db.scalar(select(AlertSent).where(AlertSent.dedupe_key == key)):
         return False
-    try:
-        send_telegram(token, chat, text)
-    except HTTPException as exc:
-        log.warning("telegram %s não enviado: %s", kind, exc.detail)
-        return False
-    db.add(AlertSent(dedupe_key=key, kind=kind, detail=text[:500], sent_at=now_utc()))
+    telegram = owner_id is None or owner_id == admin_user_id(db)
+    if telegram:
+        token, chat = telegram_creds(db)
+        if not token or not chat:
+            return False
+        try:
+            send_telegram(token, chat, text)
+        except HTTPException as exc:
+            log.warning("telegram %s não enviado: %s", kind, exc.detail)
+            return False
+    db.add(AlertSent(owner_id=owner_id, dedupe_key=key, kind=kind, detail=text[:500], sent_at=now_utc()))
     db.commit()
     return True
+
+
+def alerts_query(user: User):
+    """Alertas que o usuário vê: os das contas dele e, se for o admin, os do sistema."""
+    if user.is_admin:
+        return select(AlertSent).where((AlertSent.owner_id == user.id) | AlertSent.owner_id.is_(None))
+    return select(AlertSent).where(AlertSent.owner_id == user.id)
 
 
 def dispatch_alerts(db: Session, account: XAccount, previous_status: HealthStatus | None) -> None:
@@ -1399,14 +1542,26 @@ def dispatch_alerts(db: Session, account: XAccount, previous_status: HealthStatu
             f"ban:{account.id}:{status.value}:{local_now.date().isoformat()}",
             "ban",
             f"⚠️ Possível restrição\n👤 Conta: {name} (@{account.username})\nStatus: {label}\nO alcance pode ter sido cortado.",
+            account.owner_id,
         )
 
 
-def settings_payload(row: AppSetting) -> dict[str, Any]:
+def settings_payload(db: Session, user: User) -> dict[str, Any]:
+    """Configurações do usuário. Chaves nunca voltam, só se estão definidas."""
+    row = user_settings(db, user.id)
+    checked = row.apify_checked_at
     return {
-        "telegram_ready": all(telegram_creds(None)),
+        "telegram_ready": all(telegram_creds(None)) if user.is_admin else False,
         "impression_goal": row.impression_goal,
-        "xai_key_set": bool(row.xai_api_key or os.getenv("XAI_API_KEY")),
+        "xai_key_set": bool(xai_key(db, user)),
+        "x_token_set": bool(x_token(db, user)),
+        "apify_token_set": bool((row.apify_token or "").strip()),
+        "apify": {
+            "status": row.apify_status,
+            "detail": row.apify_detail,
+            "checked_at": as_utc(checked).isoformat() if checked else None,
+            "requested_at": as_utc(row.apify_run_requested_at).isoformat() if row.apify_run_requested_at else None,
+        },
     }
 
 

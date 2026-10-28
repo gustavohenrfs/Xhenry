@@ -1,6 +1,7 @@
 """Aba Coletores: contas descartáveis que o robo.py usa para ler as timelines.
 
-Tudo aqui exige login, inclusive a listagem: mesmo mascarados, proxy e cookies não são públicos.
+Tudo aqui é só do admin, inclusive a listagem: mesmo mascarados, proxy e cookies não são públicos.
+Os outros usuários leem pelo Apify e nem veem a aba.
 """
 
 from __future__ import annotations
@@ -17,10 +18,10 @@ from sqlalchemy.orm import Session
 from app.collectors import dump_cookies, mask_cookies, mask_proxy, parse_cookies, parse_proxy, probe_proxy
 from app.database import get_db
 from app.models import Collector, XAccount
-from app.routers.auth import current_user
+from app.routers.auth import admin_user
 from app.services import as_utc, normalize_username, now_utc
 
-router = APIRouter(dependencies=[Depends(current_user)])
+router = APIRouter(dependencies=[Depends(admin_user)])
 
 
 class CollectorIn(BaseModel):

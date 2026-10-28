@@ -21,9 +21,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=15">
+  <link rel="stylesheet" href="/static/css/styles.css?v=16">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=32"></script>
+  <script defer src="/static/js/app.js?v=33"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -41,7 +41,8 @@
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><b class="tab-badge hidden" data-badge="alerts" aria-label="alertas não vistos"></b><span>Dashboard</span></button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
         <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
-        <button type="button" data-tab="collectors" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><b class="tab-badge hidden" data-badge="collectors" aria-label="coletores precisando de atenção"></b><span>Coletores</span></button>
+        <button type="button" data-tab="collectors" data-admin-only class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><b class="tab-badge hidden" data-badge="collectors" aria-label="coletores precisando de atenção"></b><span>Coletores</span></button>
+        <button type="button" data-tab="users" data-admin-only class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/></svg><b class="tab-badge hidden" data-badge="users" aria-label="pedidos de acesso esperando"></b><span>Usuários</span></button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg><span>Verificar post</span></button>
         <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
@@ -127,8 +128,13 @@
           <div class="text-center mb-6">
             <p class="text-lg tracking-wide text-mute">Bem-vindo <span id="welcome-name" class="metallic-pink glow-slow"></span></p>
           </div>
+          <div id="apify-banner" class="notice-banner hidden" data-user-only role="status">
+            <span class="notice-ico" aria-hidden="true">🔑</span>
+            <p id="apify-banner-text" class="min-w-0 flex-1 text-sm"></p>
+            <button id="apify-banner-go" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink">Abrir Configurações</button>
+          </div>
           <div id="kpis" class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6" aria-busy="true"><div class="skel skel-kpi col-span-2"></div><div class="skel skel-kpi col-span-2"></div><div class="skel skel-kpi col-span-2"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div><div class="skel skel-tile"></div></div>
-          <div class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <div id="dash-trio" class="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
             <article id="mix-card" class="glow rounded-3xl border border-neon/20 bg-card p-4">
               <h2 class="font-display text-xl text-white">Interações</h2>
               <p id="mix-note" class="mb-3 text-xs text-mute">De onde vêm as interações dos posts do período</p>
@@ -149,7 +155,7 @@
               <p class="mb-3 text-xs text-mute">O post com mais views no período</p>
               <div id="top-post-body"><div class="skel-stack"><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i></div></div>
             </article>
-            <article id="health-card" class="glow rounded-3xl border border-neon/20 bg-card p-4 lg:col-span-2 xl:col-span-1">
+            <article id="health-card" data-admin-only class="glow rounded-3xl border border-neon/20 bg-card p-4 lg:col-span-2 xl:col-span-1">
               <h2 class="font-display text-xl text-white">Saúde da coleta</h2>
               <p id="health-note" class="mb-3 text-xs text-mute">Contas lidas pelos coletores no ritmo esperado</p>
               <div id="health-body"><div class="skel-stack"><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i></div></div>
@@ -258,6 +264,27 @@
           </form>
           <div id="collector-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
         </section>
+        <section id="pane-users" class="pane space-y-4" data-admin-only>
+          <p class="text-sm text-mute">Quem entra pelo link de convite fica esperando aqui até você aprovar. Cada pessoa só vê as próprias pastas, contas e alertas e lê as contas pelo Apify, com o token dela.</p>
+          <div class="grid gap-4 lg:grid-cols-2">
+            <article class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
+              <h2 class="font-display text-2xl text-white">Pedidos de acesso</h2>
+              <div id="users-pending" class="space-y-2"></div>
+            </article>
+            <article class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
+              <div class="flex items-center justify-between gap-3">
+                <h2 class="font-display text-2xl text-white">Convites</h2>
+                <button id="invite-new" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink">Gerar convite</button>
+              </div>
+              <p class="text-xs text-mute">Cada link vale para uma pessoa e vence em 7 dias.</p>
+              <div id="invite-list" class="space-y-2"></div>
+            </article>
+            <article class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
+              <h2 class="font-display text-2xl text-white">Com acesso</h2>
+              <div id="users-approved" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+            </article>
+          </div>
+        </section>
         <section id="pane-post" class="pane">
           <form id="post-form" class="glow mx-auto max-w-2xl space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
             <div>
@@ -336,16 +363,32 @@
           </form>
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
-            <p id="tg-status" class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
-            <label class="block text-sm text-mute" for="xai-key">Chave da xAI (análise do post)</label>
+            <p id="tg-status" data-admin-only class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
+            <div data-user-only class="space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <label class="text-sm text-mute" for="apify-token">Token do Apify (leitura das suas contas)</label>
+                <button type="button" data-clear-key="apify_token" class="hidden text-xs text-neon hover:underline">Apagar</button>
+              </div>
+              <input id="apify-token" type="password" autocomplete="off" spellcheck="false" placeholder="apify_api_..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <p id="apify-status" class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Apify: lendo…</p>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <label class="text-sm text-mute" for="x-token">Bearer Token da API do X (botão Verificar)</label>
+              <button type="button" data-clear-key="x_bearer_token" class="hidden text-xs text-neon hover:underline">Apagar</button>
+            </div>
+            <input id="x-token" type="password" autocomplete="off" spellcheck="false" placeholder="AAAA..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+            <div class="flex items-center justify-between gap-3">
+              <label class="text-sm text-mute" for="xai-key">Chave da xAI (análise do post)</label>
+              <button type="button" data-clear-key="xai_api_key" class="hidden text-xs text-neon hover:underline">Apagar</button>
+            </div>
             <input id="xai-key" type="password" autocomplete="off" placeholder="xai-..." class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <label class="block text-sm text-mute" for="goal">Meta de views do dia (todas as contas)</label>
             <input id="goal" type="number" min="1" value="500" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             <div class="flex flex-wrap gap-2 pt-2">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Salvar</button>
-              <button id="test-note" class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar notificação</button>
+              <button id="test-note" data-admin-only class="rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Testar notificação</button>
             </div>          </form>
-          <article id="robo-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
+          <article id="robo-card" data-admin-only class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Robô</h2>
             <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
               <span>
@@ -369,7 +412,7 @@
           </form>
 
           <!-- Delete Account -->
-          <div class="glow rounded-3xl border border-red-500/40 bg-card p-6">
+          <div data-user-only class="glow rounded-3xl border border-red-500/40 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Excluir conta</h2>
             <p class="mt-2 text-sm text-mute">Esta ação é irreversível. Todos os seus dados serão apagados permanentemente.</p>
             <button id="delete-account-btn" type="button" class="mt-4 rounded-2xl bg-red-600 px-4 py-3 text-sm font-medium text-white hover:bg-red-700">Excluir minha conta</button>
@@ -396,13 +439,14 @@
   <nav id="bottom-nav" class="bottom-nav md:hidden" aria-label="Abas">
     <button type="button" data-tab="dashboard" class="tab-btn active"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><b class="tab-badge hidden" data-badge="alerts" aria-label="alertas não vistos"></b><span>Dashboard</span></button>
     <button type="button" data-tab="ops" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
-    <button type="button" data-tab="collectors" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><b class="tab-badge hidden" data-badge="collectors" aria-label="coletores precisando de atenção"></b><span>Coletores</span></button>
+    <button type="button" data-tab="collectors" data-admin-only class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><b class="tab-badge hidden" data-badge="collectors" aria-label="coletores precisando de atenção"></b><span>Coletores</span></button>
     <button type="button" data-tab="archived" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
     <button type="button" id="more-btn" class="tab-btn" aria-haspopup="menu" aria-expanded="false"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18.5" cy="12" r="1.4"/></svg><span>Mais</span></button>
   </nav>
   <div id="more-sheet" class="more-sheet md:hidden" role="menu" aria-label="Outras abas">
     <button type="button" data-tab="post" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg><span>Verificar post</span></button>
     <button type="button" data-tab="cloaker" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
+    <button type="button" data-tab="users" data-admin-only class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/></svg><b class="tab-badge hidden" data-badge="users" aria-label="pedidos de acesso esperando"></b><span>Usuários</span></button>
     <button type="button" data-tab="settings" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
   </div>
   <!-- Gaveta da conta: gráfico, melhores posts e histórico de status de uma conta. -->
@@ -449,6 +493,18 @@
       <ol id="keep-help-steps" class="keep-steps mt-4"></ol>
       <p id="keep-help-note" class="mt-4 text-xs text-mute"></p>
       <button id="keep-help-close" type="button" class="mt-5 w-full rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink">Entendi</button>
+    </div>
+  </div>
+  <div id="pending-screen" class="auth-modal off" role="dialog" aria-labelledby="pending-title">
+    <div class="w-full max-w-sm rounded-3xl border border-neon/30 bg-panel p-6 text-center shadow-[0_0_40px_rgba(255,46,200,.16)]">
+      <img src="/static/img/logo-256.webp" width="256" height="256" decoding="async" alt="XHenry" class="brand-logo mx-auto h-16 w-16">
+      <p class="mt-2 text-[11px] uppercase tracking-[0.2em] text-neon">Monitoramento Real</p>
+      <div class="pending-pulse" aria-hidden="true"><span></span></div>
+      <h2 id="pending-title" class="font-display text-xl text-white">Aguardando aprovação</h2>
+      <p class="mt-2 text-sm text-mute">Seu cadastro chegou. Assim que o administrador aprovar, o painel abre sozinho aqui.</p>
+      <p id="pending-email" class="mt-3 text-sm text-white"></p>
+      <button id="pending-check" type="button" class="mt-5 w-full rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink">Verificar de novo</button>
+      <button type="button" data-logout class="mt-3 w-full text-xs text-mute">Sair</button>
     </div>
   </div>
   <div id="auth-modal" class="auth-modal off">

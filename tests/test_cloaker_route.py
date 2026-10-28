@@ -11,6 +11,7 @@ import pytest
 from conftest import image_bytes
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app.config import ROOT
 from app.routers.auth import current_user
 from main import app
@@ -18,7 +19,7 @@ from main import app
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     yield TestClient(app)
     app.dependency_overrides.clear()
 

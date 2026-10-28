@@ -8,11 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import PushSubscription
+from app.models import PushSubscription, User
 from app.push import PushUnavailable, public_key, send_one, test_payload
-from app.routers.auth import current_user
+from app.routers.auth import approved_user
 
-router = APIRouter(dependencies=[Depends(current_user)])
+router = APIRouter(dependencies=[Depends(approved_user)])
 # Sem login: o service worker não enxerga o token do localStorage. Ver renew().
 public_router = APIRouter()
 
@@ -46,10 +46,12 @@ def push_key(db: Session = Depends(get_db)) -> dict[str, str]:
 
 
 @router.post("/api/push/subscribe")
-def subscribe(payload: SubscriptionIn, db: Session = Depends(get_db)) -> dict[str, bool]:
+def subscribe(payload: SubscriptionIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     if not payload.endpoint.startswith("https://"):
         raise HTTPException(400, "Endereço de push inválido.")
     row = find(db, payload.endpoint) or PushSubscription(endpoint=payload.endpoint)
+    # O mesmo navegador com outra pessoa logada passa a ser dela.
+    row.owner_id = user.id
     row.p256dh, row.auth = payload.keys.p256dh, payload.keys.auth
     row.user_agent = payload.user_agent
     db.add(row)
@@ -84,19 +86,19 @@ def renew(payload: RenewIn, db: Session = Depends(get_db)) -> dict[str, bool]:
 
 
 @router.post("/api/push/unsubscribe")
-def unsubscribe(payload: EndpointIn, db: Session = Depends(get_db)) -> dict[str, bool]:
+def unsubscribe(payload: EndpointIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     row = find(db, payload.endpoint)
-    if row is not None:
+    if row is not None and row.owner_id == user.id:
         db.delete(row)
         db.commit()
     return {"ok": True}
 
 
 @router.post("/api/push/test")
-def push_test(payload: EndpointIn, db: Session = Depends(get_db)) -> dict[str, bool]:
+def push_test(payload: EndpointIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, bool]:
     """Botão Testar do sininho: manda uma notificação só para este navegador."""
     row = find(db, payload.endpoint)
-    if row is None:
+    if row is None or row.owner_id != user.id:
         raise HTTPException(404, "Este navegador não está inscrito. Ative as notificações de novo.")
     try:
         result = send_one(db, row, test_payload())

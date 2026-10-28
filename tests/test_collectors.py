@@ -9,12 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
 
+from conftest import admin_row
 from app import services
 from app.collectors import mask_cookies, mask_proxy, parse_cookies, parse_proxy
 from app.database import SessionLocal
 from app.models import Collector, Folder, XAccount
 from app.routers.auth import current_user
-from app.services import ensure_owner
+from app.services import ensure_admin
 from main import app
 
 TOKEN = "a" * 36 + "b1c2"
@@ -79,7 +80,7 @@ def client():
 
 @pytest.fixture
 def logged(client):
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     yield client
     app.dependency_overrides.clear()
 
@@ -128,7 +129,7 @@ def test_duplicate_and_invalid(logged):
 def test_monitored_account_cannot_be_collector_and_vice_versa(logged):
     money, burner = handle(), handle()
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name=f"Col {uuid4().hex[:8]}", color="#FF2EC8")
+        folder = Folder(owner_id=ensure_admin(db).id, name=f"Col {uuid4().hex[:8]}", color="#FF2EC8")
         db.add(folder)
         db.flush()
         db.add(XAccount(folder_id=folder.id, username=money))
@@ -217,7 +218,7 @@ def test_test_button_refuses_monitored_handle(logged, monkeypatch):
     burner = handle()
     created = logged.post("/api/collectors", json={"handle": burner}).json()
     with SessionLocal() as db:  # alguém cadastrou o mesmo @ como monitorada direto no banco
-        folder = Folder(owner_id=ensure_owner(db).id, name=f"Mon {uuid4().hex[:6]}")
+        folder = Folder(owner_id=ensure_admin(db).id, name=f"Mon {uuid4().hex[:6]}")
         db.add(folder)
         db.flush()
         db.add(XAccount(folder_id=folder.id, username=burner))

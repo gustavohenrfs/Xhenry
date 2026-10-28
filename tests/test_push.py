@@ -8,11 +8,12 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app import push
 from app.database import SessionLocal
 from app.models import AlertSent, Folder, PushSubscription, TweetSample, XAccount
 from app.routers.auth import current_user
-from app.services import ensure_owner, get_settings
+from app.services import ensure_admin, get_settings
 from main import app
 
 SUB = {"endpoint": "https://push.example/abc", "keys": {"p256dh": "B" * 87, "auth": "a" * 22}}
@@ -20,7 +21,7 @@ SUB = {"endpoint": "https://push.example/abc", "keys": {"p256dh": "B" * 87, "aut
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     try:
         with TestClient(app) as c:
             with SessionLocal() as db:
@@ -73,7 +74,7 @@ def test_subscribe_refuses_plain_http(client):
 
 def make_alert(db, suffix: str = "") -> AlertSent:
     tag = uuid4().hex[:6]
-    folder = Folder(owner_id=ensure_owner(db).id, name=f"Push {tag}")
+    folder = Folder(owner_id=ensure_admin(db).id, name=f"Push {tag}")
     db.add(folder)
     db.flush()
     account = XAccount(folder_id=folder.id, username=f"push_{tag}", display_name="Ana")
@@ -84,7 +85,7 @@ def make_alert(db, suffix: str = "") -> AlertSent:
         timezone_used="America/Sao_Paulo", hour_local=10, weekday=0,
         text_preview="Bom dia", view_count=123456, like_count=10,
     ))
-    row = AlertSent(dedupe_key=f"viral:{account.id}:42" + (f":{suffix}" if suffix else ""), kind="viral", detail="x")
+    row = AlertSent(owner_id=account.owner_id, dedupe_key=f"viral:{account.id}:42" + (f":{suffix}" if suffix else ""), kind="viral", detail="x")
     db.add(row)
     db.commit()
     return row
@@ -97,8 +98,8 @@ def test_watchdog_pushes_only_new_alerts_with_level(client, sent):
         db.commit()
         # Primeira rodada: só marca onde está, o histórico não sai.
         assert push.push_new_alerts(db) == 0
-        db.add_all([PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22),
-                    PushSubscription(endpoint="https://push.example/morta", p256dh="B" * 87, auth="a" * 22)])
+        db.add_all([PushSubscription(owner_id=admin_row().id, endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22),
+                    PushSubscription(owner_id=admin_row().id, endpoint="https://push.example/morta", p256dh="B" * 87, auth="a" * 22)])
         db.commit()
         assert push.push_new_alerts(db) == 0
         row_id = make_alert(db, "100k").id
@@ -112,7 +113,7 @@ def test_watchdog_pushes_only_new_alerts_with_level(client, sent):
 
 
 def test_backlog_goes_out_next_minute_and_stale_is_skipped(client, sent):
-    subscribed = PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22)
+    subscribed = PushSubscription(owner_id=admin_row().id, endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22)
     with SessionLocal() as db:
         db.add(subscribed)
         db.commit()
@@ -134,14 +135,14 @@ def test_renew_swaps_subscription_without_login(client):
     new = {"endpoint": "https://push.example/nova", "keys": {"p256dh": "C" * 87, "auth": "c" * 22}}
     assert client.post("/api/push/renew", json=dict(new, old_endpoint=SUB["endpoint"])).status_code == 404
     with SessionLocal() as db:
-        db.add(PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22))
+        db.add(PushSubscription(owner_id=admin_row().id, endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22))
         db.commit()
     assert client.post("/api/push/renew", json=dict(new, old_endpoint=SUB["endpoint"])).json() == {"ok": True}
     with SessionLocal() as db:
         rows = db.query(PushSubscription).all()
         assert [(r.endpoint, r.auth) for r in rows] == [(new["endpoint"], "c" * 22)]
         # A página já tinha reinscrito: a antiga some e não duplica.
-        db.add(PushSubscription(endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22))
+        db.add(PushSubscription(owner_id=admin_row().id, endpoint=SUB["endpoint"], p256dh="B" * 87, auth="a" * 22))
         db.commit()
     assert client.post("/api/push/renew", json=dict(new, old_endpoint=SUB["endpoint"])).status_code == 200
     with SessionLocal() as db:

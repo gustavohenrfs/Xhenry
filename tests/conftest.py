@@ -110,3 +110,15 @@ def image_bytes(fmt: str = "JPEG", size=(64, 48), mode: str = "RGB", exif=None) 
     kwargs = {"exif": exif} if exif is not None else {}
     img.save(buf, fmt, **kwargs)
     return buf.getvalue()
+
+
+def admin_row():
+    """O admin (ADMIN_EMAIL) já desligado da sessão: serve de usuário logado em dependency_overrides."""
+    from app.database import SessionLocal
+    from app.services import ensure_admin
+
+    with SessionLocal() as db:
+        user = ensure_admin(db)
+        db.refresh(user)
+        db.expunge(user)
+        return user

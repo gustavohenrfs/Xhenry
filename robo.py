@@ -56,6 +56,17 @@ Cada rodada grava um batimento em sync_runs (kind=tweets, account_id NULL).
 O vigia do painel usa esse batimento para avisar quando o robô fica parado.
 Ghost/Search Ban é com o painel (/api/check), não com o robô.
 
+Multiusuário: coletores, Telegram e tudo acima valem só para as contas do admin
+(users.is_admin). As contas dos outros usuários aprovados são lidas pelo Apify
+(apify_round), com o token que cada um colou em Configurações
+(user_settings.apify_token), em toda passada do cron, independente da coleta
+automática do admin: cada conta no máximo a cada APIFY_INTERVAL_MIN (padrão 60)
+ou na hora quando o usuário aperta "Atualizar dados"
+(user_settings.apify_run_requested_at). Sem token, nada é lido e o painel dele
+mostra "Token do Apify em falta" (user_settings.apify_status = sem_token). Os
+alertas dessas contas vão só para o painel do dono (alerts_sent.owner_id: sininho,
+push e Alertas), nunca para o Telegram do admin.
+
 Fica na raiz do repositório do painel e lê o mesmo .env (DATABASE_URL,
 TELEGRAM_TOKEN ou TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID). Precisa de
 psycopg[binary] e anyx (pip install anyx && playwright install chromium).
@@ -65,6 +76,8 @@ psycopg[binary] e anyx (pip install anyx && playwright install chromium).
 Variáveis próprias (ambiente do cron):
 - ROBO_ENV_FILE: outro .env, se o usuário do cron não puder ler o do painel.
 - ROBO_STATE_DIR: onde ficam a trava e o estado (padrão ~/.xhenry-robo).
+- APIFY_ACTOR: ator do Apify que lê as timelines (padrão apidojo~tweet-scraper).
+- APIFY_INTERVAL_MIN: de quanto em quanto tempo cada conta é lida pelo Apify (60).
 """
 
 from __future__ import annotations
@@ -267,7 +280,10 @@ def parse_created_at(value: Any) -> datetime | None:
         try:
             posted = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:
-            return None
+            try:
+                posted = datetime.strptime(text, "%a %b %d %H:%M:%S %z %Y")
+            except ValueError:
+                return None
     if posted.tzinfo is None:
         posted = posted.replace(tzinfo=timezone.utc)
     return posted.astimezone(timezone.utc)
@@ -293,19 +309,19 @@ def tweet_text_of(tweet: Any) -> str | None:
 def tweet_metrics(tweet: Any) -> dict[str, int]:
     nested = pick(tweet, "public_metrics", "legacy", default={}) or {}
     likes = as_int(
-        pick(tweet, "like_count", "favorite_count", "likes", "favourites_count")
+        pick(tweet, "like_count", "favorite_count", "likes", "favourites_count", "likeCount")
         or pick(nested, "like_count", "favorite_count", "likes")
     )
     rts = as_int(
-        pick(tweet, "retweet_count", "repost_count", "retweets")
+        pick(tweet, "retweet_count", "repost_count", "retweets", "retweetCount")
         or pick(nested, "retweet_count", "repost_count")
     )
     replies = as_int(
-        pick(tweet, "reply_count", "replies") or pick(nested, "reply_count")
+        pick(tweet, "reply_count", "replies", "replyCount") or pick(nested, "reply_count")
     )
-    quotes = as_int(pick(tweet, "quote_count", "quotes") or pick(nested, "quote_count"))
-    bookmarks = as_int(pick(tweet, "bookmark_count", "bookmarks") or pick(nested, "bookmark_count"))
-    raw_views = pick(tweet, "view_count", "impression_count", "impressions") or pick(
+    quotes = as_int(pick(tweet, "quote_count", "quotes", "quoteCount") or pick(nested, "quote_count"))
+    bookmarks = as_int(pick(tweet, "bookmark_count", "bookmarks", "bookmarkCount") or pick(nested, "bookmark_count"))
+    raw_views = pick(tweet, "view_count", "impression_count", "impressions", "viewCount") or pick(
         nested, "view_count", "impression_count"
     )
     if raw_views is None:
@@ -453,24 +469,28 @@ def already_alerted(cur, key: str) -> bool:
     return cur.fetchone() is not None
 
 
-def mark_alerted(cur, key: str, kind: str, text: str) -> None:
+def mark_alerted(cur, key: str, kind: str, text: str, owner_id: int | None = None) -> None:
     cur.execute(
         """
-        INSERT INTO alerts_sent (dedupe_key, kind, detail, sent_at)
-        VALUES (%s, %s, %s, NOW())
+        INSERT INTO alerts_sent (owner_id, dedupe_key, kind, detail, sent_at)
+        VALUES (%s, %s, %s, %s, NOW())
         ON CONFLICT (dedupe_key) DO NOTHING
         """,
-        (key, kind, text[:500]),
+        (owner_id, key, kind, text[:500]),
     )
 
 
-def alert_once(cur, key: str, kind: str, text: str) -> bool:
-    """Envia e registra em alerts_sent; a mesma chave nunca sai duas vezes."""
+def alert_once(cur, key: str, kind: str, text: str, owner_id: int | None = None, telegram: bool = True) -> bool:
+    """Envia e registra em alerts_sent; a mesma chave nunca sai duas vezes.
+
+    owner_id = dono da conta (NULL nos alertas do sistema). telegram=False (contas de quem lê pelo
+    Apify): só registra, e o painel do dono mostra no sininho, no push e em Alertas.
+    """
     if already_alerted(cur, key):
         return False
-    if not send_telegram(text):
+    if telegram and not send_telegram(text):
         return False
-    mark_alerted(cur, key, kind, text)
+    mark_alerted(cur, key, kind, text, owner_id)
     return True
 
 
@@ -495,7 +515,7 @@ def views_drop(hoje: int, ontem: int) -> int | None:
     return round((1 - hoje / ontem) * 100)
 
 
-def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | None = None) -> bool:
+def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | None = None, telegram: bool = True) -> bool:
     now = now or datetime.now(BR_TZ)
     if now.hour < QUEDA_HORA:
         return False
@@ -517,7 +537,7 @@ def check_views_drop(cur, account: dict[str, Any], today: date, now: datetime | 
         f"📅 Ontem: {ontem}\n"
         f"🔻 Queda: {pct}%"
     )
-    sent = alert_once(cur, f"queda:{account['id']}:{today.isoformat()}", "queda", text)
+    sent = alert_once(cur, f"queda:{account['id']}:{today.isoformat()}", "queda", text, account.get("owner_id"), telegram)
     if sent:
         log.info("alerta queda @%s: %s -> %s (-%s%%)", username, ontem, hoje, pct)
     return sent
@@ -1016,13 +1036,16 @@ def load_collectors(cur, rest: timedelta | None = None) -> tuple[list[dict[str, 
 
 
 def load_accounts(cur, limit: int) -> list[dict[str, Any]]:
+    """Contas do admin (as únicas lidas pelos coletores), as coletadas há mais tempo primeiro."""
     cur.execute(
         """
-        SELECT id, username, display_name, followers_at
-        FROM x_accounts
-        WHERE is_active IS TRUE
-          AND COALESCE(is_archived, FALSE) IS FALSE
-        ORDER BY collected_at NULLS FIRST, id
+        SELECT a.id, a.owner_id, a.username, a.display_name, a.followers_at
+        FROM x_accounts a
+        JOIN users u ON u.id = a.owner_id
+        WHERE a.is_active IS TRUE
+          AND COALESCE(a.is_archived, FALSE) IS FALSE
+          AND u.is_admin IS TRUE
+        ORDER BY a.collected_at NULLS FIRST, a.id
         LIMIT %s
         """,
         (limit,),
@@ -1053,22 +1076,32 @@ def followers_due(account: dict[str, Any], now: datetime) -> bool:
 def read_account(cur, session: Any, account: dict[str, Any], midnight: datetime) -> int:
     """Lê uma conta monitorada pela sessão do coletor. Devolve os tweets de hoje gravados."""
     username = account["username"]
-    account_id = account["id"]
-    display = account.get("display_name") or username
-    today = midnight.date()
-
     if followers_due(account, datetime.now(timezone.utc)):
         followers = fetch_followers(session, username)
-        if followers is not None:
-            upsert_followers(cur, account_id, today, followers)
-            log.info("@%s — %s seguidores", username, followers)
-        else:
-            log.warning("@%s — seguidores não encontrados no perfil", username)
-        cur.execute("UPDATE x_accounts SET followers_at = NOW() WHERE id = %s", (account_id,))
+        save_followers(cur, account, midnight.date(), followers)
         pause()
+    return save_tweets(cur, account, fetch_timeline(session, username), midnight)
 
+
+def save_followers(cur, account: dict[str, Any], today: date, followers: int | None) -> None:
+    username = account["username"]
+    if followers is not None:
+        upsert_followers(cur, account["id"], today, followers)
+        log.info("@%s — %s seguidores", username, followers)
+    else:
+        log.warning("@%s — seguidores não encontrados no perfil", username)
+    cur.execute("UPDATE x_accounts SET followers_at = NOW() WHERE id = %s", (account["id"],))
+
+
+def save_tweets(cur, account: dict[str, Any], tweets: list[Any], midnight: datetime, telegram: bool = True) -> int:
+    """Grava os posts de hoje, avisa os níveis de views, refaz o dia e marca a conta como coletada."""
+    username = account["username"]
+    account_id = account["id"]
+    owner_id = account.get("owner_id")
+    display = account.get("display_name") or username
+    today = midnight.date()
     saved = 0
-    for tweet in fetch_timeline(session, username):
+    for tweet in tweets:
         tid = tweet_id_of(tweet)
         if not tid:
             continue
@@ -1096,12 +1129,213 @@ def read_account(cur, session: Any, account: dict[str, Any], midnight: datetime)
                 f"🔁 Retweets: {metrics['retweet_count']}\n"
                 f"🔗 Link do Post: {link}"
             )
-            if alert_once(cur, view_alert_key(account_id, tid, suffix), "viral", text):
+            if alert_once(cur, view_alert_key(account_id, tid, suffix), "viral", text, owner_id, telegram):
                 log.info("alerta views (%s) @%s tweet %s (%s)", suffix or "viral", username, tid, views)
     recompute_today(cur, account_id, today)
-    check_views_drop(cur, account, today)
+    check_views_drop(cur, account, today, telegram=telegram)
     mark_collected(cur, account_id)
     return saved
+
+
+# ---- Apify (contas de quem não é admin) ----
+
+APIFY_API = "https://api.apify.com/v2"
+APIFY_ACTOR_DEFAULT = "apidojo~tweet-scraper"
+APIFY_INTERVAL_DEFAULT = 60
+APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
+APIFY_PER_ACCOUNT = 20  # posts pedidos por conta (o mesmo TWEET_LIMIT dos coletores)
+APIFY_MAX_ACCOUNTS = 25  # contas por chamada; o resto vai na passada seguinte
+NO_APIFY_TOKEN = "Token do Apify em falta. Cole o seu em Configurações para o robô ler as suas contas."
+
+
+class ApifyError(Exception):
+    """Falha ao chamar o Apify; a mensagem vai para o painel do dono."""
+
+
+def apify_actor() -> str:
+    # Na URL da API o ator vai como "dono~nome"; aceita também "dono/nome".
+    return (os.getenv("APIFY_ACTOR") or APIFY_ACTOR_DEFAULT).strip().replace("/", "~")
+
+
+def apify_interval() -> timedelta:
+    return timedelta(minutes=env_int("APIFY_INTERVAL_MIN", APIFY_INTERVAL_DEFAULT, 5, 24 * 60))
+
+
+def apify_input(handles: list[str]) -> dict[str, Any]:
+    return {"twitterHandles": handles, "maxItems": APIFY_PER_ACCOUNT * len(handles), "sort": "Latest"}
+
+
+def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
+    """Roda o ator e devolve os itens do dataset (posts). Erros viram ApifyError com o motivo."""
+    url = f"{APIFY_API}/acts/{apify_actor()}/run-sync-get-dataset-items?timeout={APIFY_TIMEOUT - 10}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(apify_input(handles)).encode(),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=APIFY_TIMEOUT) as response:
+            body = json.loads(response.read().decode("utf-8") or "[]")
+    except urllib.error.HTTPError as exc:
+        reason = {
+            401: "o Apify recusou o token (401). Confira o token em Configurações.",
+            402: "a conta do Apify está sem crédito (402).",
+            403: "o Apify negou o acesso (403). O plano gratuito não roda esse ator pela API.",
+            404: f"ator {apify_actor()} não encontrado no Apify (404).",
+            408: "o Apify demorou demais (408). Tenta de novo na próxima passada.",
+            429: "limite de chamadas do Apify (429). Tenta de novo na próxima passada.",
+        }.get(exc.code, f"o Apify respondeu {exc.code}.")
+        raise ApifyError(reason) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise ApifyError(f"sem resposta do Apify ({type(exc).__name__}).") from exc
+    except ValueError as exc:
+        raise ApifyError("o Apify devolveu algo que não é JSON.") from exc
+    if not isinstance(body, list):
+        raise ApifyError("o Apify não devolveu a lista de posts.")
+    return [item for item in body if isinstance(item, dict)]
+
+
+def apify_author(item: dict[str, Any]) -> tuple[str, int | None]:
+    """(@ em minúsculas, seguidores) do autor do post."""
+    author = item.get("author") if isinstance(item.get("author"), dict) else {}
+    handle = pick(author, "userName", "username", "screen_name", default="") or ""
+    raw = pick(author, "followers", "followers_count", "followersCount")
+    return str(handle).lower(), (as_int(raw) if raw is not None else None)
+
+
+def apify_users(cur) -> list[dict[str, Any]]:
+    """Usuários aprovados que não são o admin e têm alguma conta ativa."""
+    cur.execute(
+        """
+        SELECT u.id, s.apify_token, s.apify_run_requested_at
+        FROM users u
+        LEFT JOIN user_settings s ON s.owner_id = u.id
+        WHERE u.is_approved IS TRUE
+          AND u.is_admin IS FALSE
+          AND EXISTS (
+              SELECT 1 FROM x_accounts a
+              WHERE a.owner_id = u.id AND a.is_active IS TRUE AND COALESCE(a.is_archived, FALSE) IS FALSE
+          )
+        ORDER BY u.id
+        """
+    )
+    return list(cur.fetchall())
+
+
+def apify_accounts(cur, owner_id: int, everything: bool) -> list[dict[str, Any]]:
+    """Contas do usuário para ler agora: todas com o botão, senão as que passaram do intervalo."""
+    cur.execute(
+        """
+        SELECT id, owner_id, username, display_name, followers_at
+        FROM x_accounts
+        WHERE owner_id = %s
+          AND is_active IS TRUE
+          AND COALESCE(is_archived, FALSE) IS FALSE
+          AND (%s OR collected_at IS NULL OR collected_at < NOW() - make_interval(mins => %s))
+        ORDER BY collected_at NULLS FIRST, id
+        LIMIT %s
+        """,
+        (owner_id, everything, int(apify_interval().total_seconds() // 60), APIFY_MAX_ACCOUNTS),
+    )
+    return list(cur.fetchall())
+
+
+def set_apify_status(cur, owner_id: int, status: str, detail: str | None) -> None:
+    """Resultado da última tentativa no painel do dono; também apaga o pedido do botão."""
+    cur.execute(
+        """
+        INSERT INTO user_settings (owner_id, impression_goal, apify_status, apify_detail, apify_checked_at)
+        VALUES (%s, 500, %s, %s, NOW())
+        ON CONFLICT (owner_id) DO UPDATE SET
+            apify_status = EXCLUDED.apify_status,
+            apify_detail = EXCLUDED.apify_detail,
+            apify_checked_at = NOW(),
+            apify_run_requested_at = NULL
+        """,
+        (owner_id, status, (detail or "")[:500] or None),
+    )
+
+
+def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str, Any]:
+    """Lê pelo Apify as contas vencidas de um usuário, numa chamada só. Devolve o resumo."""
+    owner_id = user["id"]
+    requested = user["apify_run_requested_at"] is not None
+    with conn.cursor() as cur:
+        accounts = apify_accounts(cur, owner_id, requested)
+    conn.commit()
+    if not accounts:
+        if requested:  # nada para ler (tudo arquivado): só fecha o pedido
+            with conn.cursor() as cur:
+                set_apify_status(cur, owner_id, "ok", "nenhuma conta ativa para ler")
+            conn.commit()
+        return {"owner": owner_id, "contas": 0}
+    token = (user["apify_token"] or "").strip()
+    day = midnight.date().isoformat()
+    if not token:
+        with conn.cursor() as cur:
+            set_apify_status(cur, owner_id, "sem_token", NO_APIFY_TOKEN)
+            alert_once(cur, f"apify:{owner_id}:sem_token:{day}", "apify", f"🔑 {NO_APIFY_TOKEN}", owner_id, telegram=False)
+            # Sem token a fila não anda; marca como vista para não reavisar a cada minuto.
+            for account in accounts:
+                mark_collected(cur, account["id"])
+        conn.commit()
+        log.info("apify: usuário %s sem token (%s contas esperando)", owner_id, len(accounts))
+        return {"owner": owner_id, "contas": 0, "erro": "sem_token"}
+    handles = [account["username"] for account in accounts]
+    try:
+        items = apify_fetch(token, handles)
+    except ApifyError as exc:
+        with conn.cursor() as cur:
+            set_apify_status(cur, owner_id, "erro", str(exc))
+            alert_once(cur, f"apify:{owner_id}:erro:{day}", "apify", f"⚠️ Leitura pelo Apify falhou: {exc}", owner_id, telegram=False)
+            for account in accounts:  # tenta de novo no próximo intervalo, não a cada minuto
+                mark_collected(cur, account["id"])
+        conn.commit()
+        log.warning("apify: usuário %s: %s", owner_id, exc)
+        return {"owner": owner_id, "contas": 0, "erro": str(exc)}
+    by_author: dict[str, list[dict[str, Any]]] = {}
+    followers: dict[str, int] = {}
+    for item in items:
+        handle, count = apify_author(item)
+        if not handle or not tweet_id_of(item):
+            continue  # {"noResults": true} e afins
+        by_author.setdefault(handle, []).append(item)
+        if count is not None:
+            followers[handle] = count
+    saved = 0
+    now = datetime.now(timezone.utc)
+    with conn.cursor() as cur:
+        for account in accounts:
+            handle = account["username"].lower()
+            if handle in followers and followers_due(account, now):
+                save_followers(cur, account, midnight.date(), followers[handle])
+            saved += save_tweets(cur, account, by_author.get(handle, []), midnight, telegram=False)
+        set_apify_status(cur, owner_id, "ok", f"{len(accounts)} contas lidas, {saved} posts de hoje")
+    conn.commit()
+    log.info("apify: usuário %s — %s contas, %s posts de hoje", owner_id, len(accounts), saved)
+    return {"owner": owner_id, "contas": len(accounts), "tweets": saved}
+
+
+def apify_round(connect, midnight: datetime) -> list[dict[str, Any]]:
+    """Todos os usuários do Apify, um de cada vez, cada um com o próprio token. Erro de um não para os outros."""
+    results = []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            try:
+                users = apify_users(cur)
+            except Exception as exc:  # painel antigo, sem as tabelas do multiusuário
+                conn.rollback()
+                log.warning("apify: sem as tabelas do multiusuário (%s); atualize o painel", type(exc).__name__)
+                return []
+        conn.commit()
+        for user in users:
+            try:
+                results.append(apify_user_round(conn, user, midnight))
+            except Exception:
+                conn.rollback()
+                log.exception("apify: usuário %s falhou", user["id"])
+    return results
 
 
 def run_pair(conn, anyx: Any, collector: dict[str, Any], account: dict[str, Any], midnight: datetime) -> tuple[str, int, str | None]:
@@ -1424,6 +1658,26 @@ def run_round() -> int:
         log.exception("conexão com o banco falhou")
         alert_offline("banco", exc)
         return 1
+
+    # Contas dos outros usuários pelo Apify: em paralelo com os coletores, toda passada do cron (cada
+    # conta respeita o próprio intervalo) e sem depender da coleta automática do admin.
+    connect = lambda: psycopg.connect(database_url(), row_factory=dict_row, connect_timeout=10)  # noqa: E731
+    apify = ThreadPoolExecutor(max_workers=1, thread_name_prefix="apify")
+    apify_job = apify.submit(apify_round, connect, midnight)
+    try:
+        return collectors_round(conn, started, midnight)
+    finally:
+        try:
+            apify_job.result()
+        except Exception:
+            log.exception("leitura pelo Apify falhou")
+        apify.shutdown()
+
+
+def collectors_round(conn, started: datetime, midnight: datetime) -> int:
+    """A rodada dos coletores (contas do admin), como sempre foi."""
+    import psycopg
+    from psycopg.rows import dict_row
 
     with conn:
         try:

@@ -1,11 +1,19 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores" };
+const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores", users: "Usuários" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
-  config: { allow_registration: false, password_reset: false }, resetToken: ""
+  config: { allow_registration: false, password_reset: false }, resetToken: "", invite: "", user: null, apify: null
 };
 const SESSION_EXPIRED = "Sua sessão expirou. Entre novamente.";
+const PENDING = "Seu acesso está aguardando aprovação do administrador.";
+// Multiusuário: o admin vê Coletores, robô e Usuários; os outros leem as contas pelo Apify. O CSS
+// esconde [data-admin-only] / [data-user-only] pelo <body data-role>; o papel da última visita já
+// pinta certo antes do /api/me responder.
+const ROLE_KEY = "user_role";
+const USER_KEY = "user_id";
+const ADMIN_TABS = ["collectors", "users"];
+try { const role = localStorage.getItem(ROLE_KEY); if (role) document.body.dataset.role = role; } catch { /* sem storage */ }
 let lineChart = null;
 let barChart = null;
 let mixChart = null;
@@ -118,8 +126,50 @@ function sessionExpired() {
 function logout() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem("dash_snapshot");
+  localStorage.removeItem(ROLE_KEY);
   location.reload();
 }
+function isAdmin() {
+  return state.user ? Boolean(state.user.is_admin) : document.body.dataset.role === "admin";
+}
+// Outra pessoa entrou neste navegador: nada do anterior (dashboard salvo, alertas vistos) passa adiante.
+function forgetUserData() {
+  ["dash_snapshot", "viral_seen_id", "viral_notified_id"].forEach((key) => localStorage.removeItem(key));
+  dashCache.clear();
+}
+function applyRole(user) {
+  state.user = user;
+  const role = user.is_admin ? "admin" : "user";
+  document.body.dataset.role = role;
+  try {
+    const last = localStorage.getItem(USER_KEY);
+    if (last && last !== String(user.id)) forgetUserData();
+    localStorage.setItem(USER_KEY, String(user.id));
+    localStorage.setItem(ROLE_KEY, role);
+  } catch { /* sem storage */ }
+  if (!user.is_admin && ADMIN_TABS.includes(state.tab)) setTab("dashboard");
+}
+// Tela de espera: cadastrado pelo convite, ainda sem a aprovação do admin. Confere sozinha a cada 30 s.
+let pendingTimer = 0;
+function showPending(user) {
+  const email = document.getElementById("pending-email");
+  if (user) email.textContent = user.email || "";
+  else api("/api/me").then((me) => { email.textContent = me.email || ""; }).catch(() => {});
+  showAuth(false);
+  document.getElementById("pending-screen").classList.remove("off");
+  clearInterval(pendingTimer);
+  pendingTimer = setInterval(() => checkApproval(false), 30000);
+}
+async function checkApproval(manual) {
+  try {
+    const me = await api("/api/me");
+    if (me.is_approved) { clearInterval(pendingTimer); location.reload(); }
+    else if (manual) toast("Ainda aguardando a aprovação.", "info");
+  } catch (error) {
+    if (manual && error.message !== SESSION_EXPIRED) toast(error.message || "Não conferiu agora.");
+  }
+}
+document.getElementById("pending-check").addEventListener("click", () => checkApproval(true));
 function showAuth(on) {
   document.getElementById("auth-modal").classList.toggle("off", !on);
 }
@@ -164,7 +214,8 @@ function authMessage(id, text) {
   el.classList.toggle("hidden", !text);
 }
 function setAuthMode(mode) {
-  if (mode === "register" && !state.config.allow_registration) mode = "login";
+  const canRegister = state.config.allow_registration || Boolean(state.invite);
+  if (mode === "register" && !canRegister) mode = "login";
   state.authMode = mode;
   const register = mode === "register";
   const reset = mode === "reset";
@@ -184,13 +235,14 @@ function setAuthMode(mode) {
   document.getElementById("forgot-link").classList.toggle("hidden", mode !== "login" || !state.config.password_reset);
   const sw = document.getElementById("auth-switch");
   sw.textContent = mode === "login" ? "Criar conta" : "Voltar para o login";
-  sw.classList.toggle("hidden", mode === "login" && !state.config.allow_registration);
+  sw.classList.toggle("hidden", mode === "login" && !canRegister);
   authMessage("auth-info", "");
   authMessage("auth-error", "");
 }
-async function loadConfig() {
+async function loadConfig(invite) {
   try {
-    state.config = Object.assign(state.config, await api("/api/config"));
+    const query = invite ? "?invite=" + encodeURIComponent(invite) : "";
+    state.config = Object.assign(state.config, await api("/api/config" + query));
   } catch (error) {
     // Sem config: fica o padrão fechado (sem cadastro, sem recuperação).
   }
@@ -206,6 +258,11 @@ async function apiResponse(path, options) {
   if (response.status === 401 && headers.has("Authorization")) {
     sessionExpired();
     throw new Error(SESSION_EXPIRED);
+  }
+  // 403 "pending": logado, mas o admin ainda não aprovou (ou revogou).
+  if (response.status === 403 && response.headers.get("X-Access") === "pending") {
+    showPending(state.user);
+    throw new Error(PENDING);
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -228,6 +285,7 @@ function setPeriod(period) {
   });
 }
 function setTab(tab) {
+  if (ADMIN_TABS.includes(tab) && !isAdmin()) tab = "dashboard";
   state.tab = tab;
   document.querySelectorAll(".nav-btn, .tab-btn[data-tab], .more-item").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   const moreBtn = document.getElementById("more-btn");
@@ -244,6 +302,7 @@ function setTab(tab) {
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
   if (tab === "collectors") loadCollectors();
+  if (tab === "users") loadUsers();
 }
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -622,14 +681,14 @@ function ring(done, total) {
 // Selos vermelhos nos ícones das abas: Dashboard = alertas de views não vistos (como o sininho);
 // Coletores = ligados de castigo ou com erro. A soma vai também para o ícone do app instalado
 // (barra de tarefas do Windows, tela de início do celular).
-const tabBadges = { alerts: 0, collectors: 0 };
+const tabBadges = { alerts: 0, collectors: 0, users: 0 };
 function paintTabBadge(name, count) {
   tabBadges[name] = count || 0;
   document.querySelectorAll('[data-badge="' + name + '"]').forEach((badge) => {
     badge.textContent = count > 9 ? "9+" : String(count || "");
     badge.classList.toggle("hidden", !count);
   });
-  const total = tabBadges.alerts + tabBadges.collectors;
+  const total = tabBadges.alerts + tabBadges.collectors + tabBadges.users;
   try {
     if (total && navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
     else if (!total && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
@@ -689,6 +748,156 @@ async function loadHealth() {
     document.getElementById("health-body").replaceChildren();  // tira o esqueleto de carregamento
   }
 }
+// Saúde da coleta e pedidos de acesso são do admin; quem lê pelo Apify vê o estado da leitura dele.
+function roleSideLoads() {
+  if (isAdmin()) { loadHealth(); loadUsersBadge(); } else loadApify();
+}
+function apifyIssue(apify) {
+  if (!apify.token_set) return ["Token do Apify em falta. Cole o seu em Configurações para o robô ler as suas contas.", false];
+  if (apify.status === "erro") return ["A última leitura pelo Apify falhou: " + (apify.detail || "erro") + "", true];
+  return null;
+}
+function apifyStatusText(apify) {
+  if (!apify.token_set) return "Sem token: o robô não lê as suas contas.";
+  if (apify.requested_at) return "Leitura pedida às " + stampBR(apify.requested_at) + ", aguardando o robô.";
+  if (!apify.status) return "Token salvo. A primeira leitura sai em até 1 minuto.";
+  const when = apify.checked_at ? stampBR(apify.checked_at) : "—";
+  if (apify.status === "erro") return "Última tentativa (" + when + ") falhou: " + (apify.detail || "erro");
+  return "Última leitura: " + when + (apify.detail ? " · " + apify.detail : "");
+}
+function paintApify(apify) {
+  state.apify = apify;
+  const issue = apifyIssue(apify);
+  const banner = document.getElementById("apify-banner");
+  banner.classList.toggle("hidden", !issue);
+  if (issue) {
+    document.getElementById("apify-banner-text").textContent = issue[0];
+    banner.classList.toggle("is-bad", issue[1]);
+  }
+  const status = document.getElementById("apify-status");
+  status.textContent = apifyStatusText(apify);
+  status.classList.toggle("text-amber-300", Boolean(issue));
+}
+async function loadApify() {
+  try { paintApify(await api("/api/apify")); } catch { /* o aviso só aparece quando dá para ler */ }
+}
+document.getElementById("apify-banner-go").addEventListener("click", () => {
+  setTab("settings");
+  setTimeout(() => document.getElementById("apify-token").focus(), 50);
+});
+
+// ---------- Usuários (só o admin): pedidos, acesso e convites ----------
+function userAvatar(user) {
+  const box = el("span", "user-avatar");
+  const url = String(user.avatar_url || "");
+  if (url.startsWith("data:") || url.startsWith("https://")) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "";
+    box.append(img);
+  } else box.textContent = (user.nome_exibicao || user.email || "?").slice(0, 1).toUpperCase();
+  return box;
+}
+function userCard(user, actions) {
+  const card = el("article", "glow rounded-2xl border border-neon/20 bg-card p-4");
+  const head = el("div", "user-head");
+  const who = el("div", "min-w-0");
+  who.append(el("p", "truncate font-medium text-white", user.nome_exibicao || user.email), el("p", "truncate text-xs text-mute", user.email));
+  head.append(userAvatar(user), who);
+  card.append(head);
+  if (user.is_admin) card.append(collectorLine("Papel", "Administrador (você)", false));
+  if (user.is_approved) {
+    card.append(collectorLine("Acesso desde", user.approved_at ? stampBR(user.approved_at) : "—", false));
+    card.append(collectorLine("Contas", String(user.accounts), false));
+  } else card.append(collectorLine("Pediu em", user.created_at ? stampBR(user.created_at) : "—", false));
+  if (actions.length) {
+    const row = el("div", "mt-4 flex flex-wrap gap-2");
+    row.append(...actions);
+    card.append(row);
+  }
+  return card;
+}
+const INVITE_STATES = { aberto: ["Aberto", "st-healthy"], usado: ["Usado", "st-none"], vencido: ["Vencido", "st-search_ban"] };
+function copyLink(link) {
+  if (!navigator.clipboard) { toast("Copie o link à mão.", "info"); return; }
+  navigator.clipboard.writeText(link).then(() => toast("Link copiado. Mande para a pessoa.")).catch(() => toast("Copie o link à mão.", "info"));
+}
+function inviteRow(invite) {
+  const row = el("div", "invite-row rounded-2xl border border-neon/20 bg-ink");
+  const head = el("div", "flex items-start justify-between gap-3");
+  const [label, style] = INVITE_STATES[invite.status] || INVITE_STATES.vencido;
+  head.append(el("p", "min-w-0 truncate text-sm text-white", invite.note || "Convite #" + invite.id),
+    el("span", "shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium " + style, label));
+  row.append(head);
+  const when = invite.status === "usado"
+    ? "Usado por " + (invite.used_by || "conta apagada") + (invite.used_at ? " em " + stampBR(invite.used_at) : "")
+    : (invite.status === "aberto" ? "Vence " : "Venceu ") + stampBR(invite.expires_at);
+  row.append(el("p", "mt-1 text-xs text-mute", when));
+  if (invite.link) {
+    const link = el("button", "invite-link", invite.link);
+    link.type = "button";
+    link.title = "Copiar link";
+    link.addEventListener("click", () => copyLink(invite.link));
+    const actions = el("div", "mt-2 flex flex-wrap gap-2");
+    actions.append(collectorButton("Copiar link", () => copyLink(invite.link)), collectorButton("Cancelar", () => cancelInvite(invite)));
+    row.append(link, actions);
+  }
+  return row;
+}
+async function userAction(path, method, done) {
+  try {
+    await api(path, { method });
+    toast(done);
+    await loadUsers();
+  } catch (error) { toast(error.message || "Não deu certo."); }
+}
+async function loadUsers() {
+  try {
+    const [users, invites] = await Promise.all([api("/api/admin/users"), api("/api/admin/invites")]);
+    paintTabBadge("users", users.pending.length);
+    const name = (user) => user.nome_exibicao || user.email;
+    document.getElementById("users-pending").replaceChildren(...(users.pending.length
+      ? users.pending.map((user) => userCard(user, [
+        collectorButton("Aprovar", () => userAction("/api/admin/users/" + user.id + "/approve", "POST", "Acesso liberado para " + name(user) + ".")),
+        collectorButton("Recusar", async () => {
+          if (await showConfirm("Recusar o pedido?", "O cadastro de " + name(user) + " é apagado. Para entrar depois, a pessoa precisa de um convite novo.")) {
+            userAction("/api/admin/users/" + user.id, "DELETE", "Pedido recusado.");
+          }
+        })
+      ]))
+      : [emptyState("users", "Nenhum pedido esperando", "Gere um convite e mande o link. Quem se cadastrar por ele aparece aqui para você aprovar.", "Gerar convite", newInvite)]));
+    document.getElementById("users-approved").replaceChildren(...users.approved.map((user) => userCard(user, user.is_admin ? [] : [
+      collectorButton("Revogar acesso", async () => {
+        if (await showConfirm("Tirar o acesso de " + name(user) + "?", "A pessoa sai na hora e volta para a tela de espera. As pastas e contas dela ficam guardadas.")) {
+          userAction("/api/admin/users/" + user.id + "/revoke", "POST", "Acesso revogado.");
+        }
+      })
+    ])));
+    document.getElementById("invite-list").replaceChildren(...(invites.length
+      ? invites.map(inviteRow)
+      : [el("p", "text-sm text-mute", "Nenhum convite gerado ainda.")]));
+  } catch (error) {
+    if (error.message !== SESSION_EXPIRED) toast(error.message || "Não leu os usuários.");
+  }
+}
+async function loadUsersBadge() {
+  try { paintTabBadge("users", (await api("/api/admin/users")).pending.length); } catch { /* selo fica como estava */ }
+}
+async function newInvite() {
+  const note = await showPrompt("Para quem é o convite? (opcional)");
+  if (note === null) return;
+  try {
+    const invite = await api("/api/admin/invites", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note: note.trim() || null }) });
+    copyLink(invite.link);
+    await loadUsers();
+  } catch (error) { toast(error.message || "Não gerou o convite."); }
+}
+async function cancelInvite(invite) {
+  if (!(await showConfirm("Cancelar este convite?", "O link para de funcionar na hora."))) return;
+  userAction("/api/admin/invites/" + invite.id, "DELETE", "Convite cancelado.");
+}
+document.getElementById("invite-new").addEventListener("click", newInvite);
+
 function chartOptions() {
   return {
     responsive: true,
@@ -1188,7 +1397,7 @@ async function load({ silent = false } = {}) {
     // Rotas com login que não dependem do período: no máximo uma vez a cada 30 s, não a cada clique.
     if (Date.now() - sideLoadedAt > 30000) {
       sideLoadedAt = Date.now();
-      loadHealth();
+      roleSideLoads();
       loadAlerts();
       checkViral();
     }
@@ -1198,6 +1407,7 @@ async function load({ silent = false } = {}) {
     startLive();
     if (!silent) prefetchPeriods();
   } catch (error) {
+    if (error.message === PENDING || error.message === SESSION_EXPIRED) return;
     if (!silent) toast(error.message || "Falha ao carregar.");
     else markLive(false);
   } finally {
@@ -1680,17 +1890,26 @@ cloakerForm.addEventListener("submit", async (event) => {
   }
 });
 syncCloakerControls();
+const SAVED_KEY = "Já salva (vazio mantém)";
+function paintKeyField(id, key, saved, empty) {
+  document.getElementById(id).placeholder = saved ? SAVED_KEY : empty;
+  document.querySelector('[data-clear-key="' + key + '"]').classList.toggle("hidden", !saved);
+}
 async function loadSettings() {
   try {
     const settings = await api("/api/settings");
     document.getElementById("goal").value = settings.impression_goal;
-    const tg = document.getElementById("tg-status");
-    tg.textContent = settings.telegram_ready
-      ? "Telegram: usa o bot do .env do VPS, o mesmo do robô."
-      : "Telegram: falta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS (os alertas e a recuperação de senha dependem dele).";
-    tg.classList.toggle("text-amber-300", !settings.telegram_ready);
-    loadRobo();
-    document.getElementById("xai-key").placeholder = settings.xai_key_set ? "Chave já salva" : "xai-...";
+    if (isAdmin()) {
+      const tg = document.getElementById("tg-status");
+      tg.textContent = settings.telegram_ready
+        ? "Telegram: usa o bot do .env do VPS, o mesmo do robô."
+        : "Telegram: falta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS (os alertas e a recuperação de senha dependem dele).";
+      tg.classList.toggle("text-amber-300", !settings.telegram_ready);
+      loadRobo();
+    } else paintApify(Object.assign({ token_set: settings.apify_token_set }, settings.apify));
+    paintKeyField("xai-key", "xai_api_key", settings.xai_key_set, "xai-...");
+    paintKeyField("x-token", "x_bearer_token", settings.x_token_set, "AAAA...");
+    paintKeyField("apify-token", "apify_token", settings.apify_token_set, "apify_api_...");
     const me = await api("/api/me");
     document.getElementById("profile-name").value = me.nome_exibicao || "";
     paintUser(me);
@@ -2134,17 +2353,38 @@ if (cropConfirm) {
     }, "image/jpeg", 0.9);
   });
 }
+// Chave em branco = mantém a salva; "Apagar" manda "" e o servidor apaga.
+const KEY_FIELDS = [["xai-key", "xai_api_key"], ["x-token", "x_bearer_token"], ["apify-token", "apify_token"]];
+async function putSettings(payload) {
+  return api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
 document.getElementById("settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const payload = { impression_goal: Number(document.getElementById("goal").value) };
-  const xai = document.getElementById("xai-key").value.trim();
-  if (xai) payload.xai_api_key = xai;
+  KEY_FIELDS.forEach(([id, key]) => {
+    const value = document.getElementById(id).value.trim();
+    if (value) payload[key] = value;
+  });
   try {
-    await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    document.getElementById("xai-key").value = "";
-    toast("Configuração salva.");
+    await putSettings(payload);
+    KEY_FIELDS.forEach(([id]) => { document.getElementById(id).value = ""; });
+    toast(payload.apify_token ? "Token do Apify salvo: a primeira leitura sai em até 1 minuto." : "Configuração salva.");
     await loadSettings();
+    if (payload.apify_token) loadApify();
   } catch (error) { toast(error.message || "Não salvou."); }
+});
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-clear-key]");
+  if (!button) return;
+  const key = button.dataset.clearKey;
+  const label = { xai_api_key: "a chave da xAI", x_bearer_token: "o token da API do X", apify_token: "o token do Apify" }[key];
+  if (!(await showConfirm("Apagar " + label + "?", "Fica sem chave salva até você colar outra."))) return;
+  try {
+    await putSettings({ [key]: "" });
+    toast("Apagado.");
+    await loadSettings();
+    if (key === "apify_token") loadApify();
+  } catch (error) { toast(error.message || "Não apagou."); }
 });
 document.getElementById("test-note").addEventListener("click", async () => {
   try {
@@ -2265,10 +2505,33 @@ document.getElementById("robo-interval").addEventListener("change", (event) => s
 const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô não está pegando os pedidos
 const ROBO_RUN_MS = 12 * 60000;     // uma rodada manual pode levar alguns minutos (um Chrome por coletor)
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function refreshByApify(btn) {
+  btn.textContent = "Pedindo ao Apify...";
+  let apify = await api("/api/apify/run", { method: "POST" });
+  paintApify(apify);
+  const started = Date.now();
+  while (apify.requested_at) {
+    // O robô pega o pedido em até 1 minuto; a chamada ao Apify leva de segundos a 2 minutos.
+    if (Date.now() - started > ROBO_RUN_MS) throw new Error("A leitura está demorando. Os dados aparecem sozinhos quando ela terminar.");
+    await wait(5000);
+    apify = await api("/api/apify");
+    paintApify(apify);
+    if (Date.now() - started > 20000) btn.textContent = "Lendo pelo Apify...";
+  }
+  await load();
+  if (apify.status === "ok") toast("Leitura feita: " + (apify.detail || "dados atualizados") + ".");
+  else toast("A leitura falhou: " + (apify.detail || "erro no Apify") + ".", "error");
+}
 document.getElementById("refresh-all").addEventListener("click", async () => {
   const btn = document.getElementById("refresh-all");
   const orig = btn.textContent;
   btn.disabled = true;
+  if (!isAdmin()) {
+    try { await refreshByApify(btn); } catch (error) { if (error.message !== PENDING) toast(error.message || "Falha ao atualizar."); }
+    btn.disabled = false;
+    btn.textContent = orig;
+    return;
+  }
   btn.textContent = "Chamando os coletores...";
   try {
     const asked = await api("/api/robo/run", { method: "POST" });
@@ -2293,6 +2556,10 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
   btn.disabled = false;
   btn.textContent = orig;
 });
+function clearInviteLink() {
+  state.invite = "";
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
 function clearResetLink() {
   state.resetToken = "";
   if (location.hash) history.replaceState(null, "", location.pathname + location.search);
@@ -2330,8 +2597,9 @@ document.getElementById("auth-form").addEventListener("submit", async (event) =>
       await api("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome: document.getElementById("auth-name").value, email, senha })
+        body: JSON.stringify({ nome: document.getElementById("auth-name").value, email, senha, invite: state.invite || null })
       });
+      clearInviteLink();
     }
     const session = await api("/api/login", {
       method: "POST",
@@ -2340,6 +2608,8 @@ document.getElementById("auth-form").addEventListener("submit", async (event) =>
     });
     localStorage.setItem(TOKEN_KEY, session.access_token);
     paintUser(session.user);
+    applyRole(session.user);
+    if (!session.user.is_approved) { showPending(session.user); return; }
     showAuth(false);
     setTab("dashboard");
     await load();
@@ -2407,6 +2677,22 @@ document.addEventListener("click", (e) => {
 });
 
 async function boot() {
+  // Link de convite do admin: /#invite=<token>. Abre o cadastro direto (sem login aberto neste navegador).
+  const invite = !token() && location.hash.match(/^#invite=([\w\-]+)$/);
+  if (invite) {
+    await loadConfig(invite[1]);
+    if (state.config.invite_valid) {
+      state.invite = invite[1];
+      setAuthMode("register");
+      authMessage("auth-info", "Convite aceito. Crie sua conta; o acesso abre quando o administrador aprovar.");
+    } else {
+      clearInviteLink();
+      setAuthMode("login");
+      authMessage("auth-error", "Este convite não vale mais. Peça um novo ao administrador.");
+    }
+    showAuth(true);
+    return;
+  }
   const configReady = loadConfig();
   // Link do Telegram: /#reset=<token>. No hash para o token não ir ao servidor nem aos logs.
   const reset = location.hash.match(/^#reset=([\w\-.]+)$/);
@@ -2432,10 +2718,15 @@ async function boot() {
   paintSnapshot();
   configReady.then(() => { if (!state.resetToken) setAuthMode("login"); });
   try {
-    const [user] = await Promise.all([api("/api/me"), load()]);
+    const loading = load();  // não rejeita: os erros ficam dentro de load()
+    const user = await api("/api/me");
     paintUser(user);
+    applyRole(user);
+    if (!user.is_approved) { showPending(user); return; }
+    roleSideLoads();
+    await loading;
   } catch (err) {
-    if (err.message === SESSION_EXPIRED) return;
+    if (err.message === SESSION_EXPIRED || err.message === PENDING) return;
     localStorage.removeItem(TOKEN_KEY);
     showAuth(true);
   }
@@ -2947,6 +3238,8 @@ const ICONS = {
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
   account: '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5M16 7l2.5 2.5M14 9l2 2"/>',
   refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
   theme: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/>'
 };
@@ -3000,7 +3293,7 @@ let liveStamp = null;
 let dashboardDirty = false;
 function startLive() {
   if (liveSource || !window.EventSource) return;
-  liveSource = new EventSource("/api/live");
+  liveSource = new EventSource("/api/live?token=" + encodeURIComponent(token()));
   liveSource.onopen = () => markLive(true);
   liveSource.onerror = () => { liveOk = false; paintLive(); };
   liveSource.onmessage = (event) => {
@@ -3011,7 +3304,7 @@ function startLive() {
     markLive(true);
     if (!before || !token()) return;
     if (stamp.data !== before.data) {
-      loadHealth();
+      roleSideLoads();
       if (state.tab === "dashboard" && !document.hidden) load({ silent: true });
       else dashboardDirty = true;  // recarrega quando o Dashboard voltar à tela
     }
@@ -3218,13 +3511,14 @@ function renderDrawer(account, detail) {
 }
 
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["collectors", "Coletores"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["settings", "Configurações"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["collectors", "Coletores"], ["users", "Usuários"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["settings", "Configurações"]];
+function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
 let paletteIndex = 0;
 let paletteCollectors = null;
 function paletteOpen() { return document.getElementById("palette").classList.contains("open"); }
 function paletteSource() {
-  const items = TAB_LIST.map(([tab, label], index) => ({ icon: tab, title: label, hint: "Aba · tecla " + (index + 1), run: () => setTab(tab) }));
+  const items = visibleTabs().map(([tab, label], index) => ({ icon: tab, title: label, hint: "Aba · tecla " + (index + 1), run: () => setTab(tab) }));
   items.push(
     { icon: "refresh", title: "Atualizar dados", hint: "Ação · tecla R", run: () => { setTab("dashboard"); document.getElementById("refresh-all").click(); } },
     { icon: "theme", title: currentTheme() === "light" ? "Usar tema escuro" : "Usar tema claro", hint: "Ação · tecla T", run: () => document.getElementById("theme-btn").click() }
@@ -3276,7 +3570,7 @@ function openPalette() {
   paletteIndex = 0;
   paintPalette();
   input.focus();
-  api("/api/collectors").then((list) => { paletteCollectors = list; if (paletteOpen()) paintPalette(); }).catch(() => {});
+  if (isAdmin()) api("/api/collectors").then((list) => { paletteCollectors = list; if (paletteOpen()) paintPalette(); }).catch(() => {});
 }
 function closePalette() {
   const palette = document.getElementById("palette");
@@ -3339,10 +3633,10 @@ document.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
   if (event.key === "/") { event.preventDefault(); openPalette(); }
   else if (drawerOpen()) return;
-  else if (/^[1-7]$/.test(key)) setTab(TAB_LIST[Number(key) - 1][0]);
+  else if (/^[1-9]$/.test(key) && visibleTabs()[Number(key) - 1]) setTab(visibleTabs()[Number(key) - 1][0]);
   else if (key === "t") document.getElementById("theme-btn").click();
   else if (key === "r") { setTab("dashboard"); document.getElementById("refresh-all").click(); }
-  else if (event.key === "?") toast("Atalhos: 1 a 7 trocam de aba, T troca o tema, R atualiza os dados, / ou Ctrl+K abre a busca.", "info");
+  else if (event.key === "?") toast("Atalhos: 1 a " + visibleTabs().length + " trocam de aba, T troca o tema, R atualiza os dados, / ou Ctrl+K abre a busca.", "info");
 });
 
 // ---------- puxar para atualizar (app instalado, no toque) ----------
@@ -3350,6 +3644,7 @@ document.addEventListener("keydown", (event) => {
 async function refreshCurrentTab() {
   if (state.tab === "dashboard") await load();
   else if (state.tab === "collectors") await loadCollectors();
+  else if (state.tab === "users") await loadUsers();
   else if (state.tab === "archived") await loadArchived();
   else if (state.tab === "settings") await loadSettings();
 }

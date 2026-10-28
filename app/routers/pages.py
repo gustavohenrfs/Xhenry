@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.config import INDEX, ROOT
-from app.live import hub, snapshot
+from app.database import get_db
+from app.live import hub, snapshot, view_for
+from app.routers.auth import approved_user, current_user
 from app.services import token_configured
 
 router = APIRouter()
@@ -57,16 +61,25 @@ def manifest() -> FileResponse:
     )
 
 
+def live_user(request: Request, token: str = "", db: Session = Depends(get_db)):
+    """Login do /api/live: o EventSource não manda cabeçalho, então o token vem em ?token=."""
+    header = request.headers.get("authorization", "")
+    raw = token or (header[7:] if header.lower().startswith("bearer ") else "")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=raw) if raw else None
+    return approved_user(current_user(creds, db))
+
+
 @router.get("/api/live")
-async def live(request: Request, once: bool = False) -> Response:
+async def live(request: Request, once: bool = False, user=Depends(live_user)) -> Response:
     """Painel ao vivo (app/live.py): eventos com os carimbos de dados, alertas e coletores.
 
     ?once=1 devolve só o carimbo atual em JSON (testes e diagnóstico).
     """
+    user_id, is_admin = user.id, bool(user.is_admin)
     if once:
-        return JSONResponse(await run_in_threadpool(snapshot))
+        return JSONResponse(view_for(await run_in_threadpool(snapshot), user_id, is_admin))
     return StreamingResponse(
-        hub.stream(request.is_disconnected),
+        hub.stream(request.is_disconnected, user_id, is_admin),
         media_type="text/event-stream",
         # X-Accel-Buffering: o nginx entrega cada evento na hora em vez de juntar num buffer.
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

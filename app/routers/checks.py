@@ -14,15 +14,17 @@ from sqlalchemy.orm import Session
 
 from app.config import ROOT
 from app.database import get_db
-from app.models import DEFAULT_TZ, AlertSent
-from app.routers.auth import current_user
+from app.models import DEFAULT_TZ, AlertSent, User
+from app.routers.auth import admin_user, approved_user
 from app.services import (
+    alerts_query,
     as_utc,
     ask_grok,
-    get_settings,
+    now_utc,
     send_telegram,
     settings_payload,
     telegram_creds,
+    user_settings,
     viral_item,
     viral_message,
     xai_key,
@@ -34,47 +36,60 @@ router = APIRouter()
 
 class SettingsIn(BaseModel):
     impression_goal: int | None = Field(default=None, ge=1, le=10_000_000)
-    xai_api_key: str | None = None
+    # Chaves: ausente = não mexe, "" = apaga, texto = grava.
+    xai_api_key: str | None = Field(default=None, max_length=500)
+    x_bearer_token: str | None = Field(default=None, max_length=500)
+    apify_token: str | None = Field(default=None, max_length=500)
 
 
-@router.get("/api/settings", dependencies=[Depends(current_user)])
-def read_settings(db: Session = Depends(get_db)) -> dict[str, Any]:
-    return settings_payload(get_settings(db))
+@router.get("/api/settings")
+def read_settings(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    return settings_payload(db, user)
 
 
-@router.put("/api/settings", dependencies=[Depends(current_user)])
-def write_settings(payload: SettingsIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    row = get_settings(db)
+@router.put("/api/settings")
+def write_settings(payload: SettingsIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    row = user_settings(db, user.id)
     if payload.impression_goal is not None:
         row.impression_goal = payload.impression_goal
-    if payload.xai_api_key:
-        row.xai_api_key = payload.xai_api_key.strip()
+    for field in ("xai_api_key", "x_bearer_token", "apify_token"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(row, field, value.strip() or None)
+    if payload.apify_token is not None:
+        # Token novo (ou apagado): o aviso antigo do robô não vale mais; com token, lê já.
+        row.apify_status = row.apify_detail = None
+        row.apify_run_requested_at = now_utc() if row.apify_token else None
     db.commit()
-    return settings_payload(row)
+    return settings_payload(db, user)
 
 
-@router.get("/api/alerts", dependencies=[Depends(current_user)])
-def recent_alerts(limit: int = Query(default=8, ge=1, le=50), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    """Últimos alertas enviados ao Telegram (painel, robô e vigia), do mais novo para o mais antigo."""
-    rows = db.scalars(select(AlertSent).order_by(AlertSent.sent_at.desc(), AlertSent.id.desc()).limit(limit)).all()
+@router.get("/api/alerts")
+def recent_alerts(
+    limit: int = Query(default=8, ge=1, le=50), user: User = Depends(approved_user), db: Session = Depends(get_db)
+) -> list[dict[str, Any]]:
+    """Últimos alertas do usuário (painel, robô e vigia), do mais novo para o mais antigo."""
+    rows = db.scalars(alerts_query(user).order_by(AlertSent.sent_at.desc(), AlertSent.id.desc()).limit(limit)).all()
     return [
         {"kind": row.kind, "sent_at": as_utc(row.sent_at).isoformat(), "text": row.detail or ""}
         for row in rows
     ]
 
 
-@router.get("/api/viral", dependencies=[Depends(current_user)])
-def viral_alerts(limit: int = Query(default=20, ge=1, le=50), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    """Sininho do topo: só os alertas de views (todos os níveis), do mais novo para o mais antigo."""
+@router.get("/api/viral")
+def viral_alerts(
+    limit: int = Query(default=20, ge=1, le=50), user: User = Depends(approved_user), db: Session = Depends(get_db)
+) -> list[dict[str, Any]]:
+    """Sininho do topo: só os alertas de views (todos os níveis) das contas do usuário."""
     rows = db.scalars(
-        select(AlertSent).where(AlertSent.kind == "viral").order_by(AlertSent.id.desc()).limit(limit)
+        select(AlertSent).where(AlertSent.kind == "viral", AlertSent.owner_id == user.id).order_by(AlertSent.id.desc()).limit(limit)
     ).all()
     return [viral_item(db, row) for row in rows]
 
 
-@router.post("/api/telegram/test", dependencies=[Depends(current_user)])
-def test_telegram(db: Session = Depends(get_db)) -> dict[str, bool]:
-    row = get_settings(db)
+@router.post("/api/telegram/test")
+def test_telegram(user: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, bool]:
+    row = user_settings(db, user.id)
     when = datetime.now(zone(DEFAULT_TZ)).strftime("%d/%m/%Y %H:%M")
     send_telegram(
         *telegram_creds(db),
@@ -83,10 +98,11 @@ def test_telegram(db: Session = Depends(get_db)) -> dict[str, bool]:
     return {"ok": True}
 
 
-@router.post("/api/posts/review", dependencies=[Depends(current_user)])
+@router.post("/api/posts/review")
 async def review_post(
     caption: str = Form(...),
     media: UploadFile | None = File(default=None),
+    user: User = Depends(approved_user),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     text = caption.strip()
@@ -94,9 +110,9 @@ async def review_post(
         raise HTTPException(400, "A legenda é obrigatória.")
     if len(text) > 2000:
         raise HTTPException(400, "Legenda acima de 2000 caracteres.")
-    key = xai_key(db)
+    key = xai_key(db, user)
     if not key:
-        raise HTTPException(503, "Defina a chave da xAI em Configurações ou em XAI_API_KEY.")
+        raise HTTPException(503, "Cole a sua chave da xAI em Configurações para usar o Grok.")
     image_uri = None
     tmp_path = None
     if media is not None and media.filename:

@@ -9,7 +9,8 @@
   navegadores inscritos no sininho, com o painel aberto ou não.
 - Se AUTO_CHECK_MINUTES > 0, verifica a saúde das contas nesse intervalo; o
   alerta de Ghost/Search Ban sai do check_handle (dispatch_alerts). Gasta cota
-  da API do X (3 chamadas por conta), por isso vem desligado.
+  da API do X (3 chamadas por conta), por isso vem desligado. Só as contas do
+  admin, com o token do .env.
 
 Desligue tudo com WATCHDOG=off. Pensado para um único worker, como no VPS;
 com mais de um, o dedupe de alerts_sent evita mensagem repetida.
@@ -27,9 +28,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, XAccount
+from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, User, XAccount
 from app.push import push_new_alerts
-from app.services import as_utc, check_handle, get_settings, now_utc, token_configured, try_send, zone
+from app.services import (
+    as_utc,
+    check_handle,
+    get_settings,
+    now_utc,
+    owned_accounts,
+    token_configured,
+    try_send,
+    zone,
+)
 
 log = logging.getLogger("xhenry")
 TICK_SECONDS = 60
@@ -92,9 +102,14 @@ def run_auto_check(db: Session, now: datetime | None = None) -> int:
     minutes = _env_int("AUTO_CHECK_MINUTES", 0)
     if not minutes or not token_configured():
         return 0
+    admin = db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id).limit(1))
+    if admin is None:
+        return 0
     cutoff = (now or now_utc()) - timedelta(minutes=minutes)
     accounts = db.scalars(
-        select(XAccount).where(XAccount.is_active.is_(True), XAccount.is_archived.is_(False)).order_by(XAccount.id)
+        owned_accounts(admin.id)
+        .where(XAccount.is_active.is_(True), XAccount.is_archived.is_(False))
+        .order_by(XAccount.id)
     ).all()
     due: list[str] = []
     for account in accounts:
@@ -104,7 +119,7 @@ def run_auto_check(db: Session, now: datetime | None = None) -> int:
     checked = 0
     for handle in due:
         try:
-            check_handle(db, handle, None)
+            check_handle(db, admin, handle, None)
             checked += 1
         except HTTPException as exc:
             # Token recusado ou ausente vale para todas: para e tenta no próximo ciclo.

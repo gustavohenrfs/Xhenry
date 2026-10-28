@@ -10,9 +10,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app.database import SessionLocal
+from app.routers.auth import current_user
 from app.models import DailyMetric, Folder, HealthStatus, TweetSample, XAccount
-from app.services import ensure_owner, period_window
+from app.services import ensure_admin, period_window
 from main import app
 
 BR = ZoneInfo("America/Sao_Paulo")
@@ -41,8 +43,13 @@ def test_invalid_period():
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
-        yield c
+    # Tudo do dashboard exige login aprovado: os testes entram como o admin.
+    app.dependency_overrides[current_user] = admin_row
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture(scope="module")
@@ -51,7 +58,7 @@ def folder(client):
     now = datetime.now(BR).replace(microsecond=0)
     yesterday = now - timedelta(days=1)
     with SessionLocal() as db:
-        row = Folder(owner_id=ensure_owner(db).id, name=f"Dash {uuid4().hex[:8]}", color="#FF2EC8")
+        row = Folder(owner_id=ensure_admin(db).id, name=f"Dash {uuid4().hex[:8]}", color="#FF2EC8")
         db.add(row)
         db.flush()
         a = XAccount(folder_id=row.id, username="dash_a", last_health_status=HealthStatus.HEALTHY)
@@ -271,7 +278,7 @@ def test_total_charts_start_at_first_post(client, folder):
 def test_account_detail_drawer(client, folder):
     from app.routers.auth import current_user
 
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     try:
         data = client.get(f"/api/accounts/{folder['a']}/detail?period=today").json()
         assert data["account"]["username"] == "dash_a" and data["account"]["views"] >= 150

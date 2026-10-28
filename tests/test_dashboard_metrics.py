@@ -8,9 +8,11 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app.database import SessionLocal
+from app.routers.auth import current_user
 from app.models import Folder, TweetSample, XAccount
-from app.services import ensure_owner, viral_message
+from app.services import ensure_admin, viral_message
 from main import app
 
 BR = ZoneInfo("America/Sao_Paulo")
@@ -27,8 +29,13 @@ def keys_of(value) -> set[str]:
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
-        yield c
+    # Tudo do dashboard exige login aprovado: os testes entram como o admin.
+    app.dependency_overrides[current_user] = admin_row
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +43,7 @@ def account_id(client):
     """Conta com dois posts de hoje: às 9h com poucas views e muito like, às 20h com muitas views."""
     today = datetime.now(BR).replace(minute=0, second=0, microsecond=0)
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name="Métricas", color="#FF2EC8")
+        folder = Folder(owner_id=ensure_admin(db).id, name="Métricas", color="#FF2EC8")
         db.add(folder)
         db.flush()
         account = XAccount(folder_id=folder.id, username="metricas")

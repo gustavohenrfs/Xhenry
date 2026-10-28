@@ -191,7 +191,7 @@ def w(tmp_path_factory):
     Base.metadata.drop_all(world.engine)
     Base.metadata.create_all(world.engine)
     with Session(world.engine) as db:
-        folder = Folder(owner_id=services.ensure_owner(db).id, name="Dinheiro", color="#FF2EC8")
+        folder = Folder(owner_id=services.ensure_admin(db).id, name="Dinheiro", color="#FF2EC8")
         db.add(folder)
         db.flush()
         for name in ("conta1", "conta2", "conta3", "conta4"):
@@ -485,3 +485,99 @@ def test_manual_round_in_parallel_reads_everything(w, monkeypatch):
     assert sorted(u for _, u in tl) == ["conta1", "conta2", "conta3", "conta4"]
     assert not w.overlap and w.max_live >= 2
     assert w.last_beat()[1]["manual"] is True
+
+
+# ---- Multiusuário: contas dos outros usuários pelo Apify ----
+
+def friend_with_account(w, approved=True):
+    """Usuário comum (não admin) com uma conta ativa. Devolve (id do usuário, id da conta)."""
+    from sqlalchemy.orm import Session
+
+    from app.models import Folder, User, XAccount
+
+    with Session(w.engine) as db:
+        user = User(email=f"amiga{len(w.ids)}@x.com", name="Amiga", is_approved=approved)
+        db.add(user)
+        db.flush()
+        folder = Folder(owner_id=user.id, name="Da amiga")
+        db.add(folder)
+        db.flush()
+        account = XAccount(folder_id=folder.id, username=f"amiga{len(w.ids)}")
+        db.add(account)
+        db.commit()
+        w.ids[account.username] = account.id
+        return user.id, account.id
+
+
+def apify_state(w, owner_id):
+    rows = w.q("select apify_status, apify_detail, apify_run_requested_at from user_settings where owner_id=:o", o=owner_id)
+    return rows[0] if rows else None
+
+
+def test_apify_without_token_says_it_is_missing(w, monkeypatch):
+    import robo
+
+    monkeypatch.setattr(robo, "apify_fetch", lambda *_a: pytest.fail("sem token não chama o Apify"))
+    pending_id, pending_account = friend_with_account(w, approved=False)
+    owner_id, account_id = friend_with_account(w)
+    w.sent.clear()
+    w.run()
+    status, detail, _ = apify_state(w, owner_id)
+    assert status == "sem_token" and "Token do Apify em falta" in detail
+    assert apify_state(w, pending_id) is None, "pendente não é lido"
+    assert all(user != f"amiga{n}" for _, user in w.timelines() for n in range(20)), "coletor nunca lê conta de amigo"
+    alerts = w.q("select owner_id, kind from alerts_sent where kind='apify'")
+    assert alerts == [(owner_id, "apify")]
+    assert not [m for m in w.sent if "Apify" in m], "aviso do amigo não vai para o Telegram do admin"
+    w.run()
+    assert w.q("select count(*) from alerts_sent where kind='apify'")[0][0] == 1, "um aviso por dia"
+
+
+def test_apify_reads_friend_accounts_with_their_token(w, monkeypatch):
+    import robo
+
+    owner_id = w.q("select owner_id from user_settings where apify_status='sem_token'")[0][0]
+    username, account_id = w.q("select username, id from x_accounts where owner_id=:o", o=owner_id)[0]
+    w.sql(f"update user_settings set apify_token='tok-amiga', apify_run_requested_at=now() where owner_id={owner_id}")
+    calls = []
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+
+    def fetch(token, handles):
+        calls.append((token, handles))
+        return [
+            {"id": "5551", "createdAt": posted, "text": "bombou", "viewCount": 12000, "likeCount": 30,
+             "author": {"userName": username.upper(), "followers": 4321}},
+            {"id": "5552", "createdAt": "Mon Jan 01 10:00:00 +0000 2024", "viewCount": 9,
+             "author": {"userName": username, "followers": 4321}},  # de outro dia: não grava
+            {"noResults": True},
+        ]
+
+    monkeypatch.setattr(robo, "apify_fetch", fetch)
+    w.sent.clear()
+    w.run()
+    assert calls == [("tok-amiga", [username])]
+    status, detail, requested = apify_state(w, owner_id)
+    assert status == "ok" and requested is None and "1 posts de hoje" in detail
+    assert w.q("select tweet_id, view_count from tweet_samples where account_id=:a", a=account_id) == [("5551", 12000)]
+    assert w.q("select followers_count from daily_metrics where account_id=:a", a=account_id) == [(4321,)]
+    viral = w.q("select owner_id, dedupe_key from alerts_sent where kind='viral' and dedupe_key like :k", k=f"viral:{account_id}:%")
+    assert viral == [(owner_id, f"viral:{account_id}:5551:bombando")]
+    assert not [m for m in w.sent if username in m], "alerta do amigo fica só no painel dele"
+    calls.clear()
+    w.run()
+    assert calls == [], "dentro do intervalo, sem pedido: não chama de novo"
+
+
+def test_apify_error_shows_on_the_panel(w, monkeypatch):
+    import robo
+
+    owner_id = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
+    w.sql(f"update user_settings set apify_run_requested_at=now() where owner_id={owner_id}")
+
+    def refuse(_token, _handles):
+        raise robo.ApifyError("o Apify recusou o token (401). Confira o token em Configurações.")
+
+    monkeypatch.setattr(robo, "apify_fetch", refuse)
+    w.run()
+    status, detail, requested = apify_state(w, owner_id)
+    assert status == "erro" and "401" in detail and requested is None

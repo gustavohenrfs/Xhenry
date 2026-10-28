@@ -10,16 +10,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import live
+from conftest import admin_row
 from app.database import SessionLocal
+from app.routers.pages import live_user
 from app.models import AlertSent, Collector, Folder, TweetSample, XAccount
-from app.services import ensure_owner
+from app.services import ensure_admin
 from main import app
 
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
-        yield c
+    app.dependency_overrides[live_user] = admin_row
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
 
 
 def stamp(client):
@@ -32,7 +38,7 @@ def test_stamps_change_only_for_what_changed(client):
     assert stamp(client) == first, "nada mudou, carimbo igual"
     tag = uuid4().hex[:6]
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name=f"Live {tag}")
+        folder = Folder(owner_id=ensure_admin(db).id, name=f"Live {tag}")
         db.add(folder)
         db.flush()
         account = XAccount(folder_id=folder.id, username=f"live_{tag}")
@@ -64,7 +70,7 @@ def test_stream_sends_first_stamp_then_stops_on_disconnect(monkeypatch):
             calls["n"] += 1
             return calls["n"] > 1  # cliente sai depois do primeiro evento
 
-        events = [chunk async for chunk in live.hub.stream(disconnected)]
+        events = [chunk async for chunk in live.hub.stream(disconnected, 1, True)]
         return events
 
     events = asyncio.run(run())

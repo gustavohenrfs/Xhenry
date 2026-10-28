@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app import services, watchdog
 from app.database import SessionLocal
 from app.models import AlertSent, SyncKind, SyncRun, SyncStatus
@@ -17,7 +18,7 @@ from main import app
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     try:
         with TestClient(app) as test_client:
             yield test_client
@@ -116,12 +117,12 @@ def test_health_counts_late_accounts_and_collectors(client):
     from uuid import uuid4
 
     from app.models import Collector, Folder, XAccount
-    from app.services import ensure_owner
+    from app.services import ensure_admin
 
     now = now_utc()
     tag = uuid4().hex[:6]
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name=f"Saude {tag}")
+        folder = Folder(owner_id=ensure_admin(db).id, name=f"Saude {tag}")
         db.add(folder)
         db.flush()
         db.add_all([

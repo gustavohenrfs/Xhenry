@@ -4,8 +4,10 @@ Um vigia só, compartilhado por todos os navegadores abertos, olha o banco a cad
 consulta só, com índices: o mesmo carimbo do cache do dashboard (escritas pela API, collected_at do
 robô, sync_runs), o último alerta e o último uso/teste de coletor. Quando um pedaço muda, cada
 navegador recebe {"data": …, "alerts": …, "collectors": …} e recarrega só o que mudou. Os valores são
-carimbos opacos (nada de dado de conta), por isso a rota é pública como o /api/dashboard. Um
-processo uvicorn só, como o resto do painel; sem ninguém conectado o vigia para.
+carimbos opacos (nada de dado de conta). A rota exige login (token em ?token=, o EventSource não manda
+cabeçalho) e cada um recebe o carimbo dos próprios alertas; o de coletores só o admin. O de dados é
+um só para todos: um recarregamento a mais é barato e não mostra nada de ninguém. Um processo uvicorn
+só, como o resto do painel; sem ninguém conectado o vigia para.
 """
 
 from __future__ import annotations
@@ -35,22 +37,32 @@ def _digest(*parts: Any) -> str:
     return hashlib.blake2b(repr(parts).encode(), digest_size=8).hexdigest()
 
 
-def snapshot() -> dict[str, str]:
-    """Carimbos de agora: dados do dashboard, alertas e coletores."""
+def snapshot() -> dict[str, Any]:
+    """Carimbos de agora: dados do dashboard, último alerta de cada dono e coletores."""
     with SessionLocal() as db:
         version = cache.data_version(db)
-        alerts, used, tested, paused = db.execute(
+        used, tested, paused = db.execute(
             select(
-                select(func.max(AlertSent.id)).scalar_subquery(),
                 select(func.max(Collector.last_used_at)).scalar_subquery(),
                 select(func.max(Collector.test_at)).scalar_subquery(),
                 select(func.count()).select_from(Collector).where(Collector.paused_until.is_not(None)).scalar_subquery(),
             )
         ).one()
+        alerts = dict(db.execute(select(AlertSent.owner_id, func.max(AlertSent.id)).group_by(AlertSent.owner_id)).all())
     return {
         "data": _digest(*version),
-        "alerts": _digest(alerts),
+        "alerts": alerts,
         "collectors": _digest(used, tested, paused, version[0]),
+    }
+
+
+def view_for(state: dict[str, Any], user_id: int, is_admin: bool) -> dict[str, str]:
+    """O que um navegador recebe: alertas só os dele (e os do sistema, para o admin)."""
+    alerts = state["alerts"]
+    return {
+        "data": state["data"],
+        "alerts": _digest(alerts.get(user_id), alerts.get(None) if is_admin else None),
+        "collectors": state["collectors"] if is_admin else "",
     }
 
 
@@ -76,7 +88,7 @@ class LiveHub:
             await asyncio.sleep(POLL_SECONDS)
         self.task = None
 
-    async def stream(self, disconnected) -> AsyncIterator[str]:
+    async def stream(self, disconnected, user_id: int, is_admin: bool) -> AsyncIterator[str]:
         self.listeners += 1
         if self.task is None or self.task.done():  # parado ou cancelado: liga de novo
             self.task = asyncio.create_task(self._watch())
@@ -86,8 +98,9 @@ class LiveHub:
             sent = None
             idle = 0.0
             while not await disconnected():
-                if self.state != sent:
-                    sent = self.state
+                view = view_for(self.state, user_id, is_admin)
+                if view != sent:
+                    sent = view
                     idle = 0.0
                     yield "data: " + json.dumps(sent) + "\n\n"
                 try:

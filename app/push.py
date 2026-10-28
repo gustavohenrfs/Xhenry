@@ -3,7 +3,7 @@
 O navegador se inscreve pelo sininho (/api/push/subscribe) e guarda a inscrição em
 push_subscriptions. O vigia (app/watchdog.py) chama push_new_alerts a cada minuto: o
 que o robo.py gravou em alerts_sent (kind=viral) depois de push_last_alert_id vai
-para todos os inscritos. A chave VAPID é gerada no primeiro uso e fica em
+para os navegadores do dono da conta (alerts_sent.owner_id = push_subscriptions.owner_id). A chave VAPID é gerada no primeiro uso e fica em
 app_settings; VAPID_PRIVATE_KEY no .env tem prioridade. O service worker
 (static/sw.js) recebe a mensagem e mostra a notificação com o logo.
 """
@@ -145,13 +145,15 @@ def push_new_alerts(db: Session) -> int:
     ).all()
     fresh = [row for row in pending if as_utc(row.sent_at) >= oldest_ok]
     rows = fresh[:MAX_PER_TICK]
-    payloads = [viral_payload(viral_item(db, row)) for row in rows]
+    payloads = [(row.owner_id, viral_payload(viral_item(db, row))) for row in rows]
     # Sem nada recente, pula os velhos de uma vez; senão para no último enviado e o resto sai depois.
     settings.push_last_alert_id = rows[-1].id if len(fresh) > MAX_PER_TICK else newest
     db.commit()
     sent = 0
     for sub in subs:
-        for payload in payloads:
+        for owner_id, payload in payloads:
+            if owner_id is None or owner_id != sub.owner_id:
+                continue  # cada um só recebe os alertas das próprias contas
             result = send_one(db, sub, payload)
             if result == "gone":
                 break

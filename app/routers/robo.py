@@ -3,6 +3,9 @@
 O robô roda no cron do VPS a cada minuto e lê estas opções em app_settings no começo de cada
 execução: com a coleta automática desligada, só roda quando há pedido do botão; ligada, roda
 quando a última rodada tem mais que o intervalo. Ao começar, ele apaga o pedido.
+
+Robô e coletores são só do admin. Os outros usuários leem pelo Apify com o próprio token: para eles
+há só /api/apify (estado da última leitura) e /api/apify/run (o "Atualizar dados" deles).
 """
 
 from __future__ import annotations
@@ -17,11 +20,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Collector, SyncKind, SyncRun
-from app.routers.auth import current_user
-from app.services import as_utc, get_settings, now_utc, selected_accounts
+from app.models import Collector, SyncKind, SyncRun, User
+from app.routers.auth import admin_user, approved_user
+from app.services import as_utc, get_settings, now_utc, selected_accounts, settings_payload, user_settings
 
-router = APIRouter(dependencies=[Depends(current_user)])
+router = APIRouter()
+user_router = APIRouter()
 
 ROBO_INTERVALS = (5, 10, 15, 30, 60, 120, 180, 360, 720, 1440)
 
@@ -64,12 +68,12 @@ def robo_payload(db: Session) -> dict[str, Any]:
     }
 
 
-@router.get("/api/robo")
+@router.get("/api/robo", dependencies=[Depends(admin_user)])
 def read_robo(db: Session = Depends(get_db)) -> dict[str, Any]:
     return robo_payload(db)
 
 
-@router.put("/api/robo")
+@router.put("/api/robo", dependencies=[Depends(admin_user)])
 def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     row = get_settings(db)
     if payload.interval_min is not None:
@@ -84,7 +88,7 @@ def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]
     return robo_payload(db)
 
 
-@router.post("/api/robo/run")
+@router.post("/api/robo/run", dependencies=[Depends(admin_user)])
 def request_run(db: Session = Depends(get_db)) -> dict[str, Any]:
     """Botão "Atualizar Dados": o robô pega o pedido na próxima passada do cron (até 1 min)."""
     row = get_settings(db)
@@ -93,14 +97,14 @@ def request_run(db: Session = Depends(get_db)) -> dict[str, Any]:
     return robo_payload(db)
 
 
-def collection_health(db: Session) -> dict[str, Any]:
+def collection_health(db: Session, admin: User) -> dict[str, Any]:
     """Cartão "Saúde da coleta": contas atrasadas e estado dos coletores (só contagens, nada de proxy)."""
     now = now_utc()
     payload = robo_payload(db)
     collectors = db.scalars(select(Collector)).all()
     benched = [row for row in collectors if row.is_active and row.paused_until and as_utc(row.paused_until) > now]
     free = [row for row in collectors if row.is_active and row not in benched]
-    accounts = selected_accounts(db, None)
+    accounts = selected_accounts(db, admin.id, None)
     # Cada rodada lê uma conta por coletor livre: a volta completa leva ceil(contas/coletores) intervalos.
     cycle = math.ceil(len(accounts) / max(1, len(free))) * payload["interval_min"]
     late_after = max(60, 2 * cycle)
@@ -139,5 +143,23 @@ def collection_health(db: Session) -> dict[str, Any]:
 
 
 @router.get("/api/robo/health")
-def read_health(db: Session = Depends(get_db)) -> dict[str, Any]:
-    return collection_health(db)
+def read_health(user: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    return collection_health(db, user)
+
+
+@user_router.get("/api/apify")
+def read_apify(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Estado da leitura pelo Apify (token definido, último resultado do robô, pedido pendente)."""
+    payload = settings_payload(db, user)
+    return {"token_set": payload["apify_token_set"], **payload["apify"]}
+
+
+@user_router.post("/api/apify/run")
+def request_apify_run(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """"Atualizar dados" de quem lê pelo Apify: o robô lê as contas dele no próximo minuto."""
+    row = user_settings(db, user.id)
+    if not (row.apify_token or "").strip():
+        raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
+    row.apify_run_requested_at = now_utc()
+    db.commit()
+    return read_apify(user, db)

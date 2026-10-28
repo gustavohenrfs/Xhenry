@@ -20,7 +20,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
+    select,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -104,6 +106,11 @@ class User(IntPK, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     # Vai dentro do token de login; trocar ou redefinir a senha incrementa e derruba as sessões antigas.
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Multiusuário: só o ADMIN_EMAIL é admin; quem entra por convite espera a aprovação dele.
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invited_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     folders: Mapped[list[Folder]] = relationship(
         back_populates="owner", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -136,6 +143,8 @@ class XAccount(IntPK, TimestampMixin, Base):
     )
 
     folder_id: Mapped[int] = mapped_column(ForeignKey("folders.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Mesmo dono da pasta, repetido aqui para o robo.py e os filtros não precisarem de join.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(15), nullable=False, index=True)
     x_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -341,6 +350,12 @@ class SyncRun(IntPK, Base):
 
 
 class AppSetting(IntPK, Base):
+    """Configuração do sistema (linha id=1): robô, VAPID e cursor do push.
+
+    impression_goal e xai_api_key ficaram aqui do tempo de um usuário só; hoje valem as de user_settings
+    (copiadas para o admin na primeira subida) e estas não são mais lidas.
+    """
+
     __tablename__ = "app_settings"
 
     telegram_token: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -356,12 +371,49 @@ class AppSetting(IntPK, Base):
     push_last_alert_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class UserSetting(IntPK, Base):
+    """Configurações de cada usuário: meta do dia, chaves próprias (xAI, X, Apify) e a leitura pelo Apify.
+
+    O robo.py lê as contas de quem não é admin pelo Apify, com o apify_token do dono, e grava aqui o
+    resultado da última tentativa (apify_status: ok, sem_token, erro) e apaga apify_run_requested_at.
+    """
+
+    __tablename__ = "user_settings"
+    __table_args__ = (UniqueConstraint("owner_id", name="uq_user_settings_owner"),)
+
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    impression_goal: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
+    xai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    x_bearer_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    apify_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    apify_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    apify_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    apify_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    apify_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Invite(IntPK, Base):
+    """Link de convite de uso único que o admin gera na aba Usuários."""
+
+    __tablename__ = "invites"
+    __table_args__ = (UniqueConstraint("token", name="uq_invites_token"),)
+
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PushSubscription(IntPK, Base):
     """Um navegador (celular ou computador) que aceitou as notificações do sininho."""
 
     __tablename__ = "push_subscriptions"
     __table_args__ = (UniqueConstraint("endpoint", name="uq_push_endpoint"),)
 
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     endpoint: Mapped[str] = mapped_column(String(2048), nullable=False)
     p256dh: Mapped[str] = mapped_column(String(200), nullable=False)
     auth: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -376,6 +428,8 @@ class AlertSent(IntPK, Base):
         Index("ix_alerts_sent_kind_id", "kind", "id"),
     )
 
+    # Dono da conta do alerta; NULL = alerta do sistema (robô parado, coletor), só o admin vê.
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     dedupe_key: Mapped[str] = mapped_column(String(160), nullable=False)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -390,3 +444,10 @@ class DayBaseline(IntPK, Base):
     metric_date: Mapped[date] = mapped_column(Date, nullable=False)
     day_avg: Mapped[int | None] = mapped_column(Integer, nullable=True)
     drop_alerted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+
+
+@event.listens_for(XAccount, "before_insert")
+def _account_owner(_mapper, connection, target: XAccount) -> None:
+    """Conta nova herda o dono da pasta (a rota já confere que a pasta é de quem está logado)."""
+    if target.owner_id is None and target.folder_id is not None:
+        target.owner_id = connection.scalar(select(Folder.owner_id).where(Folder.id == target.folder_id))

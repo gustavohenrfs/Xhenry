@@ -8,11 +8,12 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app import services
 from app.database import SessionLocal
 from app.models import DailyMetric, Folder, HealthCheck, HealthStatus, SyncKind, SyncRun, XAccount
 from app.routers.auth import current_user
-from app.services import derive_status, ensure_owner
+from app.services import derive_status, ensure_admin
 from main import app
 
 PROFILE = {"data": {"id": "42", "name": "Fulano", "username": "saude", "protected": False,
@@ -55,7 +56,7 @@ class FakeX:
         self.routes = {"profile": profile, "timeline": timeline, "search": search}
         self.calls: list[str] = []
 
-    def __call__(self, path, _params):
+    def __call__(self, path, _params, token=""):
         self.calls.append(path)
         if path.startswith("/users/by/username/"):
             return self.routes["profile"]
@@ -86,7 +87,7 @@ def account_id():
     with TestClient(app):
         pass
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name=f"Saúde {uuid4().hex[:8]}", color="#FF2EC8")
+        folder = Folder(owner_id=ensure_admin(db).id, name=f"Saúde {uuid4().hex[:8]}", color="#FF2EC8")
         db.add(folder)
         db.flush()
         account = XAccount(folder_id=folder.id, username="saude")
@@ -100,7 +101,7 @@ def account_id():
 def check(account_id: int) -> dict:
     with SessionLocal() as db:
         folder_id = db.get(XAccount, account_id).folder_id
-        return services.check_handle(db, "saude", folder_id)
+        return services.check_handle(db, admin_row(), "saude", folder_id)
 
 
 def test_healthy_check_persists_everything(x_api, telegram, account_id):
@@ -150,7 +151,7 @@ def test_rejected_token_is_502(x_api, account_id):
 
 def test_missing_token_is_503(monkeypatch):
     monkeypatch.delenv("X_BEARER_TOKEN", raising=False)
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     try:
         with TestClient(app) as client:
             resp = client.get("/api/check/qualquer")

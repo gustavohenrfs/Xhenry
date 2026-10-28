@@ -8,10 +8,11 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app.database import SessionLocal
 from app.models import DailyMetric, Folder, TweetSample, XAccount
 from app.routers.auth import current_user
-from app.services import accounts_for, ensure_owner
+from app.services import accounts_for, ensure_admin
 from main import app
 
 BR = ZoneInfo("America/Sao_Paulo")
@@ -19,7 +20,7 @@ BR = ZoneInfo("America/Sao_Paulo")
 
 @pytest.fixture(scope="module")
 def client():
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     try:
         with TestClient(app) as c:
             yield c
@@ -32,7 +33,7 @@ def account(client):
     """Conta numa pasta própria, com um post de hoje e dois dias de daily_metrics."""
     now = datetime.now(BR)
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name=f"Arquivo {now.timestamp()}", color="#FF2EC8")
+        folder = Folder(owner_id=ensure_admin(db).id, name=f"Arquivo {now.timestamp()}", color="#FF2EC8")
         db.add(folder)
         db.flush()
         row = XAccount(folder_id=folder.id, username="arquivar", display_name="<b>Arquivo</b>")
@@ -114,4 +115,4 @@ def test_readding_archived_handle_explains(client, account):
 def test_check_skips_archived(client, account):
     archive(client, account["id"])
     with SessionLocal() as db:
-        assert all(a.id != account["id"] for a in accounts_for(db, "arquivar", None))
+        assert all(a.id != account["id"] for a in accounts_for(db, ensure_admin(db).id, "arquivar", None))

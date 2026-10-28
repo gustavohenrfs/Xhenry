@@ -20,8 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import User
-from app.services import send_telegram, telegram_creds
+from app.models import Invite, User
+from app.services import admin_email, as_utc, now_utc, send_telegram, telegram_creds
 
 log = logging.getLogger("xhenry")
 router = APIRouter()
@@ -38,6 +38,8 @@ class RegisterIn(BaseModel):
     nome: str = Field(min_length=1, max_length=120)
     email: str = Field(min_length=3, max_length=320)
     senha: str = Field(min_length=8, max_length=128)
+    # Link de convite (#invite=…) gerado pelo admin na aba Usuários.
+    invite: str | None = Field(default=None, max_length=64)
 
 
 class LoginIn(BaseModel):
@@ -190,7 +192,12 @@ def public_user(user: Any) -> dict[str, Any]:
         "nome_exibicao": user.nome_exibicao or user.name,
         "avatar_url": user.avatar_url,
         "logo_url": user.logo_url,
+        "is_admin": bool(user.is_admin),
+        "is_approved": bool(user.is_approved),
     }
+
+
+PENDING = "Seu acesso está aguardando aprovação do administrador."
 
 
 def current_user(
@@ -208,30 +215,87 @@ def current_user(
     return user
 
 
+def approved_user(user: User = Depends(current_user)) -> User:
+    """Logado e aprovado pelo admin: a dependência de toda rota com dados. Pendente leva 403 "pending"
+    (o painel mostra a tela de espera)."""
+    if not user.is_approved:
+        raise HTTPException(403, PENDING, headers={"X-Access": "pending"})
+    return user
+
+
+def admin_user(user: User = Depends(approved_user)) -> User:
+    """Só o admin: Coletores, robô, Usuários, Telegram e verificação com o token do .env."""
+    if not user.is_admin:
+        raise HTTPException(403, "Só o administrador pode fazer isso.")
+    return user
+
+
+def open_invite(db: Session, token: str | None) -> Invite | None:
+    """Convite que ainda vale (existe, não foi usado, não venceu)."""
+    if not token:
+        return None
+    invite = db.scalar(select(Invite).where(Invite.token == token.strip()))
+    if invite is None or invite.used_at is not None or as_utc(invite.expires_at) < now_utc():
+        return None
+    return invite
+
+
+def new_request_message(user: User) -> str:
+    return (
+        "👤 Novo pedido de acesso no XHenry\n"
+        f"Nome: {user.nome_exibicao or user.name}\n"
+        f"Email: {user.email}\n"
+        "Aprove na aba Usuários do painel."
+    )
+
+
 @router.post("/api/register", status_code=201)
 def register(payload: RegisterIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    if not registration_open():
+    """Cadastro pelo link de convite (uso único). Quem entra fica pendente até o admin aprovar.
+
+    ALLOW_REGISTRATION=true abre o cadastro sem convite (porta de emergência para criar o admin).
+    """
+    invite = open_invite(db, payload.invite)
+    if payload.invite and invite is None:
+        raise HTTPException(403, "Convite inválido, já usado ou vencido. Peça um novo ao administrador.")
+    if invite is None and not registration_open():
         raise HTTPException(403, "Cadastro desativado. Peça acesso ao administrador.")
     email = normalize_email(payload.email)
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, "Já existe uma conta com esse email.")
+    is_admin = email == admin_email()
     user = User(
         email=email,
         name=payload.nome.strip(),
         nome_exibicao=payload.nome.strip(),
         senha_hash=hash_password(payload.senha),
+        is_admin=is_admin,
+        is_approved=is_admin,
+        approved_at=now_utc() if is_admin else None,
+        invited_by_id=invite.created_by_id if invite else None,
     )
     db.add(user)
+    db.flush()
+    if invite is not None:
+        invite.used_by_id, invite.used_at = user.id, now_utc()
     db.commit()
     db.refresh(user)
+    if not user.is_approved:
+        try:
+            send_telegram(*telegram_creds(db), new_request_message(user))
+        except HTTPException as exc:
+            log.warning("aviso de novo pedido não enviado: %s", exc.detail)
     return public_user(user)
 
 
 @router.get("/api/config")
-def public_config(db: Session = Depends(get_db)) -> dict[str, Any]:
-    """O que a tela de login pode oferecer. Pública: roda antes de entrar."""
+def public_config(invite: str | None = None, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """O que a tela de login pode oferecer. Pública: roda antes de entrar. ?invite= diz se o convite vale."""
     token, chat = telegram_creds(db)
-    return {"allow_registration": registration_open(), "password_reset": bool(token and chat)}
+    payload: dict[str, Any] = {"allow_registration": registration_open(), "password_reset": bool(token and chat)}
+    if invite is not None:
+        payload["invite_valid"] = open_invite(db, invite) is not None
+    return payload
 
 
 @router.post("/api/login")
@@ -322,6 +386,9 @@ def confirm_password_reset(payload: ResetConfirmIn, db: Session = Depends(get_db
 
 @router.delete("/api/me", status_code=204)
 def delete_me(user=Depends(current_user), db: Session = Depends(get_db)):
+    if user.is_admin:
+        # Apagaria em cascata as pastas e contas do admin e deixaria o painel sem ninguém para aprovar.
+        raise HTTPException(400, "O administrador não pode apagar a própria conta.")
     row = db.get(User, user.id)
     if row:
         db.delete(row)

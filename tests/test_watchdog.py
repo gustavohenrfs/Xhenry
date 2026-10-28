@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app import services, watchdog
 from app.database import SessionLocal
 from app.models import AlertSent, Folder, SyncKind, SyncRun, SyncStatus, XAccount
-from app.services import ensure_owner, now_utc
+from app.services import ensure_admin, now_utc
 from main import app
 
 
@@ -99,7 +99,7 @@ def test_auto_check_off_by_default(monkeypatch):
 
 def test_auto_check_only_stale_accounts(monkeypatch):
     with SessionLocal() as db:
-        folder = Folder(owner_id=ensure_owner(db).id, name="Vigia", color="#FF2EC8")
+        folder = Folder(owner_id=ensure_admin(db).id, name="Vigia", color="#FF2EC8")
         db.add(folder)
         db.flush()
         db.add_all([
@@ -112,7 +112,7 @@ def test_auto_check_only_stale_accounts(monkeypatch):
     checked: list[str] = []
     monkeypatch.setenv("AUTO_CHECK_MINUTES", "60")
     monkeypatch.setattr(watchdog, "token_configured", lambda: True)
-    monkeypatch.setattr(watchdog, "check_handle", lambda _db, handle, _folder: checked.append(handle))
+    monkeypatch.setattr(watchdog, "check_handle", lambda _db, _owner, handle, _folder: checked.append(handle))
     with SessionLocal() as db:
         watchdog.run_auto_check(db)
     assert "velha" in checked and "nunca" in checked

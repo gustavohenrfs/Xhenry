@@ -1245,3 +1245,45 @@ body.drawer-lock { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- Multiusuário ---------- */
+/* app.js põe <body data-role="admin|user"> depois do /api/me. Coletores, robô, Telegram e Usuários são
+   do admin; o aviso e o token do Apify, de quem lê pelo Apify. Sem papel ainda, o que é do admin some. */
+body:not([data-role="admin"]) [data-admin-only] { display: none !important; }
+body[data-role="admin"] [data-user-only] { display: none !important; }
+/* Sem o cartão Saúde da coleta, Interações e Melhor post dividem a linha (sem buraco na 3ª coluna). */
+@media (min-width: 1280px) { body:not([data-role="admin"]) #dash-trio { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.notice-banner:not(.hidden) {
+  display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+  padding: .8rem 1rem; border-radius: 1.25rem;
+  border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--fg);
+}
+.notice-banner.is-bad { border-color: var(--bad-line); background: var(--bad-bg); }
+.notice-ico { font-size: 1.1rem; line-height: 1; }
+
+/* Tela de espera: um pulso calmo enquanto o admin não aprova. */
+.pending-pulse { position: relative; width: 3.5rem; height: 3.5rem; margin: 1.5rem auto 1rem; }
+.pending-pulse::before, .pending-pulse span {
+  content: ""; position: absolute; inset: 0; border-radius: 999px; border: 2px solid var(--accent);
+}
+.pending-pulse::before { opacity: .35; animation: pending-ring 2.4s ease-out infinite; }
+.pending-pulse span { inset: .9rem; background: var(--accent); border: 0; box-shadow: 0 0 18px var(--accent); }
+@keyframes pending-ring { from { transform: scale(.55); opacity: .7; } to { transform: scale(1.35); opacity: 0; } }
+
+.user-head { display: flex; align-items: center; gap: .75rem; min-width: 0; }
+.user-avatar {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 2.5rem; height: 2.5rem; border-radius: 999px; overflow: hidden;
+  border: 1px solid rgb(var(--c-neon) / .4); color: var(--accent); font-size: .95rem;
+}
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.invite-row { padding: .75rem; }
+.invite-link {
+  display: block; width: 100%; margin-top: .5rem; padding: .55rem .75rem; border-radius: .85rem;
+  border: 1px dashed var(--line-strong); background: var(--field); color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem;
+  overflow-wrap: anywhere; text-align: left;
+}
+.invite-link:hover, .invite-link:focus-visible { border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .pending-pulse::before { animation: none; } }

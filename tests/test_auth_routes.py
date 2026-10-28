@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import admin_row
 from app.routers.auth import current_user
 from main import app
 
@@ -37,9 +38,25 @@ PROTECTED = [
     ("post", "/api/push/subscribe", {"endpoint": "https://push.example/abc", "keys": {"p256dh": "x" * 30, "auth": "y" * 10}}),
     ("post", "/api/push/unsubscribe", {"endpoint": "https://push.example/abc"}),
     ("post", "/api/push/test", {"endpoint": "https://push.example/abc"}),
+    # Multiusuário: as leituras que eram públicas agora são do usuário logado.
+    ("get", "/api/live?once=1", None),
+    ("get", "/api/accounts/archived", None),
+    ("get", "/api/dashboard?period=today", None),
+    ("get", "/api/suggestions", None),
+    ("get", "/api/folders", None),
+    ("post", "/api/refresh-all", None),
+    ("get", "/api/apify", None),
+    ("post", "/api/apify/run", None),
+    ("get", "/api/admin/users", None),
+    ("post", "/api/admin/users/1/approve", None),
+    ("post", "/api/admin/users/1/revoke", None),
+    ("delete", "/api/admin/users/1", None),
+    ("get", "/api/admin/invites", None),
+    ("post", "/api/admin/invites", {}),
+    ("delete", "/api/admin/invites/1", None),
 ]
 
-PUBLIC = ["/", "/health", "/sw.js", "/manifest.webmanifest", "/api/live?once=1", "/api/config", "/api/accounts/archived", "/api/dashboard?period=today", "/api/suggestions", "/api/folders"]
+PUBLIC = ["/", "/health", "/sw.js", "/manifest.webmanifest", "/api/config"]
 
 
 @pytest.fixture(scope="module")
@@ -84,7 +101,7 @@ def test_register_open_when_allowed(client, monkeypatch):
 
 
 def test_logged_in_can_create_and_delete_folder(client):
-    app.dependency_overrides[current_user] = lambda: object()
+    app.dependency_overrides[current_user] = admin_row
     try:
         created = client.post("/api/folders", json={"name": "Teste auth", "color": "#FF2EC8"})
         assert created.status_code == 201, created.text

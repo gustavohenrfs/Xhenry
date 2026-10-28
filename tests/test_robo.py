@@ -314,3 +314,67 @@ def test_view_alert_key_keeps_the_old_key_for_the_first_level():
     assert robo.view_alert_key(7, "123", "") == "viral:7:123"
     assert robo.view_alert_key(7, "123", "1m") == "viral:7:123:1m"
     assert robo.fmt_int(1234567) == "1.234.567"
+
+
+# ---- Apify ----
+
+APIFY_ITEM = {
+    "id": "1861",
+    "createdAt": "Fri Nov 24 17:49:36 +0000 2023",
+    "text": "bom dia",
+    "likeCount": 10, "retweetCount": 2, "replyCount": 3, "quoteCount": 1, "bookmarkCount": 4, "viewCount": 5000,
+    "author": {"userName": "Fulana", "followers": 1234},
+}
+
+
+def test_apify_item_parses_like_the_collectors():
+    assert robo.parse_created_at(APIFY_ITEM["createdAt"]) == datetime(2023, 11, 24, 17, 49, 36, tzinfo=timezone.utc)
+    assert robo.tweet_metrics(APIFY_ITEM) == {
+        "like_count": 10, "retweet_count": 2, "reply_count": 3, "quote_count": 1, "bookmark_count": 4, "view_count": 5000,
+    }
+    assert robo.tweet_id_of(APIFY_ITEM) == "1861"
+    assert robo.apify_author(APIFY_ITEM) == ("fulana", 1234)
+    assert robo.apify_author({"noResults": True}) == ("", None)
+
+
+def test_apify_input_and_actor(monkeypatch):
+    monkeypatch.delenv("APIFY_ACTOR", raising=False)
+    assert robo.apify_actor() == "apidojo~tweet-scraper"
+    monkeypatch.setenv("APIFY_ACTOR", "outro/ator")
+    assert robo.apify_actor() == "outro~ator"
+    assert robo.apify_input(["a", "b"]) == {"twitterHandles": ["a", "b"], "maxItems": 40, "sort": "Latest"}
+
+
+@pytest.mark.parametrize(("code", "text"), [(401, "recusou o token"), (402, "sem crédito"), (500, "respondeu 500")])
+def test_apify_errors_become_readable(monkeypatch, code, text):
+    import urllib.error
+
+    def refuse(req, timeout):
+        assert req.headers["Authorization"] == "Bearer tok" and "run-sync-get-dataset-items" in req.full_url
+        raise urllib.error.HTTPError(req.full_url, code, "x", {}, None)
+
+    monkeypatch.setattr(robo.urllib.request, "urlopen", refuse)
+    with pytest.raises(robo.ApifyError, match=text):
+        robo.apify_fetch("tok", ["fulana"])
+
+
+def test_apify_fetch_returns_items(monkeypatch):
+    import io
+    import json
+
+    class Answer(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    sent = {}
+
+    def answer(req, timeout):
+        sent["body"] = json.loads(req.data)
+        return Answer(json.dumps([APIFY_ITEM, "lixo"]).encode())
+
+    monkeypatch.setattr(robo.urllib.request, "urlopen", answer)
+    assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM]
+    assert sent["body"]["twitterHandles"] == ["fulana"]

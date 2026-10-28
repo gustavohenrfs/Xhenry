@@ -1,4 +1,4 @@
-"""Rotas de pastas, contas, métricas e refresh."""
+"""Rotas de pastas, contas, métricas e refresh. Tudo do usuário logado: de outro dono é 404."""
 
 from __future__ import annotations
 
@@ -12,20 +12,22 @@ from sqlalchemy.orm import Session
 
 from app.cache import cached_json
 from app.database import get_db
-from app.models import DEFAULT_TZ, Collector, Folder, FolderKind, XAccount
-from app.routers.auth import current_user
+from app.models import DEFAULT_TZ, Collector, Folder, FolderKind, User, XAccount
+from app.routers.auth import approved_user
 from app.services import (
+    NO_X_TOKEN,
     account_detail,
     archived_payload,
     build_suggestions,
     check_handle,
     dashboard,
-    ensure_owner,
     normalize_username,
     now_utc,
+    owned_account,
+    owned_folder,
     period_window,
     selected_accounts,
-    token_configured,
+    x_token,
 )
 
 router = APIRouter()
@@ -50,8 +52,10 @@ class AccountUpdate(BaseModel):
 
 
 @router.get("/api/folders")
-def list_folders(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    rows = db.scalars(select(Folder).where(Folder.is_archived.is_(False)).order_by(Folder.name)).all()
+def list_folders(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    rows = db.scalars(
+        select(Folder).where(Folder.owner_id == user.id, Folder.is_archived.is_(False)).order_by(Folder.name)
+    ).all()
     return [
         {
             "id": row.id,
@@ -65,11 +69,10 @@ def list_folders(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     ]
 
 
-@router.post("/api/folders", status_code=201, dependencies=[Depends(current_user)])
-def create_folder(payload: FolderIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+@router.post("/api/folders", status_code=201)
+def create_folder(payload: FolderIn, owner: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not payload.color.startswith("#") or len(payload.color) != 7:
         raise HTTPException(400, "Cor inválida. Use #RRGGBB.")
-    owner = ensure_owner(db)
     name = payload.name.strip()
     exists = db.scalar(select(Folder).where(Folder.owner_id == owner.id, Folder.name == name))
     if exists:
@@ -87,11 +90,11 @@ def create_folder(payload: FolderIn, db: Session = Depends(get_db)) -> dict[str,
     return {"id": folder.id, "name": folder.name, "kind": folder.kind.value, "color": folder.color}
 
 
-@router.patch("/api/folders/{folder_id}", dependencies=[Depends(current_user)])
-def update_folder(folder_id: int, payload: FolderIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    folder = db.get(Folder, folder_id)
-    if folder is None:
-        raise HTTPException(404, "Pasta não encontrada.")
+@router.patch("/api/folders/{folder_id}")
+def update_folder(
+    folder_id: int, payload: FolderIn, user: User = Depends(approved_user), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    folder = owned_folder(db, user.id, folder_id)
     name = payload.name.strip()
     exists = db.scalar(select(Folder).where(Folder.owner_id == folder.owner_id, Folder.name == name, Folder.id != folder.id))
     if exists:
@@ -101,20 +104,18 @@ def update_folder(folder_id: int, payload: FolderIn, db: Session = Depends(get_d
     return {"id": folder.id, "name": folder.name}
 
 
-@router.delete("/api/folders/{folder_id}", status_code=204, dependencies=[Depends(current_user)])
-def delete_folder(folder_id: int, db: Session = Depends(get_db)) -> Response:
-    folder = db.get(Folder, folder_id)
-    if folder is None:
-        raise HTTPException(404, "Pasta não encontrada.")
+@router.delete("/api/folders/{folder_id}", status_code=204)
+def delete_folder(folder_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> Response:
+    folder = owned_folder(db, user.id, folder_id)
     db.delete(folder)
     db.commit()
     return Response(status_code=204)
 
 
-@router.post("/api/accounts", status_code=201, dependencies=[Depends(current_user)])
-def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    folder = db.get(Folder, payload.folder_id)
-    if folder is None or folder.is_archived:
+@router.post("/api/accounts", status_code=201)
+def create_account(payload: AccountIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    folder = owned_folder(db, user.id, payload.folder_id)
+    if folder.is_archived:
         raise HTTPException(404, "Pasta não encontrada.")
     username = normalize_username(payload.username)
     exists = db.scalar(
@@ -124,11 +125,13 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
         raise HTTPException(409, "Essa conta está arquivada nesta pasta. Desarquive na aba Arquivadas.")
     if exists:
         raise HTTPException(409, "Essa conta já está na pasta.")
-    if db.scalar(select(Collector).where(Collector.handle == username)):
-        # O robô entra logado nos coletores; uma conta monitorada não pode ser um deles.
+    if user.is_admin and db.scalar(select(Collector).where(Collector.handle == username)):
+        # O robô entra logado nos coletores; uma conta monitorada não pode ser um deles. Só vale para o
+        # admin: os coletores são dele, e para os outros a resposta revelaria quais @ são coletores.
         raise HTTPException(400, f"@{username} é um coletor. Remova-o da aba Coletores antes de monitorar.")
     account = XAccount(
         folder_id=folder.id,
+        owner_id=user.id,
         username=username,
         display_name=(payload.display_name or "").strip() or None,
         timezone=DEFAULT_TZ,
@@ -139,21 +142,19 @@ def create_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[st
     return {"id": account.id, "folder_id": folder.id, "username": username, "warning": None, "check": None}
 
 
-@router.delete("/api/accounts/{account_id}", status_code=204, dependencies=[Depends(current_user)])
-def delete_account(account_id: int, db: Session = Depends(get_db)) -> Response:
-    account = db.get(XAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "Conta não encontrada.")
+@router.delete("/api/accounts/{account_id}", status_code=204)
+def delete_account(account_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> Response:
+    account = owned_account(db, user.id, account_id)
     db.delete(account)
     db.commit()
     return Response(status_code=204)
 
 
-@router.patch("/api/accounts/{account_id}", dependencies=[Depends(current_user)])
-def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
-    account = db.get(XAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "Conta não encontrada.")
+@router.patch("/api/accounts/{account_id}")
+def update_account(
+    account_id: int, payload: AccountUpdate, user: User = Depends(approved_user), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    account = owned_account(db, user.id, account_id)
     if payload.display_name is not None:
         account.display_name = payload.display_name.strip() or None
     if payload.is_archived is not None and payload.is_archived != account.is_archived:
@@ -166,24 +167,31 @@ def update_account(account_id: int, payload: AccountUpdate, db: Session = Depend
 
 
 @router.get("/api/accounts/archived")
-def list_archived(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
-    return archived_payload(db)
+def list_archived(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    return archived_payload(db, user.id)
 
 
-@router.get("/api/check/{handle}", dependencies=[Depends(current_user)])
+@router.get("/api/check/{handle}")
 def check_account(
     handle: str,
     folder_id: int | None = Query(default=None),
+    user: User = Depends(approved_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return check_handle(db, normalize_username(handle), folder_id)
+    if folder_id is not None:
+        owned_folder(db, user.id, folder_id)
+    return check_handle(db, user, normalize_username(handle), folder_id)
 
 
-@router.post("/api/check-all", dependencies=[Depends(current_user)])
-def check_all(folder_id: int | None = Query(default=None), db: Session = Depends(get_db)) -> dict[str, Any]:
-    if not token_configured():
-        raise HTTPException(503, "Defina X_BEARER_TOKEN no ambiente ou no .env ao lado do main.py.")
-    accounts = selected_accounts(db, folder_id)
+@router.post("/api/check-all")
+def check_all(
+    folder_id: int | None = Query(default=None), user: User = Depends(approved_user), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    if not x_token(db, user):
+        raise HTTPException(503, NO_X_TOKEN)
+    if folder_id is not None:
+        owned_folder(db, user.id, folder_id)
+    accounts = selected_accounts(db, user.id, folder_id)
     if len(accounts) > 30:
         raise HTTPException(400, "Máximo de 30 contas por verificação. Selecione uma pasta.")
     results = []
@@ -192,7 +200,7 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
         if account.username in seen:
             continue
         seen.add(account.username)
-        results.append(check_handle(db, account.username, folder_id))
+        results.append(check_handle(db, user, account.username, folder_id))
     return {"checked": len(results), "results": results}
 
 
@@ -200,9 +208,10 @@ def check_all(folder_id: int | None = Query(default=None), db: Session = Depends
 def refresh_all(
     period: str = Query(default="7d"),
     folder_id: int | None = Query(default=None),
+    user: User = Depends(approved_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    payload = dashboard(db, period, folder_id)
+    payload = dashboard(db, user.id, period, folder_id)
     payload["refreshed"] = len(payload.get("accounts") or [])
     return payload
 
@@ -212,31 +221,37 @@ def get_dashboard(
     request: Request,
     period: str = Query(default="7d"),
     folder_id: int | None = Query(default=None),
+    user: User = Depends(approved_user),
     db: Session = Depends(get_db),
 ) -> Response:
     # Cache em memória (app/cache.py) + ETag: o auto-refresh sem novidade volta 304, sem corpo.
-    body, etag = cached_json(db, ("dashboard", period, folder_id), lambda: dashboard(db, period, folder_id))
+    # O dono entra na chave: cada usuário tem o próprio dashboard.
+    body, etag = cached_json(
+        db, ("dashboard", user.id, period, folder_id), lambda: dashboard(db, user.id, period, folder_id)
+    )
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     return Response(body, media_type="application/json", headers=headers)
 
 
-@router.get("/api/accounts/{account_id}/detail", dependencies=[Depends(current_user)])
+@router.get("/api/accounts/{account_id}/detail")
 def get_account_detail(
     account_id: int,
     period: str = Query(default="7d"),
+    user: User = Depends(approved_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Gaveta da conta no Dashboard."""
-    return account_detail(db, account_id, period)
+    return account_detail(db, user.id, account_id, period)
 
 
 @router.get("/api/suggestions")
 def get_suggestions(
     period: str = Query(default="7d"),
     folder_id: int | None = Query(default=None),
+    user: User = Depends(approved_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     start, end = period_window(period)
-    return build_suggestions(db, selected_accounts(db, folder_id), start, end)
+    return build_suggestions(db, selected_accounts(db, user.id, folder_id), start, end)

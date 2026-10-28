@@ -21,8 +21,8 @@ import app.models  # registra tabelas no metadata
 from app.cache import ForgetOnWrite
 from app.config import ROOT
 from app.database import Base, SessionLocal, engine, load_env_file
-from app.routers import accounts, auth, checks, cloaker, collectors, pages, push, robo
-from app.services import ensure_owner, ensure_user_auth_columns, token_configured
+from app.routers import accounts, admin, auth, checks, cloaker, collectors, pages, push, robo
+from app.services import ensure_admin, ensure_user_auth_columns, token_configured
 from app.watchdog import watch_forever, watchdog_enabled
 
 load_env_file(ROOT / ".env")
@@ -37,7 +37,7 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_user_auth_columns()
     with SessionLocal() as db:
-        ensure_owner(db)
+        ensure_admin(db)
     log.info("token X: %s", "configurado" if token_configured() else "ausente")
     watcher = asyncio.create_task(watch_forever()) if watchdog_enabled() else None
     yield
@@ -74,6 +74,8 @@ app.include_router(checks.router)
 app.include_router(cloaker.router)
 app.include_router(collectors.router)
 app.include_router(robo.router)
+app.include_router(robo.user_router)
+app.include_router(admin.router)
 app.include_router(push.router)
 app.include_router(push.public_router)
 app.include_router(pages.router)
