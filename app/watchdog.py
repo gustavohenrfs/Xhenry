@@ -36,6 +36,7 @@ from app.services import (
     get_settings,
     now_utc,
     owned_accounts,
+    robot_interval,
     token_configured,
     try_send,
     zone,
@@ -86,7 +87,7 @@ def check_silence(db: Session, now: datetime | None = None) -> bool:
     if pending is not None and now - as_utc(pending) < PENDING_GRACE:
         return False  # acabou de religar ou de pedir coleta: o robô pega no próximo minuto
     quiet = now - last
-    if quiet <= silence_limit(settings.robo_interval_min):
+    if quiet <= silence_limit(robot_interval(db, settings)):
         return False
     when = last.astimezone(zone(DEFAULT_TZ)).strftime("%d/%m/%Y %H:%M")
     text = (

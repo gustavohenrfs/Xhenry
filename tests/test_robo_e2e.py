@@ -581,3 +581,108 @@ def test_apify_error_shows_on_the_panel(w, monkeypatch):
     w.run()
     status, detail, requested = apify_state(w, owner_id)
     assert status == "erro" and "401" in detail and requested is None
+
+
+# ---- Fase 2: o admin lê pelo Apify primeiro; coletores só de reserva ----
+
+def admin_id(w):
+    return w.q("select id from users where is_admin is true order by id limit 1")[0][0]
+
+
+def admin_token(w, token):
+    owner = admin_id(w)
+    if w.q("select count(*) from user_settings where owner_id=:o", o=owner)[0][0] == 0:
+        w.sql(f"insert into user_settings (owner_id, impression_goal) values ({owner}, 500)")
+    value = "NULL" if token is None else f"'{token}'"
+    w.sql(f"update user_settings set apify_token={value}, apify_checked_at=NULL, apify_status=NULL where owner_id={owner}")
+
+
+def admin_items(w, views=700):
+    """Resposta do Apify para as contas do admin: um post de hoje por conta, com seguidores."""
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    return [{"id": f"77{n}", "createdAt": posted, "text": "via apify", "viewCount": views, "likeCount": 3,
+             "retweetCount": 1, "replyCount": 2, "quoteCount": 1, "bookmarkCount": 4,
+             "author": {"userName": name, "followers": 5000 + n}}
+            for n, name in enumerate(("conta1", "conta2", "conta3", "conta4"))]
+
+
+def test_admin_reads_by_apify_and_collectors_wait(w, monkeypatch):
+    import robo
+
+    due_round(w)
+    admin_token(w, "tok-admin")
+    calls = []
+
+    def fetch(token, handles):
+        calls.append((token, sorted(handles)))
+        return admin_items(w) if token == "tok-admin" else []
+
+    monkeypatch.setattr(robo, "apify_fetch", fetch)
+    w.sent.clear()
+    w.run()
+    assert ("tok-admin", ["conta1", "conta2", "conta3", "conta4"]) in calls
+    assert not w.opens(), "com o Apify funcionando nenhum coletor abre"
+    status, stats = w.last_beat()
+    assert status == "ok" and stats["via"] == "apify" and stats["contas"] == 4
+    row = w.q("select view_count, like_count, retweet_count, reply_count, quote_count, bookmark_count "
+              "from tweet_samples where account_id=:a and tweet_id='770'", a=w.ids["conta1"])
+    assert row == [(700, 3, 1, 2, 1, 4)], "todas as métricas, como os coletores"
+    assert w.q("select followers_count from daily_metrics where account_id=:a and metric_date=current_date",
+               a=w.ids["conta1"]) == [(5000,)]
+    assert [m for m in w.sent if "via apify" not in m and "Viralizando" in m or "viralizando" in m.lower()], \
+        "alerta de views do admin vai para o Telegram"
+    calls.clear()
+    w.run()
+    assert not [c for c in calls if c[0] == "tok-admin"] and not w.opens(), "dentro dos 30 min: nem Apify nem coletores"
+
+
+def test_refresh_button_uses_apify_right_away(w, monkeypatch):
+    import robo
+
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or admin_items(w, views=10))
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.run()
+    assert "tok-admin" in calls and not w.opens()
+    assert w.last_beat()[1]["manual"] is True and w.last_beat()[1]["via"] == "apify"
+    assert w.q("select robo_run_requested_at from app_settings where id=1")[0][0] is None
+
+
+def test_zero_posts_is_not_a_failure(w, monkeypatch):
+    import robo
+
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [{"noResults": True}])
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.run()
+    assert not w.opens(), "conta sem post hoje não chama os coletores"
+    assert w.last_beat()[1]["via"] == "apify"
+
+
+def test_collectors_take_over_when_apify_fails(w, monkeypatch):
+    import robo
+
+    def refuse(token, handles):
+        raise robo.ApifyError("a conta do Apify está sem crédito (402).")
+
+    monkeypatch.setattr(robo, "apify_fetch", refuse)
+    due_round(w)
+    w.sql(f"update user_settings set apify_checked_at = now() - interval '2 hours' where owner_id={admin_id(w)}")
+    w.sent.clear()
+    w.run()
+    read = sorted(u for _, u in w.timelines())
+    assert read == ["conta1", "conta2", "conta3", "conta4"], "na falha, os coletores leem tudo na mesma passada"
+    status, stats = w.last_beat()
+    assert stats["via"] == "coletores" and "402" in stats["apify_erro"]
+    assert w.q("select apify_status from user_settings where owner_id=:o", o=admin_id(w)) == [("erro",)]
+    assert [m for m in w.sent if m.startswith("⚠️ Apify falhou")], "avisa no Telegram do admin"
+
+
+def test_without_admin_token_collectors_work_as_before(w, monkeypatch):
+    import robo
+
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: pytest.fail("sem token do admin") if token is None else [])
+    admin_token(w, None)
+    due_round(w)
+    w.run()
+    assert w.opens(), "sem Apify, os coletores seguem o próprio intervalo"
+    assert w.last_beat()[1]["via"] == "coletores"

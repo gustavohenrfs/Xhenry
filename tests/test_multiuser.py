@@ -298,3 +298,45 @@ def test_admin_takes_over_the_legacy_owner():
         assert admin.is_admin and admin.is_approved
         db.delete(db.get(PushSubscription, sub_id))
         db.commit()
+
+
+def test_admin_apify_interval_and_token_request_a_read(client):
+    admin = admin_headers()
+    try:
+        robo = client.get("/api/robo", headers=admin).json()
+        assert robo["apify"]["interval_min"] == 30 and 15 in robo["apify"]["intervals"]
+        assert client.put("/api/robo", json={"apify_interval_min": 5}, headers=admin).status_code == 400, "abaixo de 15 min não"
+        assert client.put("/api/robo", json={"apify_interval_min": 60}, headers=admin).json()["apify"]["interval_min"] == 60
+        with SessionLocal() as db:
+            get_settings(db).robo_run_requested_at = None
+            db.commit()
+        saved = client.put("/api/settings", json={"apify_token": "tok-admin"}, headers=admin).json()
+        assert saved["apify_token_set"] is True and saved["apify"]["requested_at"] is None
+        robo = client.get("/api/robo", headers=admin).json()
+        assert robo["apify"]["active"] is True and robo["requested_at"], "token novo do admin: o robô lê já"
+        health = client.get("/api/robo/health", headers=admin).json()
+        assert health["late_after_min"] == 120, "pelo Apify a volta é um intervalo só (2 x 60)"
+    finally:
+        client.put("/api/settings", json={"apify_token": ""}, headers=admin)
+        client.put("/api/robo", json={"apify_interval_min": 30}, headers=admin)
+
+
+def test_watchdog_waits_the_apify_interval(monkeypatch):
+    from app import watchdog
+
+    sent: list[str] = []
+    monkeypatch.setattr(watchdog, "try_send", lambda db, key, kind, text: sent.append(text) or True)
+    with SessionLocal() as db:
+        admin = ensure_admin(db)
+        settings = get_settings(db)
+        settings.robo_enabled, settings.robo_interval_min, settings.apify_interval_min = True, 5, 60
+        settings.robo_run_requested_at = None
+        row = services.user_settings(db, admin.id)
+        row.apify_token = "tok"
+        db.commit()
+        now = datetime.now(timezone.utc)
+        monkeypatch.setattr(watchdog, "last_robot_beat", lambda _db: now - timedelta(minutes=40))
+        assert watchdog.check_silence(db, now) is False, "40 min sem batimento é normal com Apify a cada 60"
+        row.apify_token = None
+        db.commit()
+        assert watchdog.check_silence(db, now) is True, "só com coletores (5 min), 40 min é robô parado"

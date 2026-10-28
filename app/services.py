@@ -94,6 +94,7 @@ def ensure_user_auth_columns() -> None:
             "robo_run_requested_at": kind,
             "vapid_private_key": "TEXT",
             "push_last_alert_id": "INTEGER",
+            "apify_interval_min": "INTEGER NOT NULL DEFAULT 30",
         }
         for column, ddl in added.items():
             if column not in setting_cols:
@@ -217,6 +218,25 @@ def backfill_owners(db: Session, admin: User) -> None:
 
 def admin_user_id(db: Session) -> int | None:
     return db.scalar(select(User.id).where(User.is_admin.is_(True)).order_by(User.id).limit(1))
+
+
+def admin_apify_active(db: Session) -> bool:
+    """O admin tem token do Apify: as contas dele são lidas pelo Apify e os coletores ficam de reserva."""
+    token = db.scalar(
+        select(UserSetting.apify_token)
+        .join(User, User.id == UserSetting.owner_id)
+        .where(User.is_admin.is_(True))
+        .order_by(User.id)
+        .limit(1)
+    )
+    return bool((token or "").strip())
+
+
+def robot_interval(db: Session, settings: AppSetting) -> int:
+    """Minutos entre as rodadas do robô nas contas do admin: o do Apify quando ele está ativo."""
+    if admin_apify_active(db):
+        return settings.apify_interval_min or 30
+    return settings.robo_interval_min
 
 
 def normalize_username(value: str) -> str:

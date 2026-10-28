@@ -21,9 +21,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=16">
+  <link rel="stylesheet" href="/static/css/styles.css?v=17">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
-  <script defer src="/static/js/app.js?v=33"></script>
+  <script defer src="/static/js/app.js?v=34"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -245,6 +245,10 @@
           <div id="archived-accounts" class="grid gap-3 lg:grid-cols-2"></div>
         </section>
         <section id="pane-collectors" class="pane space-y-4">
+          <div id="apify-standby" class="notice-banner is-ok hidden" role="status">
+            <span class="notice-ico" aria-hidden="true">⚡</span>
+            <p id="apify-standby-text" class="min-w-0 flex-1 text-sm"></p>
+          </div>
           <p class="text-sm text-mute">Contas descartáveis que o robô usa para ler as timelines das contas monitoradas. Cada rodada lê uma conta por coletor, cada uma saindo pelo proxy do seu coletor. Nunca use aqui uma conta que gera dinheiro.</p>
           <form id="collector-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-4">
             <div class="flex flex-wrap gap-2">
@@ -364,7 +368,7 @@
           <form id="settings-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
             <h2 class="font-display text-2xl text-white">Configurações</h2>
             <p id="tg-status" data-admin-only class="rounded-2xl border border-neon/20 bg-ink px-3 py-3 text-sm text-mute">Telegram: lendo…</p>
-            <div data-user-only class="space-y-3">
+            <div class="space-y-3">
               <div class="flex items-center justify-between gap-3">
                 <label class="text-sm text-mute" for="apify-token">Token do Apify (leitura das suas contas)</label>
                 <button type="button" data-clear-key="apify_token" class="hidden text-xs text-neon hover:underline">Apagar</button>
@@ -397,10 +401,12 @@
               </span>
               <input id="robo-enabled" type="checkbox" class="h-5 w-5 shrink-0 accent-[#FF2EC8]">
             </label>
-            <label class="block text-sm text-mute" for="robo-interval">Coletar a cada</label>
+            <label class="block text-sm text-mute" for="robo-apify-interval">Ler pelo Apify a cada</label>
+            <select id="robo-apify-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
+            <label class="block text-sm text-mute" for="robo-interval">Coletores a cada (sem Apify)</label>
             <select id="robo-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
             <p id="robo-status" class="text-xs text-mute">—</p>
-            <p class="text-xs text-mute">O botão Atualizar dados (no topo do Dashboard) manda os coletores lerem as contas na hora, mesmo com a coleta automática desligada. O robô pega o pedido em até 1 minuto.</p>
+            <p class="text-xs text-mute">Com o token do Apify salvo, o robô lê as suas contas pelo Apify e os coletores ficam em espera: só entram se o Apify falhar. Sem token, lê só pelos coletores. O botão Atualizar dados (no topo do Dashboard) lê na hora, mesmo com a coleta automática desligada; o robô pega o pedido em até 1 minuto.</p>
           </article>
 
           <!-- Change Password Form -->

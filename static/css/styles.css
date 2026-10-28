@@ -1260,6 +1260,7 @@ body[data-role="admin"] [data-user-only] { display: none !important; }
   border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--fg);
 }
 .notice-banner.is-bad { border-color: var(--bad-line); background: var(--bad-bg); }
+.notice-banner.is-ok { border-color: var(--ok-line); background: var(--ok-bg); }
 .notice-ico { font-size: 1.1rem; line-height: 1; }
 
 /* Tela de espera: um pulso calmo enquanto o admin não aprova. */

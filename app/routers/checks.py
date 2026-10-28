@@ -20,6 +20,7 @@ from app.services import (
     alerts_query,
     as_utc,
     ask_grok,
+    get_settings,
     now_utc,
     send_telegram,
     settings_payload,
@@ -59,7 +60,9 @@ def write_settings(payload: SettingsIn, user: User = Depends(approved_user), db:
     if payload.apify_token is not None:
         # Token novo (ou apagado): o aviso antigo do robô não vale mais; com token, lê já.
         row.apify_status = row.apify_detail = None
-        row.apify_run_requested_at = now_utc() if row.apify_token else None
+        row.apify_run_requested_at = now_utc() if row.apify_token and not user.is_admin else None
+        if row.apify_token and user.is_admin:
+            get_settings(db).robo_run_requested_at = now_utc()  # o admin lê pela rodada do robô
     db.commit()
     return settings_payload(db, user)
 

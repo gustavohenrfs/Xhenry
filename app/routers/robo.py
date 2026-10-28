@@ -22,21 +22,34 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Collector, SyncKind, SyncRun, User
 from app.routers.auth import admin_user, approved_user
-from app.services import as_utc, get_settings, now_utc, selected_accounts, settings_payload, user_settings
+from app.services import (
+    admin_apify_active,
+    as_utc,
+    get_settings,
+    now_utc,
+    robot_interval,
+    selected_accounts,
+    settings_payload,
+    user_settings,
+)
 
 router = APIRouter()
 user_router = APIRouter()
 
 ROBO_INTERVALS = (5, 10, 15, 30, 60, 120, 180, 360, 720, 1440)
+# Cada leitura pelo Apify cobra no mínimo 50 posts: nada abaixo de 15 min.
+APIFY_INTERVALS = (15, 30, 60, 120, 180, 360, 720, 1440)
 
 
 class RoboIn(BaseModel):
     enabled: bool | None = None
     interval_min: int | None = None
+    apify_interval_min: int | None = None
 
 
 def robo_payload(db: Session) -> dict[str, Any]:
     row = get_settings(db)
+    interval = robot_interval(db, row)
     last = db.scalars(
         select(SyncRun)
         .where(SyncRun.kind == SyncKind.TWEETS, SyncRun.account_id.is_(None), SyncRun.finished_at.is_not(None))
@@ -54,14 +67,27 @@ def robo_payload(db: Session) -> dict[str, Any]:
             "contas": stats.get("contas"),
             "tweets": stats.get("tweets"),
             "manual": bool(stats.get("manual")),
+            # Por onde a rodada leu: "apify" ou "coletores" (rodadas antigas não diziam: coletores).
+            "via": stats.get("via") or "coletores",
+            "apify_error": stats.get("apify_erro"),
         }
         if row.robo_enabled:
-            next_run = (finished + timedelta(minutes=row.robo_interval_min)).isoformat()
+            next_run = (finished + timedelta(minutes=interval)).isoformat()
     requested = row.robo_run_requested_at
+    admin = db.scalar(select(User).where(User.is_admin.is_(True)).order_by(User.id).limit(1))
+    apify = user_settings(db, admin.id) if admin else None
     return {
         "enabled": row.robo_enabled,
         "interval_min": row.robo_interval_min,
         "intervals": list(ROBO_INTERVALS),
+        "apify": {
+            "active": admin_apify_active(db),
+            "interval_min": row.apify_interval_min,
+            "intervals": list(APIFY_INTERVALS),
+            "status": apify.apify_status if apify else None,
+            "detail": apify.apify_detail if apify else None,
+            "checked_at": as_utc(apify.apify_checked_at).isoformat() if apify and apify.apify_checked_at else None,
+        },
         "requested_at": as_utc(requested).isoformat() if requested else None,
         "last_run": last_run,
         "next_run_at": next_run,
@@ -80,6 +106,10 @@ def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]
         if payload.interval_min not in ROBO_INTERVALS:
             raise HTTPException(400, "Intervalo inválido.")
         row.robo_interval_min = payload.interval_min
+    if payload.apify_interval_min is not None:
+        if payload.apify_interval_min not in APIFY_INTERVALS:
+            raise HTTPException(400, "Intervalo do Apify inválido.")
+        row.apify_interval_min = payload.apify_interval_min
     if payload.enabled is not None:
         if payload.enabled and not row.robo_enabled:
             row.robo_run_requested_at = now_utc()  # religou: coleta já, sem esperar o intervalo
@@ -105,8 +135,12 @@ def collection_health(db: Session, admin: User) -> dict[str, Any]:
     benched = [row for row in collectors if row.is_active and row.paused_until and as_utc(row.paused_until) > now]
     free = [row for row in collectors if row.is_active and row not in benched]
     accounts = selected_accounts(db, admin.id, None)
-    # Cada rodada lê uma conta por coletor livre: a volta completa leva ceil(contas/coletores) intervalos.
-    cycle = math.ceil(len(accounts) / max(1, len(free))) * payload["interval_min"]
+    if payload["apify"]["active"]:
+        # Pelo Apify cada rodada lê todas as contas: a volta é um intervalo só.
+        cycle = payload["apify"]["interval_min"]
+    else:
+        # Cada rodada lê uma conta por coletor livre: a volta completa leva ceil(contas/coletores) intervalos.
+        cycle = math.ceil(len(accounts) / max(1, len(free))) * payload["interval_min"]
     late_after = max(60, 2 * cycle)
     stale = []
     for account in accounts:

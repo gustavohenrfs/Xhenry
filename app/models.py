@@ -366,6 +366,9 @@ class AppSetting(IntPK, Base):
     robo_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     robo_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     robo_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Com o token do Apify do admin salvo, as contas dele são lidas pelo Apify neste ritmo (os coletores
+    # ficam de reserva); robo_interval_min passa a valer só quando não há Apify.
+    apify_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
     # Web Push: chave VAPID gerada no primeiro uso e o último alerta viral já empurrado.
     vapid_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     push_last_alert_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

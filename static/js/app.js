@@ -700,9 +700,10 @@ function renderHealth(health) {
   const host = document.getElementById("health-body");
   const note = document.getElementById("health-note");
   const late = health.late_after_min >= 120 ? Math.round(health.late_after_min / 60) + " h" : health.late_after_min + " min";
-  note.textContent = health.enabled
-    ? "Atrasada é a conta sem coleta há mais de " + late + "."
-    : "Coleta automática desligada: só coleta quando você clica em Atualizar dados.";
+  note.textContent = (health.apify && health.apify.active ? "Lendo pelo Apify a cada " + intervalLabel(health.apify.interval_min) + ", coletores em espera. " : "")
+    + (health.enabled
+      ? "Atrasada é a conta sem coleta há mais de " + late + "."
+      : "Coleta automática desligada: só coleta quando você clica em Atualizar dados.");
   const gauge = el("div", "gauge-wrap");
   gauge.append(ring(health.fresh, health.accounts), el("p", "gauge-label font-mono text-lg text-white", health.fresh + "/" + health.accounts));
   const behind = health.stale.length;
@@ -710,7 +711,7 @@ function renderHealth(health) {
   const summary = el("div", "min-w-0 flex-1 text-left");
   summary.append(
     el("p", "text-sm text-white", behind ? behind + (behind === 1 ? " conta atrasada" : " contas atrasadas") : "Todas as contas em dia"),
-    el("p", "mt-1 text-xs text-mute", last ? "Última rodada " + agoText(last.finished_at) + ", às " + stampBR(last.finished_at) : "O robô ainda não rodou")
+    el("p", "mt-1 text-xs text-mute", last ? "Última rodada " + agoText(last.finished_at) + ", às " + stampBR(last.finished_at) + (last.via === "apify" ? ", pelo Apify" : ", pelos coletores") : "O robô ainda não rodou")
   );
   const top = el("div", "flex items-center gap-4");
   top.append(gauge, summary);
@@ -758,7 +759,7 @@ function apifyIssue(apify) {
   return null;
 }
 function apifyStatusText(apify) {
-  if (!apify.token_set) return "Sem token: o robô não lê as suas contas.";
+  if (!apify.token_set) return isAdmin() ? "Sem token: o robô lê as suas contas pelos coletores." : "Sem token: o robô não lê as suas contas.";
   if (apify.requested_at) return "Leitura pedida às " + stampBR(apify.requested_at) + ", aguardando o robô.";
   if (!apify.status) return "Token salvo. A primeira leitura sai em até 1 minuto.";
   const when = apify.checked_at ? stampBR(apify.checked_at) : "—";
@@ -776,7 +777,7 @@ function paintApify(apify) {
   }
   const status = document.getElementById("apify-status");
   status.textContent = apifyStatusText(apify);
-  status.classList.toggle("text-amber-300", Boolean(issue));
+  status.classList.toggle("text-amber-300", Boolean(issue) && !(isAdmin() && !apify.token_set));
 }
 async function loadApify() {
   try { paintApify(await api("/api/apify")); } catch { /* o aviso só aparece quando dá para ler */ }
@@ -1906,7 +1907,8 @@ async function loadSettings() {
         : "Telegram: falta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env do VPS (os alertas e a recuperação de senha dependem dele).";
       tg.classList.toggle("text-amber-300", !settings.telegram_ready);
       loadRobo();
-    } else paintApify(Object.assign({ token_set: settings.apify_token_set }, settings.apify));
+    }
+    paintApify(Object.assign({ token_set: settings.apify_token_set }, settings.apify));
     paintKeyField("xai-key", "xai_api_key", settings.xai_key_set, "xai-...");
     paintKeyField("x-token", "x_bearer_token", settings.x_token_set, "AAAA...");
     paintKeyField("apify-token", "apify_token", settings.apify_token_set, "apify_api_...");
@@ -2093,9 +2095,24 @@ function collectorCard(collector) {
   card.append(actions);
   return card;
 }
+// Aba Coletores em espera: com o Apify do admin ativo, os coletores só entram quando ele falha.
+function paintStandby(robo) {
+  const banner = document.getElementById("apify-standby");
+  const apify = robo.apify || {};
+  banner.classList.toggle("hidden", !apify.active);
+  if (!apify.active) return;
+  const run = robo.last_run;
+  const failed = apify.status === "erro" || Boolean(run && run.apify_error);
+  banner.classList.toggle("is-ok", !failed);
+  banner.classList.toggle("is-bad", failed);
+  document.getElementById("apify-standby-text").textContent = failed
+    ? "Apify falhou" + (apify.checked_at ? " às " + stampBR(apify.checked_at) : "") + ": " + ((run && run.apify_error) || apify.detail || "erro") + " Os coletores assumiram."
+    : "Apify ativo · coletores em espera. Eles só entram se o Apify falhar.";
+}
 async function loadCollectors({ silent = false } = {}) {
   const host = document.getElementById("collector-list");
   if (!host) return;
+  api("/api/robo").then(paintStandby).catch(() => {});
   const message = (text) => {
     const p = document.createElement("p");
     p.className = "text-sm text-mute";
@@ -2459,22 +2476,26 @@ function intervalLabel(minutes) {
 function stampBR(iso) {
   return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
-function paintRobo(robo) {
-  const toggle = document.getElementById("robo-enabled");
-  const select = document.getElementById("robo-interval");
-  toggle.checked = robo.enabled;
-  select.replaceChildren(...robo.intervals.map((minutes) => {
+function fillIntervals(select, intervals, value, disabled) {
+  select.replaceChildren(...intervals.map((minutes) => {
     const option = document.createElement("option");
     option.value = String(minutes);
     option.textContent = intervalLabel(minutes);
     return option;
   }));
-  select.value = String(robo.interval_min);
-  select.disabled = !robo.enabled;
-  const parts = [];
+  select.value = String(value);
+  select.disabled = disabled;
+}
+function paintRobo(robo) {
+  const toggle = document.getElementById("robo-enabled");
+  toggle.checked = robo.enabled;
+  fillIntervals(document.getElementById("robo-interval"), robo.intervals, robo.interval_min, !robo.enabled);
+  fillIntervals(document.getElementById("robo-apify-interval"), robo.apify.intervals, robo.apify.interval_min, !robo.enabled);
+  paintStandby(robo);
+  const parts = [robo.apify.active ? "Lendo pelo Apify; coletores em espera." : "Sem token do Apify: lendo pelos coletores."];
   if (robo.last_run) {
     const run = robo.last_run;
-    let text = "Última rodada: " + stampBR(run.finished_at);
+    let text = "Última rodada (" + (run.via === "apify" ? "Apify" : "coletores") + "): " + stampBR(run.finished_at);
     if (run.contas !== null && run.contas !== undefined) text += " · " + run.contas + " contas, " + (run.tweets || 0) + " tweets";
     if (run.status === "failed") text += " · falhou";
     else if (run.status === "partial") text += " · com falhas";
@@ -2493,7 +2514,8 @@ async function saveRobo(body) {
   try {
     const robo = await api("/api/robo", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     paintRobo(robo);
-    toast(body.enabled === false ? "Coleta automática desligada." : body.enabled ? "Coleta automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(robo.interval_min) + ".");
+    const every = body.apify_interval_min ? robo.apify.interval_min : robo.interval_min;
+    toast(body.enabled === false ? "Coleta automática desligada." : body.enabled ? "Coleta automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(every) + ".");
   } catch (error) {
     toast(error.message || "Não salvou o robô.");
     loadRobo();
@@ -2501,6 +2523,7 @@ async function saveRobo(body) {
 }
 document.getElementById("robo-enabled").addEventListener("change", (event) => saveRobo({ enabled: event.target.checked }));
 document.getElementById("robo-interval").addEventListener("change", (event) => saveRobo({ interval_min: Number(event.target.value) }));
+document.getElementById("robo-apify-interval").addEventListener("change", (event) => saveRobo({ apify_interval_min: Number(event.target.value) }));
 
 const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô não está pegando os pedidos
 const ROBO_RUN_MS = 12 * 60000;     // uma rodada manual pode levar alguns minutos (um Chrome por coletor)
@@ -2550,7 +2573,8 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     }
     await load();
     const run = robo.last_run;
-    toast(run.status === "failed" ? "A coleta falhou. Veja o aviso no Telegram." : "Coleta feita: " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
+    const via = run.via === "apify" ? " pelo Apify" : run.apify_error ? " pelos coletores (o Apify falhou)" : "";
+    toast(run.status === "failed" ? "A coleta falhou. Veja o aviso no Telegram." : "Coleta feita" + via + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
     if (state.tab === "settings") paintRobo(robo);
   } catch (error) { toast(error.message || "Falha ao atualizar."); }
   btn.disabled = false;

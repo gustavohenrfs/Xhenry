@@ -56,6 +56,14 @@ Cada rodada grava um batimento em sync_runs (kind=tweets, account_id NULL).
 O vigia do painel usa esse batimento para avisar quando o robô fica parado.
 Ghost/Search Ban é com o painel (/api/check), não com o robô.
 
+Leitura híbrida das contas do admin: com o token do Apify dele salvo em
+Configurações (user_settings.apify_token), o robô lê todas as contas do admin
+pelo Apify a cada app_settings.apify_interval_min (padrão 30) ou na hora pelo
+"Atualizar Dados", e os coletores ficam em espera. Os coletores só entram quando
+a chamada ao Apify falha (token recusado, sem crédito, rede): na mesma passada,
+como uma rodada manual. Conta sem post hoje não é falha. Sem token, tudo funciona
+como acima, só com os coletores. O batimento grava por onde leu (stats.via).
+
 Multiusuário: coletores, Telegram e tudo acima valem só para as contas do admin
 (users.is_admin). As contas dos outros usuários aprovados são lidas pelo Apify
 (apify_round), com o token que cada um colou em Configurações
@@ -1257,6 +1265,36 @@ def set_apify_status(cur, owner_id: int, status: str, detail: str | None) -> Non
     )
 
 
+def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datetime, telegram: bool) -> int:
+    """Lê as contas pelo Apify (lotes de APIFY_MAX_ACCOUNTS) e grava como os coletores: posts de hoje,
+    alertas de views, o dia refeito e seguidores (em toda leitura: vêm junto com os posts).
+
+    Devolve os posts de hoje gravados. Falha da chamada sobe como ApifyError antes de gravar o lote;
+    conta sem post nenhum não é falha.
+    """
+    saved = 0
+    for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS):
+        batch = accounts[start:start + APIFY_MAX_ACCOUNTS]
+        items = apify_fetch(token, [account["username"] for account in batch])
+        by_author: dict[str, list[dict[str, Any]]] = {}
+        followers: dict[str, int] = {}
+        for item in items:
+            handle, count = apify_author(item)
+            if not handle or not tweet_id_of(item):
+                continue  # {"noResults": true} e afins
+            by_author.setdefault(handle, []).append(item)
+            if count is not None:
+                followers[handle] = count
+        with conn.cursor() as cur:
+            for account in batch:
+                handle = account["username"].lower()
+                if handle in followers:
+                    save_followers(cur, account, midnight.date(), followers[handle])
+                saved += save_tweets(cur, account, by_author.get(handle, []), midnight, telegram=telegram)
+        conn.commit()
+    return saved
+
+
 def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str, Any]:
     """Lê pelo Apify as contas vencidas de um usuário, numa chamada só. Devolve o resumo."""
     owner_id = user["id"]
@@ -1282,10 +1320,10 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
         conn.commit()
         log.info("apify: usuário %s sem token (%s contas esperando)", owner_id, len(accounts))
         return {"owner": owner_id, "contas": 0, "erro": "sem_token"}
-    handles = [account["username"] for account in accounts]
     try:
-        items = apify_fetch(token, handles)
+        saved = apify_read(conn, token, accounts, midnight, telegram=False)
     except ApifyError as exc:
+        conn.rollback()
         with conn.cursor() as cur:
             set_apify_status(cur, owner_id, "erro", str(exc))
             alert_once(cur, f"apify:{owner_id}:erro:{day}", "apify", f"⚠️ Leitura pelo Apify falhou: {exc}", owner_id, telegram=False)
@@ -1294,23 +1332,7 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
         conn.commit()
         log.warning("apify: usuário %s: %s", owner_id, exc)
         return {"owner": owner_id, "contas": 0, "erro": str(exc)}
-    by_author: dict[str, list[dict[str, Any]]] = {}
-    followers: dict[str, int] = {}
-    for item in items:
-        handle, count = apify_author(item)
-        if not handle or not tweet_id_of(item):
-            continue  # {"noResults": true} e afins
-        by_author.setdefault(handle, []).append(item)
-        if count is not None:
-            followers[handle] = count
-    saved = 0
-    now = datetime.now(timezone.utc)
     with conn.cursor() as cur:
-        for account in accounts:
-            handle = account["username"].lower()
-            if handle in followers and followers_due(account, now):
-                save_followers(cur, account, midnight.date(), followers[handle])
-            saved += save_tweets(cur, account, by_author.get(handle, []), midnight, telegram=False)
         set_apify_status(cur, owner_id, "ok", f"{len(accounts)} contas lidas, {saved} posts de hoje")
     conn.commit()
     log.info("apify: usuário %s — %s contas, %s posts de hoje", owner_id, len(accounts), saved)
@@ -1674,8 +1696,81 @@ def run_round() -> int:
         apify.shutdown()
 
 
+APIFY_ADMIN_INTERVAL_DEFAULT = 30
+
+
+def admin_apify(conn) -> dict[str, Any] | None:
+    """Token do Apify do admin e se a leitura venceu (coleta ligada e a última tentativa mais velha que
+    app_settings.apify_interval_min). None sem token: o admin lê só pelos coletores, como antes."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.id, s.apify_token, s.apify_checked_at, a.robo_enabled,
+                       COALESCE(a.apify_interval_min, %s) AS interval_min
+                FROM users u
+                JOIN user_settings s ON s.owner_id = u.id
+                LEFT JOIN app_settings a ON a.id = 1
+                WHERE u.is_admin IS TRUE
+                ORDER BY u.id
+                LIMIT 1
+                """,
+                (APIFY_ADMIN_INTERVAL_DEFAULT,),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    except Exception as exc:  # painel antigo, sem as colunas: só coletores
+        conn.rollback()
+        log.warning("sem as opções do Apify do admin (%s); só coletores", type(exc).__name__)
+        return None
+    if row is None or not (row["apify_token"] or "").strip():
+        return None
+    interval = timedelta(minutes=max(1, int(row["interval_min"] or APIFY_ADMIN_INTERVAL_DEFAULT)))
+    last = row["apify_checked_at"]
+    due = row["robo_enabled"] is not False and (
+        last is None or datetime.now(timezone.utc) - last >= interval - INTERVAL_SLACK
+    )
+    return {"id": row["id"], "token": row["apify_token"].strip(), "due": due}
+
+
+def admin_accounts(cur) -> list[dict[str, Any]]:
+    """Todas as contas ativas do admin (a leitura pelo Apify não tem limite de coletor)."""
+    return load_accounts(cur, 100_000)
+
+
+def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: datetime, manual: bool) -> str | None:
+    """Lê as contas do admin pelo Apify. None = deu certo (batimento gravado); texto = motivo da falha,
+    e aí os coletores assumem nesta mesma passada."""
+    with conn.cursor() as cur:
+        accounts = admin_accounts(cur)
+    conn.commit()
+    log.info("início pelo Apify%s — %s contas, tweets depois de %s", " (Atualizar Dados)" if manual else "",
+             len(accounts), midnight.isoformat())
+    try:
+        saved = apify_read(conn, admin["token"], accounts, midnight, telegram=True)
+    except ApifyError as exc:
+        conn.rollback()
+        reason = str(exc)
+        hour = datetime.now(BR_TZ).strftime("%Y-%m-%dT%H")
+        with conn.cursor() as cur:
+            set_apify_status(cur, admin["id"], "erro", reason + " Os coletores assumiram.")
+            alert_once(cur, f"apify:{admin['id']}:erro:{hour}", "apify",
+                       f"⚠️ Apify falhou: {reason}\nOs coletores assumiram a leitura.", admin["id"])
+        conn.commit()
+        log.warning("apify do admin falhou (%s); coletores assumem", reason)
+        return reason
+    with conn.cursor() as cur:
+        set_apify_status(cur, admin["id"], "ok", f"{len(accounts)} contas lidas, {saved} posts de hoje")
+        record_run(cur, started, "ok", None, {"via": "apify", "contas": len(accounts), "tweets": saved,
+                                               "falhas": 0, "manual": manual})
+    conn.commit()
+    log.info("fim pelo Apify — %s contas, %s tweets", len(accounts), saved)
+    return None
+
+
 def collectors_round(conn, started: datetime, midnight: datetime) -> int:
-    """A rodada dos coletores (contas do admin), como sempre foi."""
+    """As contas do admin: pelo Apify quando ele tem token (coletores em espera), senão ou se o Apify
+    falhar, pelos coletores, como sempre foi."""
     import psycopg
     from psycopg.rows import dict_row
 
@@ -1683,10 +1778,18 @@ def collectors_round(conn, started: datetime, midnight: datetime) -> int:
         try:
             tests = pending_tests(conn)
             run, manual = round_plan(conn)
+            admin = admin_apify(conn)
         except Exception as exc:
             log.exception("não leu as opções do robô")
             alert_offline("banco", exc)
             return 1
+        apify_error = None
+        if admin is not None:
+            # Com Apify, os coletores não seguem o próprio intervalo: só entram se a chamada falhar,
+            # e aí leem tudo, como no "Atualizar Dados".
+            if manual or admin["due"]:
+                apify_error = apify_admin_read(conn, admin, started, midnight, manual)
+            run, manual = apify_error is not None, apify_error is not None or manual
         if not run and not tests:
             return 0  # desligado ou dentro do intervalo: sai quieto (o cron chama de novo em 1 min)
         try:
@@ -1735,6 +1838,9 @@ def collectors_round(conn, started: datetime, midnight: datetime) -> int:
                 alert_offline("rodada", exc)
             return 1
         errors = stats.pop("erros")
+        stats["via"] = "coletores"
+        if apify_error:
+            stats["apify_erro"] = apify_error[:300]
         status = "partial" if stats["falhas"] or not stats["coletores"] else "ok"
         with conn.cursor() as cur:
             record_run(cur, started, status, error_summary(errors)[:2000] if errors else None, stats)
