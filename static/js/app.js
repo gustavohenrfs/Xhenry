@@ -3774,7 +3774,7 @@ function renderDrawer(account, detail) {
 }
 
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["collectors", "Coletores"], ["users", "Usuários"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["settings", "Configurações"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["collectors", "Coletores"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["users", "Usuários"], ["settings", "Configurações"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
 let paletteIndex = 0;

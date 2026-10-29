@@ -277,6 +277,9 @@ form.glow:focus-within::before { --mx: 50%; --my: 0%; opacity: .9; }
 /* ---------- navegação ---------- */
 #nav { display: flex; flex: 1; flex-direction: column; }
 #nav [data-tab="settings"] { margin-top: auto; }
+/* Admin: Usuários desce junto, logo acima de Configurações (o grupo de baixo da barra). */
+body[data-role="admin"] #nav [data-tab="users"] { margin-top: auto; }
+body[data-role="admin"] #nav [data-tab="settings"] { margin-top: .5rem; }
 #user-foot { border-top: 1px solid var(--line); padding-top: 1rem; }
 .nav-btn {
   position: relative;
