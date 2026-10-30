@@ -160,3 +160,21 @@ def test_access_request_is_an_admin_alert_not_telegram(client, monkeypatch):
         row = db.query(AlertSent).filter(AlertSent.kind == "acesso").order_by(AlertSent.id.desc()).first()
         assert row.owner_id == admin_id and email in row.detail
     assert notify_prefs(None)["kinds"]["acesso"] is True
+
+
+def test_types_have_short_names(client):
+    _, headers = new_user(admin=True)
+    types = client.get("/api/notifications", headers=headers).json()["types"]
+    short = {t["key"]: t["short"] for t in types}
+    assert short["viral"] == "Viralizando" and short["ban"] == "Restrição" and short["falha"] == "Falhas"
+    assert all(len(t["short"]) <= 14 for t in types)
+
+
+def test_settings_mobile_markup():
+    from app.config import ROOT
+
+    html = (ROOT / "templates/index.html").read_text(encoding="utf-8")
+    for block in ("notify-steps-block", "notify-quiet-block", "notify-devices-block"):
+        assert f'<details id="{block}"' in html
+    css = (ROOT / "static/css/styles.css").read_text(encoding="utf-8")
+    assert "#pane-settings .grid > *" in css and "min-width: 0" in css

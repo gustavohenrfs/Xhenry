@@ -97,8 +97,8 @@ def notify_payload(db: Session, user: User) -> dict[str, Any]:
     return {
         "prefs": notify_prefs(row),
         "types": [
-            {"key": key, "label": label, "emoji": emoji}
-            for key, label, emoji, admin_only in NOTIFY_TYPES
+            {"key": key, "label": label, "emoji": emoji, "short": short}
+            for key, label, emoji, admin_only, short in NOTIFY_TYPES
             if user.is_admin or not admin_only
         ],
         "post_steps": list(POST_STEPS),

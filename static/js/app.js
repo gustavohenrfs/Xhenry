@@ -268,7 +268,7 @@ function busyField() {
   if (!field || Date.now() - changedAt > 1500 || !field.isConnected || field.disabled) return null;
   changed = null;
   // O anel vai no cartãozinho do interruptor (label) ou no próprio campo (lista, horário).
-  const shown = field.closest("label.rounded-2xl, .notify-type") || field;
+  const shown = field.closest("label.rounded-2xl, .notify-pill") || field;
   field.disabled = true;
   shown.classList.add("is-saving");
   return () => { field.disabled = false; shown.classList.remove("is-saving"); };
@@ -859,14 +859,21 @@ function notifySelect(id, steps, value, unit) {
 }
 function paintNotify(data) {
   const prefs = data.prefs;
+  // Pílulas compactas: nome curto na tela, o nome inteiro no title (e no leitor de tela, pelo aria-label).
   document.getElementById("notify-types").replaceChildren(...data.types.map((type) => {
-    const row = el("label", "notify-type");
+    const on = prefs.kinds[type.key] !== false;
+    const pill = el("label", "notify-pill" + (on ? " on" : ""));
+    pill.title = type.label;
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = prefs.kinds[type.key] !== false;
-    input.addEventListener("change", () => saveNotify({ kinds: { [type.key]: input.checked } }));
-    row.append(el("b", "", type.emoji), el("span", "", type.label), input);
-    return row;
+    input.checked = on;
+    input.setAttribute("aria-label", type.label);
+    input.addEventListener("change", () => {
+      pill.classList.toggle("on", input.checked);
+      saveNotify({ kinds: { [type.key]: input.checked } });
+    });
+    pill.append(input, el("b", "", type.emoji), el("span", "", type.short || type.label));
+    return pill;
   }));
   notifySelect("notify-post-step", data.post_steps, prefs.post_step, "views");
   notifySelect("notify-day-step", data.day_steps, prefs.day_step, "views no dia");
@@ -875,6 +882,10 @@ function paintNotify(data) {
   document.getElementById("quiet-from").value = prefs.quiet.from;
   document.getElementById("quiet-to").value = prefs.quiet.to;
   ["quiet-from", "quiet-to"].forEach((id) => { document.getElementById(id).disabled = !prefs.quiet.on; });
+  // Resumo no título de cada bloco: no celular eles ficam fechados.
+  const step = (value) => (value ? num(value) : "desligado");
+  document.getElementById("notify-steps-sum").textContent = "Post: " + step(prefs.post_step) + " · Dia: " + step(prefs.day_step);
+  document.getElementById("notify-quiet-sum").textContent = prefs.quiet.on ? prefs.quiet.from + "–" + prefs.quiet.to : "Desligado";
   paintNotifyStatus();
 }
 async function loadNotify() {
@@ -916,8 +927,16 @@ async function loadDevices() {
       row.append(text, remove);
       return row;
     }) : [el("li", "text-sm text-mute", "Nenhum aparelho recebe notificações ainda. Clique em Ativar neste aparelho.")]));
+    document.getElementById("notify-devices-sum").textContent = devices.length ? devices.length + (devices.length === 1 ? " aparelho" : " aparelhos") : "Nenhum";
   } catch (error) { host.replaceChildren(); }
 }
+// Celular: os blocos de Notificações começam fechados (mostram só o resumo); no computador ficam abertos.
+const narrowSettings = matchMedia("(max-width: 767px)");
+function fitNotifyBlocks() {
+  document.querySelectorAll(".notify-block").forEach((block) => { block.open = !narrowSettings.matches; });
+}
+fitNotifyBlocks();
+narrowSettings.addEventListener("change", fitNotifyBlocks);
 document.getElementById("notify-post-step").addEventListener("change", (event) => saveNotify({ post_step: Number(event.target.value) }));
 document.getElementById("notify-day-step").addEventListener("change", (event) => saveNotify({ day_step: Number(event.target.value) }));
 document.getElementById("quiet-on").addEventListener("change", (event) => saveNotify({ quiet: { on: event.target.checked } }));

@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=24">
+  <link rel="stylesheet" href="/static/css/styles.css?v=25">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=41"></script>
+  <script defer src="/static/js/app.js?v=42"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -455,14 +455,20 @@
                 <p class="text-xs text-mute">Desligado não apita nem aparece no sininho; continua no Histórico de alertas.</p>
                 <div id="notify-types" class="notify-types"></div>
               </section>
-              <section class="space-y-3">
-                <h3 class="text-sm text-white">Marcos de views</h3>
+              <div class="space-y-3">
+              <details id="notify-steps-block" class="notify-block" open>
+                <summary><h3 class="text-sm text-white">Marcos de views</h3><span id="notify-steps-sum" class="notify-sum"></span><svg class="notify-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></summary>
+                <div class="notify-body space-y-3">
                 <label class="block text-sm text-mute" for="notify-post-step">Avisar a cada … views de um post</label>
                 <select id="notify-post-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
                 <label class="block text-sm text-mute" for="notify-day-step">Avisar a cada … views no total do dia</label>
                 <select id="notify-day-step" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
                 <p id="notify-goal" class="text-xs text-mute"></p>
-                <h3 class="pt-2 text-sm text-white">Não perturbe</h3>
+                </div>
+              </details>
+              <details id="notify-quiet-block" class="notify-block" open>
+                <summary><h3 class="text-sm text-white">Não perturbe</h3><span id="notify-quiet-sum" class="notify-sum"></span><svg class="notify-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></summary>
+                <div class="notify-body space-y-3">
                 <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
                   <span>
                     <span class="block text-sm text-white">Silenciar no horário</span>
@@ -476,12 +482,14 @@
                   <label class="text-sm text-mute" for="quiet-to">até</label>
                   <input id="quiet-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
                 </div>
-              </section>
+                </div>
+              </details>
+              </div>
             </div>
-            <section class="space-y-2">
-              <h3 class="text-sm text-white">Aparelhos</h3>
-              <ul id="notify-devices" class="space-y-2"></ul>
-            </section>
+            <details id="notify-devices-block" class="notify-block" open>
+              <summary><h3 class="text-sm text-white">Aparelhos</h3><span id="notify-devices-sum" class="notify-sum"></span><svg class="notify-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></summary>
+              <ul id="notify-devices" class="notify-body space-y-2"></ul>
+            </details>
           </article>
           </div>
         </section>

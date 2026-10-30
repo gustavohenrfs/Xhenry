@@ -1639,19 +1639,19 @@ def record_alert(db: Session, key: str, kind: str, text: str, owner_id: int | No
 # ---------- Notificações (push e sininho) ----------
 # Cada tipo liga/desliga em Configurações → Notificações. Os alertas continuam todos no histórico.
 NOTIFY_TYPES = [
-    # chave, rótulo, emoji, só admin
-    ("viral", "Post viralizando (500 views)", "🚀", False),
-    ("bombando", "Post bombando (10K views)", "🔥", False),
-    ("100k", "Post passou de 100K views", "💯", False),
-    ("1m", "Post passou de 1M de views", "👑", False),
-    ("marco_post", "Marcos de views de um post", "📈", False),
-    ("marco_dia", "Marcos de views do dia", "📊", False),
-    ("meta", "Meta do dia batida", "🎯", False),
-    ("resumo", "Resumo do fim do dia (23:59)", "🎉", False),
-    ("queda", "Queda de views", "📉", False),
-    ("ban", "Possível restrição da conta", "⚠️", False),
-    ("falha", "Falhas de leitura (Apify, robô)", "🛠️", False),
-    ("acesso", "Novo pedido de acesso", "👤", True),
+    # chave, rótulo, emoji, só admin, nome curto (pílula em Configurações)
+    ("viral", "Post viralizando (500 views)", "🚀", False, "Viralizando"),
+    ("bombando", "Post bombando (10K views)", "🔥", False, "Bombando"),
+    ("100k", "Post passou de 100K views", "💯", False, "100K"),
+    ("1m", "Post passou de 1M de views", "👑", False, "1M"),
+    ("marco_post", "Marcos de views de um post", "📈", False, "Marco do post"),
+    ("marco_dia", "Marcos de views do dia", "📊", False, "Marco do dia"),
+    ("meta", "Meta do dia batida", "🎯", False, "Meta do dia"),
+    ("resumo", "Resumo do fim do dia (23:59)", "🎉", False, "Resumo"),
+    ("queda", "Queda de views", "📉", False, "Queda"),
+    ("ban", "Possível restrição da conta", "⚠️", False, "Restrição"),
+    ("falha", "Falhas de leitura (Apify, robô)", "🛠️", False, "Falhas"),
+    ("acesso", "Novo pedido de acesso", "👤", True, "Acesso"),
 ]
 POST_STEPS = (0, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 1_000_000)
 DAY_STEPS = (0, 10_000, 50_000, 100_000, 500_000, 1_000_000)
