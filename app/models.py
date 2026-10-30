@@ -437,3 +437,31 @@ def _account_owner(_mapper, connection, target: XAccount) -> None:
     """Conta nova herda o dono da pasta (a rota já confere que a pasta é de quem está logado)."""
     if target.owner_id is None and target.folder_id is not None:
         target.owner_id = connection.scalar(select(Folder.owner_id).where(Folder.id == target.folder_id))
+
+
+class RadarSnapshot(IntPK, Base):
+    """Uma leitura de uma fonte do Radar de trend (x, google, news, wiki); ok=False guarda o erro."""
+
+    __tablename__ = "radar_snapshots"
+    __table_args__ = (Index("ix_radar_snapshots_source_at", "source", "fetched_at"),)
+
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    items: Mapped[list[RadarItem]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
+
+
+class RadarItem(IntPK, Base):
+    """Um assunto de uma leitura, na posição em que a fonte mostrou. No X, extra.hour = hora (0 = mais nova)."""
+
+    __tablename__ = "radar_items"
+
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("radar_snapshots.id", ondelete="CASCADE"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(400), nullable=False)
+    norm: Mapped[str] = mapped_column(String(400), nullable=False, index=True)
+    volume: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)

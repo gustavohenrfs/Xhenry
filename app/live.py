@@ -2,8 +2,8 @@
 
 Um vigia só, compartilhado por todos os navegadores abertos, olha o banco a cada POLL_SECONDS numa
 consulta só, com índices: o mesmo carimbo do cache do dashboard (escritas pela API, collected_at do
-robô, sync_runs) e o último alerta. Quando um pedaço muda, cada navegador recebe {"data": …,
-"alerts": …} e recarrega só o que mudou. Os valores são carimbos opacos (nada de dado de conta). A rota
+robô, sync_runs), o último alerta e a última leitura do Radar de trend. Quando um pedaço muda, cada
+navegador recebe {"data": …, "alerts": …, "radar": …} e recarrega só o que mudou. Os valores são carimbos opacos (nada de dado de conta). A rota
 exige login (token em ?token=, o EventSource não manda cabeçalho) e cada um recebe o carimbo dos
 próprios alertas. O de dados é
 um só para todos: um recarregamento a mais é barato e não mostra nada de ninguém. Um processo uvicorn
@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import cache
 from app.database import SessionLocal
-from app.models import AlertSent
+from app.models import AlertSent, RadarSnapshot
 
 log = logging.getLogger("xhenry")
 POLL_SECONDS = 2.0
@@ -41,10 +41,12 @@ def snapshot() -> dict[str, Any]:
     """Carimbos de agora: dados do dashboard e último alerta de cada dono."""
     with SessionLocal() as db:
         version = cache.data_version(db)
+        radar = db.scalar(select(func.max(RadarSnapshot.id)))
         alerts = dict(db.execute(select(AlertSent.owner_id, func.max(AlertSent.id)).group_by(AlertSent.owner_id)).all())
     return {
         "data": _digest(*version),
         "alerts": alerts,
+        "radar": _digest(radar),
     }
 
 
@@ -54,6 +56,7 @@ def view_for(state: dict[str, Any], user_id: int, is_admin: bool) -> dict[str, s
     return {
         "data": state["data"],
         "alerts": _digest(alerts.get(user_id), alerts.get(None) if is_admin else None),
+        "radar": state["radar"],
     }
 
 

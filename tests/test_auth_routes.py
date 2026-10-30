@@ -39,6 +39,9 @@ PROTECTED = [
     # Multiusuário: as leituras que eram públicas agora são do usuário logado.
     ("get", "/api/live?once=1", None),
     ("get", "/api/accounts/archived", None),
+    ("get", "/api/radar", None),
+    ("post", "/api/radar/refresh", None),
+    ("get", "/api/radar/topic?norm=lula", None),
     ("get", "/api/dashboard?period=today", None),
     ("get", "/api/suggestions", None),
     ("get", "/api/folders", None),

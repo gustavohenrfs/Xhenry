@@ -7,6 +7,7 @@
   antigo) ou com a leitura automática desligada, fica quieto.
 - Empurra por Web Push cada alerta de views novo do robô (app/push.py) para os
   navegadores inscritos no sininho, com o painel aberto ou não.
+- Lê as fontes do Radar de trend que venceram (app/radar.py; RADAR=off desliga).
 - Se AUTO_CHECK_MINUTES > 0, verifica a saúde das contas nesse intervalo; o
   alerta de Ghost/Search Ban sai do check_handle (dispatch_alerts). Gasta cota
   da API do X (3 chamadas por conta), por isso vem desligado. Só as contas do
@@ -27,6 +28,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import radar
 from app.database import SessionLocal
 from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, User, XAccount
 from app.push import push_new_alerts
@@ -141,6 +143,21 @@ def run_auto_check(db: Session, now: datetime | None = None) -> int:
     return checked
 
 
+def run_radar(db: Session, now: datetime | None = None) -> list[str]:
+    """Fontes do radar vencidas; erro aqui nunca para o vigia."""
+    if not radar.radar_enabled():
+        return []
+    try:
+        due = radar.refresh_due(db, now)
+        if due:
+            radar.refresh(db, due)
+        return due
+    except Exception:
+        log.exception("radar falhou nesta rodada")
+        db.rollback()
+        return []
+
+
 def run_once(now: datetime | None = None) -> None:
     with SessionLocal() as db:
         check_silence(db, now)
@@ -150,6 +167,7 @@ def run_once(now: datetime | None = None) -> None:
             log.exception("push dos alertas falhou nesta rodada")
             db.rollback()
         run_auto_check(db, now)
+        run_radar(db, now)
 
 
 async def watch_forever() -> None:

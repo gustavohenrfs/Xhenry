@@ -34,7 +34,7 @@ def stamp(client):
 
 def test_stamps_change_only_for_what_changed(client):
     first = stamp(client)
-    assert set(first) == {"data", "alerts"}
+    assert set(first) == {"data", "alerts", "radar"}
     assert stamp(client) == first, "nada mudou, carimbo igual"
     tag = uuid4().hex[:6]
     with SessionLocal() as db:

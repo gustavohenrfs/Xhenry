@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", users: "Usuários" };
+const titles = { dashboard: "Dashboard", radar: "Radar de trend", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", users: "Usuários" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
@@ -347,6 +347,7 @@ function setTab(tab) {
   if (tab === "ops") closeOpsFolder();
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
+  if (tab === "radar") loadRadar();
   if (tab === "users") loadUsers();
 }
 function el(tag, className, text) {
@@ -1703,7 +1704,7 @@ document.getElementById("nav").addEventListener("click", (event) => {
   if (button) setTab(button.dataset.tab);
 });
 // Celular: abas embaixo; "Mais" abre as que não cabem (MORE_TABS).
-const MORE_TABS = ["post", "cloaker", "settings"];
+const MORE_TABS = ["archived", "post", "cloaker", "settings"];
 function setMoreOpen(open) {
   document.getElementById("more-sheet").classList.toggle("open", open);
   document.getElementById("more-btn").setAttribute("aria-expanded", String(open));
@@ -3165,7 +3166,7 @@ document.getElementById("theme-btn").addEventListener("click", (event) => {
 // (--rx/--ry). Um ouvinte só para a página toda, pintado uma vez por quadro. Só com mouse; sem
 // inclinação com "reduzir movimento". Formulários não se mexem (o laser deles acende ao digitar).
 const GLASS_SELECTOR = ".glow, .kpi-card, #pane-dashboard article, #cloaker-results";
-const TILT_SELECTOR = ".kpi-card, #pane-dashboard article.glow, .account-card, #folder-cards > .glow, #ops-accounts > .glow, #archived-accounts > .glow";
+const TILT_SELECTOR = ".kpi-card, #pane-dashboard article.glow, .account-card, #folder-cards > .glow, #ops-accounts > .glow, #archived-accounts > .glow, .radar-card";
 const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let litCard = null;
@@ -3230,6 +3231,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) auto
 // ---------- ícones e telas vazias ----------
 // Mesmo traço dos ícones das abas (index.html); usados nas telas vazias e na busca rápida.
 const ICONS = {
+  radar: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 18.2 5.8"/><circle cx="12" cy="12" r="1.3"/>',
   dashboard: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
   ops: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>',
   archived: '<rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/>',
@@ -3309,6 +3311,7 @@ function startLive() {
       else dashboardDirty = true;  // recarrega quando o Dashboard voltar à tela
     }
     if (stamp.alerts !== before.alerts) { checkViral(); loadAlerts(); }
+    if (stamp.radar !== before.radar && state.tab === "radar") loadRadar({ silent: true });
   };
 }
 function flash(node) {
@@ -3506,8 +3509,225 @@ function renderDrawer(account, detail) {
   body.replaceChildren(head, stats, extra);
 }
 
+// ---------- Radar de trend ----------
+// O que está em alta no Brasil (X, Google Trends, Google Notícias, Wikipédia), datas sazonais e o que pode
+// virar trend. A aba só lê /api/radar; as fontes são lidas pelo servidor. Todo texto das fontes entra por
+// textContent (el), nunca como HTML.
+const RADAR_SOURCES = { x: "X Brasil", google: "Google", news: "Notícias", wiki: "Wikipédia" };
+const RADAR_SHORT = { x: "X", google: "Google", news: "Notícias", wiki: "Wiki" };
+const RADAR_CATEGORIES = ["Futebol", "Política", "Famosos/TV", "Música", "Economia", "Outros"];
+const RADAR_DIRECTIONS = { novo: ["Novo", "is-new"], subindo: ["▲ Subindo", "is-up"], caindo: ["▼ Caindo", "is-down"] };
+let radarData = null;
+let radarFilter = "";
+let radarRetry = 0;
+let radarAll = false;  // lista inteira ou só os 20 primeiros
+const RADAR_FIRST = 20;
+async function loadRadar({ silent = false } = {}) {
+  try {
+    const data = await api("/api/radar");
+    paintRadar(data);
+    // O servidor começou uma leitura (dados velhos ou nenhum): olha de novo em 20 s, até 3 vezes.
+    if (data.refreshing && radarRetry < 3) {
+      radarRetry += 1;
+      setTimeout(() => { if (state.tab === "radar") loadRadar({ silent: true }); }, 20000);
+    } else if (!data.refreshing) radarRetry = 0;
+  } catch (error) {
+    if (error.message === SESSION_EXPIRED || error.message === PENDING) return;
+    if (!silent) toast(error.message || "Não leu o radar.");
+    if (!radarData) document.getElementById("radar-topics").replaceChildren(el("li", "text-sm text-mute", "Não deu para ler o radar agora."));
+  }
+}
+function radarWhen(item) {
+  if (item.kind === "previsao") return "Pode virar trend";
+  if (item.in_days === 0) return "Hoje";
+  if (item.in_days === 1) return "Amanhã";
+  return "Em " + item.in_days + " dias · " + item.date.slice(8, 10) + "/" + item.date.slice(5, 7);
+}
+function paintRadarSources(data) {
+  const host = document.getElementById("radar-sources");
+  host.replaceChildren(...Object.entries(RADAR_SOURCES).map(([key, label]) => {
+    const info = data.sources[key] || {};
+    const status = info.ok === true ? "ok" : info.ok === false ? "bad" : "wait";
+    const chip = el("span", "radar-src is-" + status);
+    chip.title = info.ok === false ? label + " indisponível: " + (info.error || "erro") : info.at ? label + " lido " + agoText(info.at) : label + ": ainda sem leitura";
+    chip.append(el("i", "radar-dot"), el("span", "", RADAR_SHORT[key]));
+    return chip;
+  }));
+}
+function radarUpcomingCard(item) {
+  const card = el(item.norm ? "button" : "div", "radar-card" + (item.kind === "previsao" ? " is-hot" : ""));
+  if (item.norm) {
+    card.type = "button";
+    card.addEventListener("click", (event) => openTopic(item.norm, event.currentTarget));
+  }
+  card.append(el("span", "radar-when", radarWhen(item)), el("span", "radar-name", item.name), el("span", "radar-tip", item.tip || ""));
+  return card;
+}
+function radarTopicRow(topic, index) {
+  const li = el("li", "");
+  const row = el("button", "radar-topic" + (index < 3 ? " is-top" : ""));
+  row.type = "button";
+  row.addEventListener("click", (event) => openTopic(topic.norm, event.currentTarget));
+  const main = el("span", "radar-main");
+  const title = el("span", "radar-title", topic.title);
+  const meta = el("span", "radar-meta");
+  topic.sources.forEach((name) => meta.append(el("span", "src-badge src-" + name, RADAR_SHORT[name] + (topic.ranks[name] ? " #" + topic.ranks[name] : ""))));
+  const dir = RADAR_DIRECTIONS[topic.direction];
+  if (dir) meta.append(el("span", "radar-dir " + dir[1], dir[0]));
+  if (topic.hours_x > 1) meta.append(el("span", "radar-note", "em alta há " + topic.hours_x + " h"));
+  if (topic.volume) meta.append(el("span", "radar-note", topic.volume + " buscas"));
+  main.append(title, meta);
+  const heat = el("span", "radar-heat");
+  heat.title = "Calor " + topic.heat + " de 100";
+  const bar = el("i", "");
+  bar.style.width = Math.max(4, topic.heat) + "%";
+  heat.append(bar);
+  row.append(el("span", "radar-pos font-mono", String(index + 1)), main, el("span", "radar-cat", topic.category), heat);
+  li.append(row);
+  return li;
+}
+function paintRadarTopics() {
+  const host = document.getElementById("radar-topics");
+  const topics = (radarData.topics || []).filter((topic) => !radarFilter || topic.category === radarFilter);
+  const filters = document.getElementById("radar-filters");
+  const present = RADAR_CATEGORIES.filter((name) => radarData.topics.some((topic) => topic.category === name));
+  filters.replaceChildren(...[""].concat(present).map((name) => {
+    const chip = el("button", "chip" + (radarFilter === name ? " on" : ""), name || "Tudo");
+    chip.type = "button";
+    chip.addEventListener("click", () => { radarFilter = name; radarAll = false; paintRadarTopics(); });
+    return chip;
+  }));
+  if (!radarData.topics.length) {
+    host.replaceChildren(el("li", "", ""));
+    host.firstChild.append(emptyState("radar", "Radar ainda vazio", "As fontes ainda não foram lidas. A primeira leitura sai em instantes; ou atualize agora.", "Atualizar agora", refreshRadar));
+    return;
+  }
+  const shown = radarAll ? topics : topics.slice(0, RADAR_FIRST);
+  const rows = shown.length ? shown.map(radarTopicRow) : [el("li", "text-sm text-mute", "Nada em " + radarFilter + " agora.")];
+  if (shown.length < topics.length) {
+    const more = el("button", "mt-1 w-full rounded-2xl border border-neon/40 px-4 py-2 text-sm", "Ver todos (" + topics.length + ")");
+    more.type = "button";
+    more.addEventListener("click", () => { radarAll = true; paintRadarTopics(); });
+    const li = el("li", "");
+    li.append(more);
+    rows.push(li);
+  }
+  host.replaceChildren(...rows);
+}
+function paintRadar(data) {
+  radarData = data;
+  document.getElementById("radar-updated").textContent = data.updated_at
+    ? "Atualizado " + agoText(data.updated_at) + (data.refreshing ? " · lendo as fontes…" : "")
+    : data.refreshing ? "Lendo as fontes pela primeira vez…" : "Ainda sem leitura";
+  paintRadarSources(data);
+  const upcoming = document.getElementById("radar-upcoming");
+  upcoming.replaceChildren(...(data.upcoming.length ? data.upcoming.map(radarUpcomingCard) : [el("p", "text-sm text-mute", "Nenhuma data marcada nos próximos 14 dias.")]));
+  paintRadarTopics();
+  const headlines = document.getElementById("radar-headlines");
+  headlines.replaceChildren(...(data.headlines.length ? data.headlines.map((item) => {
+    const li = el("li", "");
+    const link = el("a", "radar-headline", item.title);
+    link.href = item.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    li.append(link, el("span", "text-[11px] text-mute", item.source || ""));
+    return li;
+  }) : [el("li", "text-sm text-mute", "Sem manchetes soltas agora.")]));
+}
+async function refreshRadar() {
+  try {
+    paintRadar(await api("/api/radar/refresh", { method: "POST" }));
+    toast("Radar atualizado.");
+  } catch (error) { toast(error.message || "Não atualizou o radar."); }
+}
+document.getElementById("radar-refresh").addEventListener("click", refreshRadar);
+// Gaveta do assunto: a mesma gaveta das contas, com as posições no X nas últimas 24 h e as notícias.
+async function openTopic(norm, origin) {
+  const drawer = document.getElementById("drawer");
+  if (!drawerOpen()) drawerReturn = origin || document.activeElement;
+  const key = "radar:" + norm;
+  drawerFor = key;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  document.body.classList.add("drawer-lock");
+  const loading = el("div", "skel-stack");
+  loading.append(...[1, 2, 3, 4, 5].map(() => el("i", "skel skel-line")));
+  document.getElementById("drawer-body").replaceChildren(loading);
+  document.getElementById("drawer-close").focus();
+  try {
+    const topic = await api("/api/radar/topic?norm=" + encodeURIComponent(norm));
+    if (drawerFor === key) renderTopic(topic);
+  } catch (error) {
+    if (drawerFor === key) document.getElementById("drawer-body").replaceChildren(el("p", "text-sm text-mute", error.message || "Não deu para abrir o assunto."));
+  }
+}
+function linkButton(label, href, primary) {
+  const link = el("a", primary ? "rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink" : "rounded-full border border-neon/40 px-4 py-1.5 text-sm", label);
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  return link;
+}
+function renderTopic(topic) {
+  const head = el("div", "drawer-head");
+  const title = el("h2", "font-display text-2xl text-white", topic.title);
+  title.id = "drawer-title";
+  const where = topic.sources.map((name) => RADAR_SOURCES[name] + (topic.ranks[name] ? " #" + topic.ranks[name] : "")).join(" · ");
+  const actions = el("div", "mt-3 flex flex-wrap gap-2");
+  actions.append(
+    linkButton("Ver no X", "https://x.com/search?q=" + encodeURIComponent(topic.title) + "&f=live", true),
+    linkButton("Pesquisar no Google", "https://www.google.com/search?q=" + encodeURIComponent(topic.title) + "&tbm=nws", false)
+  );
+  head.append(el("span", "radar-cat", topic.category), title, el("p", "text-sm text-mute", where), actions);
+  const stats = el("dl", "drawer-stats");
+  [["Calor", topic.heat + "/100"], ["No X agora", topic.rank_x ? "#" + topic.rank_x : "—"], ["Em alta há", topic.hours_x ? topic.hours_x + " h" : "—"], ["Buscas", topic.volume || "—"]].forEach(([label, value]) => {
+    const item = el("div", "drawer-stat");
+    item.append(el("dt", "text-[11px] text-mute", label), el("dd", "font-mono text-lg text-white", value));
+    stats.append(item);
+  });
+  const extra = el("div", "space-y-5");
+  const seen = topic.history_x.some((hour) => hour.rank !== null);
+  const canvasBox = el("div", "h-44");
+  const canvas = document.createElement("canvas");
+  canvasBox.append(canvas);
+  extra.append(drawerSection("Posição no X nas últimas 24 h", seen ? canvasBox : el("p", "text-sm text-mute", "Não apareceu nos trending topics do X nas últimas 24 h.")));
+  const news = el("ol", "drawer-list");
+  topic.news.forEach((item) => {
+    const li = el("li", "radar-news");
+    const link = el("a", "radar-headline", item.title);
+    link.href = item.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    li.append(link, el("span", "text-[11px] text-mute", item.source || ""));
+    news.append(li);
+  });
+  extra.append(drawerSection("Notícias ligadas", topic.news.length ? news : el("p", "text-sm text-mute", "Nenhuma notícia ligada a esse assunto agora.")));
+  document.getElementById("drawer-body").replaceChildren(head, stats, extra);
+  if (seen && window.Chart) {
+    if (drawerChart) drawerChart.destroy();
+    const accent = cssVar("--accent") || "#ff2ec8";
+    drawerChart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: topic.history_x.map((hour) => (hour.at ? new Date(hour.at).toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }) : "")),
+        datasets: [{ label: "Posição", legendColor: accent, data: topic.history_x.map((hour) => hour.rank), borderColor: accent, backgroundColor: accent,
+          tension: .3, pointRadius: 2, pointHoverRadius: 4, borderWidth: 2, spanGaps: false }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => "#" + ctx.parsed.y } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
+          y: { reverse: true, min: 1, suggestedMax: 50, ticks: { precision: 0, maxTicksLimit: 5, callback: (value) => "#" + value } }
+        }
+      }
+    });
+  }
+}
+
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["users", "Usuários"], ["settings", "Configurações"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["users", "Usuários"], ["settings", "Configurações"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
 let paletteIndex = 0;
@@ -3622,6 +3842,7 @@ document.addEventListener("keydown", (event) => {
 // No navegador o próprio Chrome já faz isso; no app instalado não existe, então fazemos aqui.
 async function refreshCurrentTab() {
   if (state.tab === "dashboard") await load();
+  else if (state.tab === "radar") await loadRadar();
   else if (state.tab === "users") await loadUsers();
   else if (state.tab === "archived") await loadArchived();
   else if (state.tab === "settings") await loadSettings();

@@ -21,7 +21,7 @@ import app.models  # registra tabelas no metadata
 from app.cache import ForgetOnWrite
 from app.config import ROOT
 from app.database import Base, SessionLocal, engine, load_env_file
-from app.routers import accounts, admin, auth, checks, cloaker, pages, push, robo
+from app.routers import accounts, admin, auth, checks, cloaker, pages, push, radar, robo
 from app.services import ensure_admin, ensure_user_auth_columns, token_configured
 from app.watchdog import watch_forever, watchdog_enabled
 
@@ -72,6 +72,7 @@ app.include_router(auth.router)
 app.include_router(accounts.router)
 app.include_router(checks.router)
 app.include_router(cloaker.router)
+app.include_router(radar.router)
 app.include_router(robo.router)
 app.include_router(robo.user_router)
 app.include_router(admin.router)

@@ -23,6 +23,14 @@ As métricas dos tweets são coletadas pelo `robo.py` (na raiz deste repositóri
 - **Selos vermelhos** nas abas: Dashboard com os alertas não vistos, Usuários com os pedidos de acesso esperando. A soma aparece no ícone do app instalado.
 - **Notificações depois de reiniciar:** no celular chegam sozinhas. No computador só chegam com o navegador rodando; o sininho tem o guia "Continuar recebendo depois de reiniciar" com os passos do Edge ou do Chrome.
 
+## Radar de trend
+
+A aba **Radar** mostra o que está em alta no Brasil agora, de graça: trending topics do X Brasil (trends24), buscas do Google Trends, manchetes do Google Notícias e as páginas mais lidas da Wikipédia. O painel lê as fontes sozinho (X e Google a cada 15 min, Notícias a cada 30, Wikipédia a cada 6 h; `RADAR=off` desliga) e junta as que falam do mesmo assunto.
+
+- **Em alta agora:** cada assunto com a barra de calor, de quais fontes veio, se é novo, se está subindo ou caindo, há quanto tempo está em alta no X e o volume de buscas; filtros por Futebol, Política, Famosos/TV, Música e Economia.
+- **Próximos dias:** o que pode virar trend (novo ou subindo em várias fontes, ou que subiu rápido no X) e as datas sazonais dos próximos 14 dias com uma dica de post.
+- **Ao tocar num assunto:** a posição no X hora a hora nas últimas 24 h, as notícias ligadas e os links para o X e o Google.
+
 ## Leitura pelo Apify
 
 O `robo.py` lê as timelines pelo Apify (ator `APIFY_ACTOR`, padrão `apidojo~tweet-scraper`), com o token que cada usuário cola em Configurações. Nenhuma conta monitorada é logada.

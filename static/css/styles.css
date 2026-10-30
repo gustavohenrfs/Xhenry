@@ -1374,3 +1374,67 @@ button.bg-neon.is-busy::after, button.bg-red-600.is-busy::after {
 }
 .invite-link:hover, .invite-link:focus-visible { border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .pending-pulse::before { animation: none; } }
+
+/* ---------- Radar de trend ---------- */
+.radar-head { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1rem; }
+.radar-sources { display: flex; flex-wrap: wrap; gap: .35rem; }
+.radar-src {
+  display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .6rem; border: 1px solid var(--line);
+  border-radius: 999px; font-size: .72rem; color: var(--muted); background: var(--field);
+}
+.radar-dot { width: .45rem; height: .45rem; border-radius: 999px; background: var(--line-strong); }
+.radar-src.is-ok .radar-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.radar-src.is-bad .radar-dot { background: var(--bad); }
+.radar-src.is-bad { color: var(--bad); }
+/* Próximos dias: faixa que rola de lado no celular, sem empurrar a página. */
+.radar-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(13.5rem, 15rem); gap: .6rem; overflow-x: auto; padding-bottom: .4rem; scroll-snap-type: x proximity; }
+.radar-card {
+  display: flex; flex-direction: column; gap: .3rem; min-height: 7.5rem; padding: .85rem 1rem; text-align: left;
+  border: 1px solid var(--line); border-radius: 1.25rem; background: var(--field); scroll-snap-align: start;
+}
+button.radar-card { cursor: pointer; }
+.radar-card.is-hot { border-color: rgb(var(--c-neon) / .55); box-shadow: inset 0 0 24px -12px var(--laser-a); }
+.radar-when { font-size: .7rem; color: var(--accent-2); }
+.radar-card.is-hot .radar-when { color: var(--accent); }
+.radar-name { font-family: var(--font-display, inherit); font-size: 1rem; color: var(--fg); line-height: 1.25; overflow-wrap: anywhere; }
+.radar-tip { font-size: .75rem; color: var(--muted); line-height: 1.35; }
+.radar-skel-card { display: block; height: 7.5rem; border-radius: 1.25rem; }
+.radar-grid { display: grid; gap: 1rem; }
+@media (min-width: 1024px) { .radar-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; } }
+/* Lista de assuntos: posição, nome com selos, categoria e a barra de calor com o brilho laser. */
+.radar-topics { display: grid; gap: .35rem; }
+.radar-topic {
+  display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "pos main cat" "pos heat heat";
+  align-items: center; gap: .3rem .75rem; width: 100%; padding: .6rem .75rem; text-align: left; cursor: pointer;
+  border: 1px solid transparent; border-radius: 1rem; transition: background .15s ease, border-color .15s ease;
+}
+.radar-topic:hover, .radar-topic:focus-visible { background: var(--field); border-color: var(--line); outline: none; }
+.radar-topic.is-top { background: var(--field); border-color: rgb(var(--c-neon) / .25); }
+.radar-pos { grid-area: pos; font-size: .85rem; color: var(--muted); text-align: center; }
+.radar-topic.is-top .radar-pos { color: var(--accent); font-size: 1.05rem; }
+.radar-main { grid-area: main; display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+.radar-title { color: var(--fg); font-size: .95rem; overflow-wrap: anywhere; }
+.radar-topic.is-top .radar-title { font-size: 1.05rem; }
+.radar-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; }
+.src-badge { padding: .05rem .45rem; border-radius: 999px; font-size: .66rem; border: 1px solid var(--line-strong); color: var(--muted); }
+.src-badge.src-x { color: var(--fg); }
+.src-badge.src-google { color: var(--accent-2); border-color: currentColor; }
+.src-badge.src-news { color: var(--warn); border-color: currentColor; }
+.src-badge.src-wiki { color: var(--muted); }
+.radar-dir { font-size: .68rem; }
+.radar-dir.is-new { color: var(--accent); }
+.radar-dir.is-up { color: var(--ok); }
+.radar-dir.is-down { color: var(--bad); }
+.radar-note { font-size: .68rem; color: var(--muted); }
+.radar-cat { grid-area: cat; justify-self: end; padding: .1rem .55rem; border-radius: 999px; font-size: .68rem; color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.radar-heat { grid-area: heat; display: block; height: .3rem; border-radius: 999px; background: var(--line); overflow: hidden; }
+.radar-heat i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent-2), var(--accent)); box-shadow: 0 0 10px var(--laser-a); }
+.radar-headlines { display: grid; gap: .65rem; }
+.radar-headlines li, .radar-news { display: flex; flex-direction: column; gap: .1rem; }
+.radar-headline { font-size: .85rem; color: var(--fg); text-decoration: none; line-height: 1.35; overflow-wrap: anywhere; }
+.radar-headline:hover, .radar-headline:focus-visible { color: var(--accent); }
+.radar-news { padding: .5rem 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 767px) {
+  .radar-topic { grid-template-columns: 1.6rem minmax(0, 1fr); grid-template-areas: "pos main" "pos heat"; }
+  .radar-topic .radar-cat { display: none; }
+}
