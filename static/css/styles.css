@@ -1510,3 +1510,8 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 @media (prefers-reduced-motion: reduce) {
   .radar-switch-track, .radar-switch-track i, .radar-seg button { transition: none; }
 }
+
+/* ---------- Ferramentas (Verificar post + Metadados) ---------- */
+.tools-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; }
+.radar-seg button .nav-ico { width: 1rem; height: 1rem; margin-right: .4rem; vertical-align: -.15rem; }
+#pane-tools [hidden] { display: none !important; }

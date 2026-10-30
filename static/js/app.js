@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", radar: "Radar de trend", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", users: "Usuários" };
+const titles = { dashboard: "Dashboard", radar: "Radar de trend", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
@@ -331,7 +331,8 @@ function setPeriod(period) {
   });
 }
 function setTab(tab) {
-  if (ADMIN_TABS.includes(tab) && !isAdmin()) tab = "dashboard";
+  if (tab === "post" || tab === "cloaker") { setTool(tab); tab = "tools"; }  // abas antigas, hoje dentro de Ferramentas
+  if (!titles[tab] || (ADMIN_TABS.includes(tab) && !isAdmin())) tab = "dashboard";
   state.tab = tab;
   document.querySelectorAll(".nav-btn, .tab-btn[data-tab], .more-item").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   const moreBtn = document.getElementById("more-btn");
@@ -1704,7 +1705,7 @@ document.getElementById("nav").addEventListener("click", (event) => {
   if (button) setTab(button.dataset.tab);
 });
 // Celular: abas embaixo; "Mais" abre as que não cabem (MORE_TABS).
-const MORE_TABS = ["archived", "post", "cloaker", "settings"];
+const MORE_TABS = ["archived", "tools", "settings"];
 function setMoreOpen(open) {
   document.getElementById("more-sheet").classList.toggle("open", open);
   document.getElementById("more-btn").setAttribute("aria-expanded", String(open));
@@ -3231,6 +3232,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) auto
 // ---------- ícones e telas vazias ----------
 // Mesmo traço dos ícones das abas (index.html); usados nas telas vazias e na busca rápida.
 const ICONS = {
+  tools: '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/>',
   radar: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 18.2 5.8"/><circle cx="12" cy="12" r="1.3"/>',
   dashboard: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
   ops: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>',
@@ -3967,8 +3969,25 @@ function renderTopic(topic) {
   }
 }
 
+// ---------- Ferramentas: Verificar post e Metadados na mesma aba ----------
+// O seletor no topo troca a ferramenta; a última escolhida fica lembrada neste navegador.
+const TOOL_HINTS = {
+  post: "O Grok diz se o post corre risco de restrição no X antes de você publicar.",
+  cloaker: "Gera cópias da mídia com hash e metadados diferentes, visualmente iguais ao original."
+};
+function setTool(tool) {
+  if (!TOOL_HINTS[tool]) tool = "post";
+  document.querySelectorAll("[data-tool]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.tool === tool)));
+  document.getElementById("tool-post").hidden = tool !== "post";
+  document.getElementById("tool-cloaker").hidden = tool !== "cloaker";
+  document.getElementById("tools-hint").textContent = TOOL_HINTS[tool];
+  try { localStorage.setItem("tool_tab", tool); } catch { /* sem storage */ }
+}
+document.querySelectorAll("[data-tool]").forEach((button) => button.addEventListener("click", () => setTool(button.dataset.tool)));
+try { setTool(localStorage.getItem("tool_tab") || "post"); } catch { setTool("post"); }
+
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["users", "Usuários"], ["settings", "Configurações"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
 let paletteIndex = 0;
@@ -3977,7 +3996,9 @@ function paletteSource() {
   const items = visibleTabs().map(([tab, label], index) => ({ icon: tab, title: label, hint: "Aba · tecla " + (index + 1), run: () => setTab(tab) }));
   items.push(
     { icon: "refresh", title: "Atualizar dados", hint: "Ação · tecla R", run: () => { setTab("dashboard"); document.getElementById("refresh-all").click(); } },
-    { icon: "theme", title: currentTheme() === "light" ? "Usar tema escuro" : "Usar tema claro", hint: "Ação · tecla T", run: () => document.getElementById("theme-btn").click() }
+    { icon: "theme", title: currentTheme() === "light" ? "Usar tema escuro" : "Usar tema claro", hint: "Ação · tecla T", run: () => document.getElementById("theme-btn").click() },
+    { icon: "post", title: "Verificar post", hint: "Ferramenta", run: () => { setTab("tools"); setTool("post"); } },
+    { icon: "cloaker", title: "Metadados", hint: "Ferramenta", run: () => { setTab("tools"); setTool("cloaker"); } }
   );
   ((state.data && state.data.accounts) || []).filter((a) => !a.is_archived).forEach((account) => items.push({
     icon: "account",
