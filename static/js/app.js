@@ -665,7 +665,7 @@ const ALERT_KINDS = {
   viral: ["Viral", "#7cf0b5"], queda: ["Queda", "#ffb4c4"], ban: ["Restrição", "#ffb4c4"],
   erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"],
   apify: ["Apify", "#ffc46b"], marco_post: ["Marco do post", "#7cf0b5"], marco_dia: ["Marco do dia", "#4fe3ff"],
-  meta: ["Meta batida", "#ffd36b"], acesso: ["Pedido de acesso", "#d6ccff"], resumo: ["Resumo do dia", "#ff63c3"]
+  meta: ["Meta batida", "#ffd36b"], radar: ["Radar", "#67dcff"], acesso: ["Pedido de acesso", "#d6ccff"], resumo: ["Resumo do dia", "#ff63c3"]
 };
 let alertGroup = "";
 const VIEW_LEVEL_TAGS = [
@@ -3623,6 +3623,7 @@ function paintRadar(data) {
   const upcoming = document.getElementById("radar-upcoming");
   upcoming.replaceChildren(...(data.upcoming.length ? data.upcoming.map(radarUpcomingCard) : [el("p", "text-sm text-mute", "Nenhuma data marcada nos próximos 14 dias.")]));
   paintRadarTopics();
+  paintRadarTerms(data.my_terms || []);
   const headlines = document.getElementById("radar-headlines");
   headlines.replaceChildren(...(data.headlines.length ? data.headlines.map((item) => {
     const li = el("li", "");
@@ -3641,6 +3642,84 @@ async function refreshRadar() {
   } catch (error) { toast(error.message || "Não atualizou o radar."); }
 }
 document.getElementById("radar-refresh").addEventListener("click", refreshRadar);
+// Meus termos: o radar avisa (kind=radar: push, sininho, histórico) quando um deles aparece.
+function paintRadarTerms(terms) {
+  const host = document.getElementById("radar-terms");
+  if (!terms.length) {
+    host.replaceChildren(el("li", "text-sm text-mute", "Nenhum termo ainda. Adicione o que você quer pegar primeiro: time, artista, político…"));
+    return;
+  }
+  host.replaceChildren(...terms.map((term) => {
+    const li = el("li", "radar-term" + (term.hot ? " is-hot" : ""));
+    const name = el(term.topic ? "button" : "span", "radar-term-name", term.term);
+    if (term.topic) {
+      name.type = "button";
+      name.title = "Em alta agora: abrir o assunto";
+      name.addEventListener("click", (event) => openTopic(term.topic, event.currentTarget));
+    }
+    li.append(el("i", "radar-dot"), name);
+    if (term.hot) li.append(el("span", "radar-dir is-up", "em alta"));
+    const remove = el("button", "radar-term-x", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Parar de vigiar " + term.term);
+    remove.addEventListener("click", async () => {
+      try {
+        await api("/api/radar/terms/" + term.id, { method: "DELETE" });
+        radarData.my_terms = radarData.my_terms.filter((item) => item.id !== term.id);
+        paintRadarTerms(radarData.my_terms);
+        toast("Termo removido.");
+      } catch (error) { toast(error.message || "Não removeu o termo."); }
+    });
+    li.append(remove);
+    return li;
+  }));
+}
+async function addRadarTerm(term) {
+  try {
+    await api("/api/radar/terms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term }) });
+    radarData.my_terms = await api("/api/radar/terms");
+    paintRadarTerms(radarData.my_terms);
+    toast("Pronto: você recebe um aviso quando \"" + term + "\" estiver em alta.");
+    return true;
+  } catch (error) {
+    toast(error.message || "Não salvou o termo.");
+    return false;
+  }
+}
+document.getElementById("radar-term-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("radar-term-input");
+  const term = input.value.trim();
+  if (term && radarData && await addRadarTerm(term)) input.value = "";
+});
+// Posts que estão engajando: só no clique (gasta Apify de quem clicou; 30 min de cache para todos).
+async function loadEngagingPosts(term, box) {
+  const button = box.querySelector("button");
+  button.disabled = true;
+  button.textContent = "Buscando no X…";
+  try {
+    const data = await api("/api/radar/posts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ term }) });
+    const list = el("ol", "drawer-list");
+    data.posts.forEach((post) => {
+      const li = el("li", "radar-post");
+      const link = el("a", "radar-headline", post.text || "(sem texto)");
+      link.href = post.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      const meta = el("span", "radar-meta");
+      meta.append(el("span", "radar-note", "@" + post.author), el("span", "font-mono text-xs text-white", num(post.views) + " views"),
+        el("span", "radar-note", num(post.likes) + " ♥ · " + num(post.retweets) + " RT"));
+      li.append(link, meta);
+      list.append(li);
+    });
+    const when = el("p", "text-[11px] text-mute", (data.cached ? "Guardado " : "Buscado ") + agoText(data.fetched_at) + (data.cached ? " (sem gastar créditos)" : ""));
+    box.replaceChildren(data.posts.length ? list : el("p", "text-sm text-mute", "Nenhum post forte em português sobre isso agora."), when);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Tentar de novo";
+    toast(error.message || "Não buscou os posts.", "error");
+  }
+}
 // Gaveta do assunto: a mesma gaveta das contas, com as posições no X nas últimas 24 h e as notícias.
 async function openTopic(norm, origin) {
   const drawer = document.getElementById("drawer");
@@ -3678,6 +3757,14 @@ function renderTopic(topic) {
     linkButton("Ver no X", "https://x.com/search?q=" + encodeURIComponent(topic.title) + "&f=live", true),
     linkButton("Pesquisar no Google", "https://www.google.com/search?q=" + encodeURIComponent(topic.title) + "&tbm=nws", false)
   );
+  const watch = el("button", "rounded-full border border-neon/40 px-4 py-1.5 text-sm", "Alertar este termo");
+  watch.type = "button";
+  const already = ((radarData && radarData.my_terms) || []).some((t) => t.topic === topic.norm || t.norm === topic.norm);
+  if (already) { watch.disabled = true; watch.textContent = "Termo vigiado"; }
+  watch.addEventListener("click", async () => {
+    if (await addRadarTerm(topic.title.replace(/^#/, ""))) { watch.disabled = true; watch.textContent = "Termo vigiado"; }
+  });
+  actions.append(watch);
   head.append(el("span", "radar-cat", topic.category), title, el("p", "text-sm text-mute", where), actions);
   const stats = el("dl", "drawer-stats");
   [["Calor", topic.heat + "/100"], ["No X agora", topic.rank_x ? "#" + topic.rank_x : "—"], ["Em alta há", topic.hours_x ? topic.hours_x + " h" : "—"], ["Buscas", topic.volume || "—"]].forEach(([label, value]) => {
@@ -3702,6 +3789,12 @@ function renderTopic(topic) {
     news.append(li);
   });
   extra.append(drawerSection("Notícias ligadas", topic.news.length ? news : el("p", "text-sm text-mute", "Nenhuma notícia ligada a esse assunto agora.")));
+  const postsBox = el("div", "space-y-2");
+  const postsButton = el("button", "w-full rounded-2xl border border-neon/40 px-4 py-2.5 text-sm", "Ver posts que estão engajando");
+  postsButton.type = "button";
+  postsBox.append(postsButton, el("p", "text-[11px] text-mute", "Busca no X pelo seu Apify (usa créditos). O resultado fica guardado 30 min."));
+  postsButton.addEventListener("click", () => loadEngagingPosts(topic.title, postsBox));
+  extra.append(drawerSection("Posts que estão engajando", postsBox));
   document.getElementById("drawer-body").replaceChildren(head, stats, extra);
   if (seen && window.Chart) {
     if (drawerChart) drawerChart.destroy();

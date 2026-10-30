@@ -1399,7 +1399,8 @@ button.radar-card { cursor: pointer; }
 .radar-name { font-family: var(--font-display, inherit); font-size: 1rem; color: var(--fg); line-height: 1.25; overflow-wrap: anywhere; }
 .radar-tip { font-size: .75rem; color: var(--muted); line-height: 1.35; }
 .radar-skel-card { display: block; height: 7.5rem; border-radius: 1.25rem; }
-.radar-grid { display: grid; gap: 1rem; }
+.radar-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.radar-grid > * { min-width: 0; }
 @media (min-width: 1024px) { .radar-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); align-items: start; } }
 /* Lista de assuntos: posição, nome com selos, categoria e a barra de calor com o brilho laser. */
 .radar-topics { display: grid; gap: .35rem; }
@@ -1438,3 +1439,18 @@ button.radar-card { cursor: pointer; }
   .radar-topic { grid-template-columns: 1.6rem minmax(0, 1fr); grid-template-areas: "pos main" "pos heat"; }
   .radar-topic .radar-cat { display: none; }
 }
+.radar-terms { display: flex; flex-wrap: wrap; gap: .4rem; }
+.radar-term {
+  display: inline-flex; align-items: center; gap: .4rem; min-height: 2.25rem; padding: .2rem .35rem .2rem .7rem;
+  border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); font-size: .8rem; color: var(--fg);
+}
+.radar-term.is-hot { border-color: var(--ok); box-shadow: 0 0 14px -6px var(--ok); }
+.radar-term.is-hot .radar-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.radar-term-name { color: inherit; background: none; border: 0; padding: 0; font: inherit; overflow-wrap: anywhere; }
+button.radar-term-name { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.radar-term-x {
+  display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1.6rem; border-radius: 999px;
+  color: var(--muted); font-size: 1rem; line-height: 1;
+}
+.radar-term-x:hover, .radar-term-x:focus-visible { color: var(--bad); background: rgb(var(--c-ink) / .4); }
+.radar-post { display: flex; flex-direction: column; gap: .3rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }

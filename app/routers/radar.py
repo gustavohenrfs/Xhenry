@@ -1,4 +1,5 @@
-"""Aba Radar de trend: o que está em alta no Brasil, datas sazonais e o que pode virar trend.
+"""Aba Radar de trend: o que está em alta no Brasil, datas sazonais, o que pode virar trend, os termos que
+cada usuário vigia (alerta kind=radar) e os posts que estão engajando (Apify de quem clicou).
 
 Só lê o banco (app/radar.py monta). As fontes são lidas pelo vigia; se a última leitura tiver mais de 15 min
 ao abrir a aba, uma leitura começa numa thread e a resposta já sai com o que existe ("refreshing": true).
@@ -11,13 +12,17 @@ import threading
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import radar
 from app.database import SessionLocal, get_db
+from app.models import RadarTerm, User
+from app.radar_sources import norm as norm_of
 from app.routers.auth import approved_user
-from app.services import as_utc, now_utc
+from app.services import as_utc, now_utc, user_settings
 
 log = logging.getLogger("xhenry")
 router = APIRouter(dependencies=[Depends(approved_user)])
@@ -43,9 +48,19 @@ def _refresh_in_background() -> bool:
     return True
 
 
+class TermIn(BaseModel):
+    term: str = Field(min_length=1, max_length=80)
+
+
+def with_my_terms(db: Session, user: User, payload: dict[str, Any]) -> dict[str, Any]:
+    topics, headlines, _ = radar.build_topics(db)
+    payload["my_terms"] = radar.my_terms(db, user.id, topics, headlines)
+    return payload
+
+
 @router.get("/api/radar")
-def read_radar(db: Session = Depends(get_db)) -> dict[str, Any]:
-    payload = radar.board(db)
+def read_radar(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    payload = with_my_terms(db, user, radar.board(db))
     updated = payload["updated_at"]
     stale = updated is None or now_utc() - as_utc(radar.parse_iso(updated)) > STALE
     payload["refreshing"] = bool(stale and radar.radar_enabled() and _refresh_in_background())
@@ -53,10 +68,10 @@ def read_radar(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.post("/api/radar/refresh")
-def refresh_radar(db: Session = Depends(get_db)) -> dict[str, Any]:
+def refresh_radar(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not radar.refresh_manual(db):
         raise HTTPException(429, "O radar acabou de ser atualizado. Tente de novo em 2 minutos.")
-    payload = radar.board(db)
+    payload = with_my_terms(db, user, radar.board(db))
     payload["refreshing"] = False
     return payload
 
@@ -67,3 +82,48 @@ def read_topic(norm: str = Query(..., min_length=1, max_length=400), db: Session
     if detail is None:
         raise HTTPException(404, "Esse assunto saiu do radar.")
     return detail
+
+
+@router.get("/api/radar/terms")
+def list_terms(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    topics, headlines, _ = radar.build_topics(db)
+    return radar.my_terms(db, user.id, topics, headlines)
+
+
+@router.post("/api/radar/terms", status_code=201)
+def add_term(payload: TermIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    term = " ".join(payload.term.split())
+    key = norm_of(term)
+    if not key:
+        raise HTTPException(400, "Escreva um termo com letras ou números.")
+    if db.scalar(select(RadarTerm.id).where(RadarTerm.owner_id == user.id, RadarTerm.norm == key)):
+        raise HTTPException(409, "Você já vigia esse termo.")
+    if (db.scalar(select(func.count()).select_from(RadarTerm).where(RadarTerm.owner_id == user.id)) or 0) >= radar.MAX_TERMS:
+        raise HTTPException(400, f"Limite de {radar.MAX_TERMS} termos. Remova um para adicionar outro.")
+    row = RadarTerm(owner_id=user.id, term=term, norm=key)
+    db.add(row)
+    db.commit()
+    return {"id": row.id, "term": row.term, "norm": row.norm}
+
+
+@router.delete("/api/radar/terms/{term_id}", status_code=204)
+def delete_term(term_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> Response:
+    row = db.get(RadarTerm, term_id)
+    if row is None or row.owner_id != user.id:
+        raise HTTPException(404, "Termo não encontrado.")
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/api/radar/posts")
+def engaging_posts(payload: TermIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Posts mais fortes do momento sobre o assunto. Gasta crédito do Apify de quem clicou (cache de 30 min)."""
+    try:
+        return radar.engaging_posts(db, user.id, user_settings(db, user.id).apify_token, payload.term.strip())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except radar.RadarError as exc:
+        raise HTTPException(502, "A busca no Apify falhou: " + str(exc)) from exc

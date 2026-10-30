@@ -29,7 +29,8 @@ A aba **Radar** mostra o que está em alta no Brasil agora, de graça: trending 
 
 - **Em alta agora:** cada assunto com a barra de calor, de quais fontes veio, se é novo, se está subindo ou caindo, há quanto tempo está em alta no X e o volume de buscas; filtros por Futebol, Política, Famosos/TV, Música e Economia.
 - **Próximos dias:** o que pode virar trend (novo ou subindo em várias fontes, ou que subiu rápido no X) e as datas sazonais dos próximos 14 dias com uma dica de post.
-- **Ao tocar num assunto:** a posição no X hora a hora nas últimas 24 h, as notícias ligadas e os links para o X e o Google.
+- **Ao tocar num assunto:** a posição no X hora a hora nas últimas 24 h, as notícias ligadas, os links para o X e o Google, o botão **Alertar este termo** e o botão **Ver posts que estão engajando** (busca no X pelo seu Apify, gasta créditos; o resultado fica guardado 30 min).
+- **Meus termos:** cadastre até 30 palavras ("Flamengo", "Lula"…). Quando uma aparecer no radar, chega notificação (no máximo uma vez a cada 6 h por termo). Liga e desliga em Configurações → Notificações (tipo Radar).
 
 ## Leitura pelo Apify
 

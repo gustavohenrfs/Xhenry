@@ -7,6 +7,8 @@
 - board(): junta itens das fontes que falam do mesmo assunto (mesmo norm, ou um contido no outro por palavra
   inteira, 4+ letras), calcula o calor, há quanto tempo está em alta no X e a direção, e monta "Próximos dias"
   (datas sazonais + o que pode virar trend). Só lê o banco.
+- check_terms(): depois de cada leitura, termo de um usuário (radar_terms) em alta vira alerta kind=radar.
+- engaging_posts(): os posts mais fortes sobre um assunto, buscados no Apify de quem clicou (cache de 30 min).
 
 Guarda só 2 dias de leituras: a do X já traz as 24 horas, mais que isso só ocuparia o banco.
 """
@@ -29,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app import radar_sources as src
 from app import seasonal
-from app.models import DEFAULT_TZ, RadarItem, RadarSnapshot
+from app.models import DEFAULT_TZ, RadarItem, RadarPostCache, RadarSnapshot, RadarTerm
 
 log = logging.getLogger("xhenry")
 
@@ -141,6 +143,11 @@ def refresh(db: Session, sources: list[str] | tuple[str, ...] | None = None,
     db.execute(delete(RadarItem).where(RadarItem.snapshot_id.in_(old)).execution_options(synchronize_session=False))
     db.execute(delete(RadarSnapshot).where(RadarSnapshot.fetched_at < now - KEEP).execution_options(synchronize_session=False))
     db.commit()
+    try:
+        check_terms(db, now)
+    except Exception:
+        log.exception("radar: alerta dos termos falhou")
+        db.rollback()
     return result
 
 
@@ -350,3 +357,134 @@ def _zone():
 
 
 DEFAULT_TZ_INFO = _zone()
+
+
+# ---- Meus termos (alerta) ----
+
+MAX_TERMS = 30
+ALERT_WINDOW_HOURS = 6
+
+
+def term_hits(term_norm: str, topics: list[dict[str, Any]], headlines: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """O assunto em alta que bate com o termo (por palavra inteira), ou uma manchete que o cita."""
+    for topic in topics:
+        if _same(topic["norm"], term_norm) or _contains(topic["norm"], term_norm):
+            return topic
+    for item in headlines:
+        if _contains(src.norm(item["title"]), term_norm) or src.norm(item["title"]) == term_norm:
+            return {"title": item["title"], "sources": ["news"], "ranks": {}, "url": item["url"], "norm": term_norm}
+    return None
+
+
+def my_terms(db: Session, owner_id: int, topics: list[dict[str, Any]], headlines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = db.scalars(select(RadarTerm).where(RadarTerm.owner_id == owner_id).order_by(RadarTerm.created_at, RadarTerm.id)).all()
+    out = []
+    for row in rows:
+        hit = term_hits(row.norm, topics, headlines)
+        out.append({"id": row.id, "term": row.term, "norm": row.norm, "hot": hit is not None,
+                    "topic": hit["norm"] if hit else None})
+    return out
+
+
+def alert_text(term: str, hit: dict[str, Any]) -> str:
+    where = " · ".join(
+        f"{src_label} #{hit['ranks'][name]}" if hit["ranks"].get(name) else src_label
+        for name, src_label in (("x", "X Brasil"), ("google", "Google"), ("news", "Notícias"), ("wiki", "Wikipédia"))
+        if name in hit["sources"]
+    )
+    return f"📡 {term} em alta\nEm: {where}\nAssunto: {hit['title']}\nhttps://x.com/search?q={quote(term)}"
+
+
+def check_terms(db: Session, now: datetime | None = None) -> int:
+    """Depois de cada leitura: termo de alguém em alta vira alerta (uma vez por termo a cada janela de 6 h)."""
+    from app.services import record_alert
+
+    terms = db.scalars(select(RadarTerm)).all()
+    if not terms:
+        return 0
+    topics, headlines, _ = build_topics(db)
+    now = now or _now()
+    window = now.astimezone(DEFAULT_TZ_INFO).strftime("%Y-%m-%d") + f"-{now.astimezone(DEFAULT_TZ_INFO).hour // ALERT_WINDOW_HOURS}"
+    sent = 0
+    for term in terms:
+        hit = term_hits(term.norm, topics, headlines)
+        if hit and record_alert(db, f"radar:{term.owner_id}:{term.norm}:{window}", "radar", alert_text(term.term, hit), term.owner_id):
+            sent += 1
+    return sent
+
+
+# ---- Posts que estão engajando (Apify de quem clicou, guardado 30 min para todos) ----
+
+POSTS_TTL = timedelta(minutes=30)
+POSTS_SHOWN = 10
+APIFY_SEARCH_TIMEOUT = 150.0
+APIFY_ERRORS = {
+    401: "o Apify recusou o token (401). Confira o token em Configurações.",
+    402: "a conta do Apify está sem crédito (402).",
+    403: "o Apify negou o acesso (403). O plano gratuito não roda esse ator pela API.",
+    404: "ator do Apify não encontrado (404).",
+    408: "o Apify demorou demais (408). Tente de novo.",
+    429: "limite de chamadas do Apify (429). Tente de novo em instantes.",
+}
+
+
+def apify_search(token: str, term: str) -> list[dict[str, Any]]:
+    """Busca os posts em português mais fortes do momento sobre o termo (mesmo ator do robô, sort Top)."""
+    import robo
+
+    url = f"{robo.APIFY_API}/acts/{robo.apify_actor()}/run-sync-get-dataset-items?timeout={int(APIFY_SEARCH_TIMEOUT) - 10}"
+    body = {"searchTerms": [term], "sort": "Top", "tweetLanguage": "pt", "maxItems": 20}
+    try:
+        response = httpx.post(url, json=body, headers={"Authorization": f"Bearer {token}"}, timeout=APIFY_SEARCH_TIMEOUT)
+    except httpx.HTTPError as exc:
+        raise RadarError(f"sem resposta do Apify ({type(exc).__name__}).") from exc
+    if response.status_code >= 400:
+        raise RadarError(APIFY_ERRORS.get(response.status_code, f"o Apify respondeu {response.status_code}."))
+    try:
+        items = response.json()
+    except ValueError as exc:
+        raise RadarError("o Apify devolveu algo que não é JSON.") from exc
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+def post_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Posts prontos para a tela: sem repost, mais views primeiro, no máximo POSTS_SHOWN."""
+    import robo
+
+    rows = []
+    for item in items:
+        tid = robo.tweet_id_of(item)
+        if not tid or robo.is_repost(item):
+            continue
+        author = item.get("author") if isinstance(item.get("author"), dict) else {}
+        handle = str(robo.pick(author, "userName", "username", "screen_name", default="") or "")
+        metrics = robo.tweet_metrics(item)
+        posted = robo.parse_created_at(robo.pick(item, "createdAt", "created_at"))
+        rows.append({
+            "id": tid, "author": handle, "name": str(robo.pick(author, "name", default="") or handle),
+            "text": (robo.tweet_text_of(item) or "")[:280], "views": metrics["view_count"], "likes": metrics["like_count"],
+            "retweets": metrics["retweet_count"], "replies": metrics["reply_count"],
+            "posted_at": posted.isoformat() if posted else None,
+            "url": f"https://x.com/{handle}/status/{tid}" if handle else robo.pick(item, "url", "twitterUrl", default=None),
+        })
+    rows.sort(key=lambda row: -(row["views"] or 0))
+    return rows[:POSTS_SHOWN]
+
+
+def engaging_posts(db: Session, owner_id: int, token: str | None, term: str) -> dict[str, Any]:
+    """Posts do cache (30 min, de qualquer usuário) ou uma busca nova com o token de quem pediu."""
+    key = src.norm(term)
+    if not key:
+        raise ValueError("Termo vazio.")
+    cutoff = _now() - POSTS_TTL
+    cached = db.scalars(select(RadarPostCache).where(RadarPostCache.norm == key).order_by(RadarPostCache.id.desc()).limit(1)).first()
+    if cached is not None and _as_utc(cached.fetched_at) >= cutoff:
+        return {"term": term, "posts": cached.posts or [], "fetched_at": _as_utc(cached.fetched_at).isoformat(), "cached": True}
+    if not (token or "").strip():
+        raise PermissionError("Token do Apify em falta. Cole o seu em Configurações para buscar os posts.")
+    rows = post_rows(apify_search(token.strip(), term))
+    now = _now()
+    db.execute(delete(RadarPostCache).where(RadarPostCache.norm == key).execution_options(synchronize_session=False))
+    db.add(RadarPostCache(norm=key, owner_id=owner_id, fetched_at=now, posts=rows))
+    db.commit()
+    return {"term": term, "posts": rows, "fetched_at": now.isoformat(), "cached": False}

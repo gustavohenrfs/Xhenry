@@ -465,3 +465,26 @@ class RadarItem(IntPK, Base):
     volume: Mapped[str | None] = mapped_column(String(32), nullable=True)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class RadarTerm(IntPK, Base):
+    """Termo que o usuário quer vigiar no Radar ("Flamengo"); em alta em qualquer fonte, vira alerta kind=radar."""
+
+    __tablename__ = "radar_terms"
+    __table_args__ = (UniqueConstraint("owner_id", "norm", name="uq_radar_terms_owner_norm"),)
+
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    term: Mapped[str] = mapped_column(String(80), nullable=False)
+    norm: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class RadarPostCache(IntPK, Base):
+    """Posts que estão engajando sobre um assunto (busca no Apify paga por owner_id); vale 30 min para todos."""
+
+    __tablename__ = "radar_post_cache"
+
+    norm: Mapped[str] = mapped_column(String(400), nullable=False, index=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    posts: Mapped[list | None] = mapped_column(JSON, nullable=True)

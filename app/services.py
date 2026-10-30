@@ -1650,6 +1650,7 @@ NOTIFY_TYPES = [
     ("resumo", "Resumo do fim do dia (23:59)", "🎉", False, "Resumo"),
     ("queda", "Queda de views", "📉", False, "Queda"),
     ("ban", "Possível restrição da conta", "⚠️", False, "Restrição"),
+    ("radar", "Radar de trend (meus termos)", "📡", False, "Radar"),
     ("falha", "Falhas de leitura (Apify, robô)", "🛠️", False, "Falhas"),
     ("acesso", "Novo pedido de acesso", "👤", True, "Acesso"),
 ]
@@ -1722,6 +1723,7 @@ ALERT_TITLES = {
     "marco_dia": ("📊", "Marco de views do dia"),
     "meta": ("🎯", "Meta do dia batida"),
     "resumo": ("🎉", "Resumo do dia"),
+    "radar": ("📡", "Radar de trend"),
     "acesso": ("👤", "Novo pedido de acesso"),
     "erro": ("❌", "Erro na leitura"),
     "silencio": ("🔇", "Robô parado"),
@@ -1736,7 +1738,7 @@ def alert_item(db: Session, row: AlertSent) -> dict[str, Any]:
         return viral_item(db, row)
     lines = [line.strip() for line in (row.detail or "").splitlines() if line.strip()]
     emoji, title = ALERT_TITLES.get(row.kind, ("🔔", "Alerta"))
-    if lines and row.kind in {"marco_post", "marco_dia", "meta", "resumo"}:
+    if lines and row.kind in {"marco_post", "marco_dia", "meta", "resumo", "radar"}:
         title = re.sub(r"^\W+\s*", "", lines[0]) or title  # "Post passou de 10.000 views"
     found = re.search(r"Conta:\s*(.*?)\s*\(@(\w+)\)", row.detail or "")
     link = re.search(r"https://x\.com/\S+", row.detail or "")

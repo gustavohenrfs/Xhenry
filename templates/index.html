@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=26">
+  <link rel="stylesheet" href="/static/css/styles.css?v=27">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=43"></script>
+  <script defer src="/static/js/app.js?v=44"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -195,6 +195,7 @@
                 <button type="button" class="chip" data-alert-group="queda">Queda</button>
                 <button type="button" class="chip" data-alert-group="ban">Restrição</button>
                 <button type="button" class="chip" data-alert-group="falha">Falhas</button>
+                <button type="button" class="chip" data-alert-group="radar">Radar</button>
                 <button type="button" class="chip" data-alert-group="acesso" data-admin-only>Acessos</button>
               </div>
               <ul id="alert-list" class="alert-list"><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li><li class="skel skel-line"></li></ul>
@@ -268,11 +269,22 @@
               </div>
               <ol id="radar-topics" class="radar-topics"><li class="skel-stack"><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i></li></ol>
             </article>
+            <div class="space-y-4">
+            <article id="radar-terms-card" class="glow rounded-3xl border border-neon/20 bg-card p-4">
+              <h3 class="font-display text-xl text-white">Meus termos</h3>
+              <p class="mb-3 text-xs text-mute">Avisa por notificação quando um termo seu aparecer no radar (no máximo 1 vez a cada 6 h por termo).</p>
+              <form id="radar-term-form" class="flex gap-2">
+                <input id="radar-term-input" maxlength="80" placeholder="Ex.: Flamengo" aria-label="Novo termo" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-2.5 text-sm outline-none focus:border-neon">
+                <button type="submit" class="rounded-2xl bg-neon px-4 py-2.5 text-sm font-medium text-ink">Vigiar</button>
+              </form>
+              <ul id="radar-terms" class="radar-terms mt-3"></ul>
+            </article>
             <article class="glow rounded-3xl border border-neon/20 bg-card p-4">
               <h3 class="font-display text-xl text-white">Manchetes</h3>
               <p class="mb-3 text-xs text-mute">Notícias do momento que ainda não viraram assunto</p>
               <ul id="radar-headlines" class="radar-headlines"></ul>
             </article>
+            </div>
           </div>
         </section>
         <section id="pane-archived" class="pane space-y-4">

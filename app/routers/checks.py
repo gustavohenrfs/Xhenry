@@ -76,6 +76,7 @@ ALERT_FILTERS = {
     "ban": {"ban"},
     "falha": {"erro", "silencio", "apify"},
     "acesso": {"acesso"},
+    "radar": {"radar"},
 }
 
 
@@ -151,7 +152,7 @@ def recent_alerts(
     db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Histórico: últimos alertas do usuário (painel, robô e vigia), todos os tipos, do mais novo para o
-    mais antigo. ?group= filtra (views, queda, ban, falha, acesso)."""
+    mais antigo. ?group= filtra (views, queda, ban, falha, acesso, radar)."""
     query = alerts_query(user)
     if group:
         if group not in ALERT_FILTERS:
