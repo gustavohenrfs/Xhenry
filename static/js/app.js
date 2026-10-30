@@ -3521,10 +3521,20 @@ let radarData = null;
 let radarFilter = "";
 let radarRetry = 0;
 let radarAll = false;  // lista inteira ou só os 20 primeiros
+// Região (Brasil ou Internacional) e o filtro "Bom pra engajar" ficam lembrados neste navegador.
+let radarRegion = "br";
+let radarEngage = true;
+let radarHookAt = 0;  // qual ideia do gancho está na tela ("Outra ideia" gira)
+try {
+  radarRegion = localStorage.getItem("radar_region") === "world" ? "world" : "br";
+  radarEngage = localStorage.getItem("radar_engage") !== "off";
+} catch { /* sem storage */ }
+const ENGAGE_MIN = 55;
+function radarRemember(key, value) { try { localStorage.setItem(key, value); } catch { /* sem storage */ } }
 const RADAR_FIRST = 20;
 async function loadRadar({ silent = false } = {}) {
   try {
-    const data = await api("/api/radar");
+    const data = await api("/api/radar?region=" + radarRegion);
     paintRadar(data);
     // O servidor começou uma leitura (dados velhos ou nenhum): olha de novo em 20 s, até 3 vezes.
     if (data.refreshing && radarRetry < 3) {
@@ -3555,16 +3565,64 @@ function paintRadarSources(data) {
   }));
 }
 function radarUpcomingCard(item) {
-  const card = el(item.norm ? "button" : "div", "radar-card" + (item.kind === "previsao" ? " is-hot" : ""));
-  if (item.norm) {
-    card.type = "button";
-    card.addEventListener("click", (event) => openTopic(item.norm, event.currentTarget));
-  }
-  card.append(el("span", "radar-when", radarWhen(item)), el("span", "radar-name", item.name), el("span", "radar-tip", item.tip || ""));
+  const card = el("button", "radar-card" + (item.kind === "previsao" ? " is-hot" : ""));
+  card.type = "button";
+  card.addEventListener("click", (event) => (item.norm ? openTopic(item.norm, event.currentTarget) : openDateIdeas(item, event.currentTarget)));
+  card.append(el("span", "radar-when", radarWhen(item)), el("span", "radar-name font-display", item.name), el("span", "radar-tip", item.tip || ""));
   return card;
 }
+// Copiar e Postar: o texto vai para a área de transferência ou para a tela de post do X, já escrito.
+async function copyIdea(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  toast("Copiado. Cole no X.", "ok");
+}
+function ideaActions(text) {
+  const box = el("span", "idea-actions");
+  const copy = el("button", "idea-btn", "Copiar");
+  copy.type = "button";
+  copy.addEventListener("click", (event) => { event.stopPropagation(); copyIdea(text); });
+  const post = el("a", "idea-btn is-post", "Postar");
+  post.href = "https://x.com/intent/post?text=" + encodeURIComponent(text);
+  post.target = "_blank";
+  post.rel = "noopener noreferrer";
+  post.title = "Abre o X com o texto pronto";
+  post.addEventListener("click", (event) => event.stopPropagation());
+  box.append(copy, post);
+  return box;
+}
+function engageable(topic) { return !topic.blocked && topic.engage >= ENGAGE_MIN; }
+function paintRadarHook() {
+  const host = document.getElementById("radar-hook");
+  const best = (radarData.topics || []).filter((t) => engageable(t) && t.ideas.length)
+    .sort((a, b) => (b.engage + b.heat) - (a.engage + a.heat))[0];
+  host.hidden = !best;
+  if (!best) return;
+  const idea = best.ideas[radarHookAt % best.ideas.length];
+  const top = el("div", "radar-hook-top");
+  const name = el("button", "radar-hook-topic", best.title);
+  name.type = "button";
+  name.title = "Abrir o assunto";
+  name.addEventListener("click", (event) => openTopic(best.norm, event.currentTarget));
+  top.append(el("span", "radar-hook-label", "Gancho do momento"), name, el("span", "radar-cat", best.category));
+  const line = el("p", "radar-hook-line font-display", idea);
+  const actions = ideaActions(idea);
+  const next = el("button", "idea-btn", "Outra ideia");
+  next.type = "button";
+  next.addEventListener("click", () => { radarHookAt += 1; paintRadarHook(); });
+  actions.append(next);
+  host.replaceChildren(top, line, actions);
+}
 function radarTopicRow(topic, index) {
-  const li = el("li", "");
+  const li = el("li", "radar-row");
   const row = el("button", "radar-topic" + (index < 3 ? " is-top" : ""));
   row.type = "button";
   row.addEventListener("click", (event) => openTopic(topic.norm, event.currentTarget));
@@ -3584,11 +3642,18 @@ function radarTopicRow(topic, index) {
   heat.append(bar);
   row.append(el("span", "radar-pos font-mono", String(index + 1)), main, el("span", "radar-cat", topic.category), heat);
   li.append(row);
+  if (topic.ideas && topic.ideas.length) {
+    const hook = el("div", "radar-hookline");
+    hook.append(el("p", "radar-hookline-text", topic.ideas[0]), ideaActions(topic.ideas[0]));
+    li.append(hook);
+  }
   return li;
 }
 function paintRadarTopics() {
   const host = document.getElementById("radar-topics");
-  const topics = (radarData.topics || []).filter((topic) => !radarFilter || topic.category === radarFilter);
+  let topics = (radarData.topics || []).filter((topic) => !radarFilter || topic.category === radarFilter);
+  // "Bom pra engajar": só o que rende post de texto, o mais engajável primeiro; assunto sensível nunca aparece.
+  if (radarEngage) topics = topics.filter(engageable).sort((a, b) => b.engage - a.engage);
   const filters = document.getElementById("radar-filters");
   const present = RADAR_CATEGORIES.filter((name) => radarData.topics.some((topic) => topic.category === name));
   filters.replaceChildren(...[""].concat(present).map((name) => {
@@ -3603,7 +3668,8 @@ function paintRadarTopics() {
     return;
   }
   const shown = radarAll ? topics : topics.slice(0, RADAR_FIRST);
-  const rows = shown.length ? shown.map(radarTopicRow) : [el("li", "text-sm text-mute", "Nada em " + radarFilter + " agora.")];
+  const empty = radarEngage ? "Nada bom pra engajar" + (radarFilter ? " em " + radarFilter : "") + " agora. Desligue o filtro para ver tudo." : "Nada em " + radarFilter + " agora.";
+  const rows = shown.length ? shown.map(radarTopicRow) : [el("li", "text-sm text-mute", empty)];
   if (shown.length < topics.length) {
     const more = el("button", "mt-1 w-full rounded-2xl border border-neon/40 px-4 py-2 text-sm", "Ver todos (" + topics.length + ")");
     more.type = "button";
@@ -3614,8 +3680,16 @@ function paintRadarTopics() {
   }
   host.replaceChildren(...rows);
 }
+function paintRadarControls() {
+  document.getElementById("radar-heading").textContent = radarRegion === "world" ? "Agora no mundo" : "Agora no Brasil";
+  document.querySelectorAll("[data-radar-region]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.radarRegion === radarRegion)));
+  document.getElementById("radar-engage").checked = radarEngage;
+  document.getElementById("radar-terms-card").hidden = radarRegion === "world";
+}
 function paintRadar(data) {
   radarData = data;
+  paintRadarControls();
+  paintRadarHook();
   document.getElementById("radar-updated").textContent = data.updated_at
     ? "Atualizado " + agoText(data.updated_at) + (data.refreshing ? " · lendo as fontes…" : "")
     : data.refreshing ? "Lendo as fontes pela primeira vez…" : "Ainda sem leitura";
@@ -3637,11 +3711,27 @@ function paintRadar(data) {
 }
 async function refreshRadar() {
   try {
-    paintRadar(await api("/api/radar/refresh", { method: "POST" }));
+    paintRadar(await api("/api/radar/refresh?region=" + radarRegion, { method: "POST" }));
     toast("Radar atualizado.");
   } catch (error) { toast(error.message || "Não atualizou o radar."); }
 }
 document.getElementById("radar-refresh").addEventListener("click", refreshRadar);
+document.querySelectorAll("[data-radar-region]").forEach((button) => button.addEventListener("click", () => {
+  if (radarRegion === button.dataset.radarRegion) return;
+  radarRegion = button.dataset.radarRegion;
+  radarRemember("radar_region", radarRegion);
+  radarFilter = "";
+  radarAll = false;
+  radarHookAt = 0;
+  paintRadarControls();
+  loadRadar();
+}));
+document.getElementById("radar-engage").addEventListener("change", (event) => {
+  radarEngage = event.target.checked;
+  radarRemember("radar_engage", radarEngage ? "on" : "off");
+  radarAll = false;
+  if (radarData) paintRadarTopics();
+});
 // Meus termos: o radar avisa (kind=radar: push, sininho, histórico) quando um deles aparece.
 function paintRadarTerms(terms) {
   const host = document.getElementById("radar-terms");
@@ -3720,6 +3810,63 @@ async function loadEngagingPosts(term, box) {
     toast(error.message || "Não buscou os posts.", "error");
   }
 }
+function ideaList(lines) {
+  const list = el("ol", "idea-list");
+  lines.forEach((line) => {
+    const li = el("li", "idea-item");
+    li.append(el("p", "idea-text", line), ideaActions(line));
+    list.append(li);
+  });
+  return list;
+}
+function ideasBox(topic) {
+  const box = el("div", "space-y-3");
+  if (topic.blocked) {
+    box.append(el("p", "text-sm text-mute", "Assunto sensível (morte, tragédia, crime, doença ou criança): sem ideias de post."));
+    return box;
+  }
+  const list = ideaList(topic.ideas || []);
+  const grok = el("button", "w-full rounded-2xl border border-neon/40 px-4 py-2.5 text-sm", "Mais ideias com Grok");
+  grok.type = "button";
+  grok.addEventListener("click", async () => {
+    grok.disabled = true;
+    grok.textContent = "Pedindo ao Grok…";
+    try {
+      const data = await api("/api/radar/ideas/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ norm: topic.norm, region: radarRegion }) });
+      list.prepend(...ideaList(data.ideas).children);
+      grok.textContent = "Mais ideias com Grok";
+    } catch (error) {
+      toast(error.message || "O Grok não respondeu.", "error");
+      grok.textContent = "Tentar de novo";
+    }
+    grok.disabled = false;
+  });
+  box.append(list, grok, el("p", "text-[11px] text-mute", "O Grok usa a sua chave da xAI. As frases são sugestivas, nunca explícitas, e nunca sexualizam uma pessoa real."));
+  return box;
+}
+async function openDateIdeas(item, origin) {
+  const drawer = document.getElementById("drawer");
+  if (!drawerOpen()) drawerReturn = origin || document.activeElement;
+  const key = "radar-data:" + item.name;
+  drawerFor = key;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  document.body.classList.add("drawer-lock");
+  document.getElementById("drawer-close").focus();
+  const head = el("div", "drawer-head");
+  const title = el("h2", "font-display text-2xl text-white", item.name);
+  title.id = "drawer-title";
+  head.append(el("span", "radar-cat", radarWhen(item)), title, el("p", "text-sm text-mute", item.tip || ""));
+  const body = el("div", "space-y-5");
+  body.append(drawerSection("Ideias de post", el("p", "text-sm text-mute", "Montando as ideias…")));
+  document.getElementById("drawer-body").replaceChildren(head, body);
+  try {
+    const data = await api("/api/radar/ideas?norm=" + encodeURIComponent(item.name));
+    if (drawerFor === key) body.replaceChildren(drawerSection("Ideias de post", ideasBox({ ...data, norm: data.norm })));
+  } catch (error) {
+    if (drawerFor === key) body.replaceChildren(el("p", "text-sm text-mute", error.message || "Não deu para montar as ideias."));
+  }
+}
 // Gaveta do assunto: a mesma gaveta das contas, com as posições no X nas últimas 24 h e as notícias.
 async function openTopic(norm, origin) {
   const drawer = document.getElementById("drawer");
@@ -3734,7 +3881,7 @@ async function openTopic(norm, origin) {
   document.getElementById("drawer-body").replaceChildren(loading);
   document.getElementById("drawer-close").focus();
   try {
-    const topic = await api("/api/radar/topic?norm=" + encodeURIComponent(norm));
+    const topic = await api("/api/radar/topic?region=" + radarRegion + "&norm=" + encodeURIComponent(norm));
     if (drawerFor === key) renderTopic(topic);
   } catch (error) {
     if (drawerFor === key) document.getElementById("drawer-body").replaceChildren(el("p", "text-sm text-mute", error.message || "Não deu para abrir o assunto."));
@@ -3773,6 +3920,7 @@ function renderTopic(topic) {
     stats.append(item);
   });
   const extra = el("div", "space-y-5");
+  extra.append(drawerSection("Ideias de post", ideasBox(topic)));
   const seen = topic.history_x.some((hour) => hour.rank !== null);
   const canvasBox = el("div", "h-44");
   const canvas = document.createElement("canvas");

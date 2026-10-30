@@ -15,7 +15,9 @@ from typing import Any
 
 URLS = {
     "x": "https://trends24.in/brazil/",
+    "x_world": "https://trends24.in/",
     "google": "https://trends.google.com/trending/rss?geo=BR",
+    "google_world": "https://trends.google.com/trending/rss?geo=US",
     "news": "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419",
     # A Wikipédia publica o dia anterior inteiro: {date} = AAAA/MM/DD de ontem (UTC).
     "wiki": "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/pt.wikipedia/all-access/{date}",
@@ -27,6 +29,15 @@ def norm(text: str) -> str:
     """Forma de comparar assuntos: minúsculas, sem acento, sem # e @, só letras, números e espaços únicos."""
     plain = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower()
     return " ".join(re.sub(r"[^a-z0-9]+", " ", plain).split())
+
+
+def latin(text: str) -> bool:
+    """Só letras do alfabeto latino (com acentos)? Emoji, número e pontuação não contam. Tira do Brasil os
+    trends em tailandês, árabe, coreano, japonês etc. que o X Brasil às vezes mostra."""
+    for char in text or "":
+        if char.isalpha() and ord(char) > 0x024F and not 0x1E00 <= ord(char) <= 0x1EFF:
+            return False
+    return True
 
 
 class _XParser(HTMLParser):

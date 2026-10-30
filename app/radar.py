@@ -29,15 +29,33 @@ import httpx
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app import radar_ideas
 from app import radar_sources as src
 from app import seasonal
 from app.models import DEFAULT_TZ, RadarItem, RadarPostCache, RadarSnapshot, RadarTerm
 
 log = logging.getLogger("xhenry")
 
-SOURCES = ("x", "google", "news", "wiki")
-INTERVALS = {"x": 15, "google": 15, "news": 30, "wiki": 360}  # minutos
+SOURCES = ("x", "google", "news", "wiki", "x_world", "google_world")
+INTERVALS = {"x": 15, "google": 15, "news": 30, "wiki": 360, "x_world": 15, "google_world": 15}  # minutos
 WEIGHTS = {"x": 40, "google": 30, "news": 20, "wiki": 10}
+# Cada região usa as suas leituras com os nomes genéricos da tela (x, google, news, wiki).
+REGIONS = {
+    "br": {"x": "x", "google": "google", "news": "news", "wiki": "wiki"},
+    "world": {"x": "x_world", "google": "google_world"},
+}
+# Nunca bom pra engajar (e nunca ganha ideia de post): morte, tragédia, crime, doença e qualquer coisa com criança.
+BLOCK_RE = re.compile(
+    r"\b(?:morte|mortes|morre|morreu|morrem|morto|mortos|faleceu|falece|falecimento|velorio|enterro|luto|tragedia|"
+    r"acidente|acidentes|crime|crimes|assassin\w*|homicidio|feminicidio|estupro|abuso|violencia|tiroteio|baleado|"
+    r"ataque|atentado|massacre|sequestro|desaparecid\w*|doenca|cancer|hospital|internad\w*|uti|vitima|vitimas|"
+    r"enchente|desabamento|incendio|guerra|bomba|crianca|criancas|menor|menores|infantil|bebe|bebes|adolescente|"
+    r"pedofil\w*|suicidio|overdose|preso|presa|prisao|policia)\b")
+# Quanto cada categoria rende para conta de texto (+ bônus de data e clima e do calor do assunto).
+ENGAGE_BASE = {"Futebol": 80, "Famosos/TV": 70, "Música": 65, "Política": 55, "Outros": 40, "Economia": 30}
+ENGAGE_BONUS_RE = re.compile(
+    r"\b(?:feriado|carnaval|natal|reveillon|ano novo|black friday|halloween|namorados|dia das maes|dia dos pais|"
+    r"pascoa|sao joao|festa junina|calor|frio|chuva|praia|verao|sextou|final|classico|jogo|bbb|reality|show)\b")
 KEEP = timedelta(days=2)
 TIMEOUT = 15.0
 WIKI_TOP = 40
@@ -92,15 +110,16 @@ def _as_utc(value: datetime) -> datetime:
 def read_source(source: str, fetch: Callable[[str], str], now: datetime | None = None) -> list[dict[str, Any]]:
     """Itens prontos para gravar: rank, title, norm, volume, url, extra. Lista vazia vira RadarError."""
     rows: list[dict[str, Any]] = []
-    if source == "x":
-        for hour, block in enumerate(src.parse_x(fetch(src.URLS["x"]))[:24]):
+    if source in ("x", "x_world"):
+        for hour, block in enumerate(src.parse_x(fetch(src.URLS[source]))[:24]):
             for rank, title in enumerate(block["items"], 1):
                 rows.append({"rank": rank, "title": title, "url": "https://x.com/search?q=" + quote(title),
                              "extra": {"hour": hour, "at": block["at"].isoformat()}})
-    elif source == "google":
-        for rank, item in enumerate(src.parse_google(fetch(src.URLS["google"])), 1):
+    elif source in ("google", "google_world"):
+        geo = "BR" if source == "google" else "US"
+        for rank, item in enumerate(src.parse_google(fetch(src.URLS[source])), 1):
             rows.append({"rank": rank, "title": item["title"], "volume": item["volume"],
-                         "url": "https://trends.google.com/trends/explore?geo=BR&q=" + quote(item["title"]),
+                         "url": f"https://trends.google.com/trends/explore?geo={geo}&q=" + quote(item["title"]),
                          "extra": {"news": item["news"][:5]}})
     elif source == "news":
         for rank, item in enumerate(src.parse_news(fetch(src.URLS["news"])), 1):
@@ -229,12 +248,34 @@ def _rank_in(hour: list[RadarItem], norm: str) -> int | None:
     return None
 
 
-def build_topics(db: Session) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[list[RadarItem]]]:
-    """(assuntos, manchetes sem assunto, horas do X)."""
-    x_hours = _x_hours(_items(db, _last_ok(db, "x")))
-    google = _items(db, _last_ok(db, "google"))
-    news = _items(db, _last_ok(db, "news"))
-    wiki = _items(db, _last_ok(db, "wiki"))
+def blocked_text(text: str) -> bool:
+    return BLOCK_RE.search(src.norm(text)) is not None
+
+
+def engage_of(topic: dict[str, Any]) -> int:
+    """0–100: o quanto o assunto rende para post de texto (futebol, reality, show, data…); bloqueado = 0."""
+    if topic["blocked"]:
+        return 0
+    text = " ".join([topic["norm"]] + [src.norm(n["title"]) for n in topic["news"][:3]])
+    base = 40 if radar_ideas.is_person(topic["norm"], topic["category"]) else ENGAGE_BASE.get(topic["category"], 40)
+    score = base + (15 if ENGAGE_BONUS_RE.search(text) else 0) + topic["heat"] * 0.2
+    if topic.get("sources") == ["wiki"]:
+        score *= 0.6  # só a Wikipédia: gente lida ontem, quase nunca é assunto do X agora
+    return max(1, min(100, round(score)))
+
+
+def build_topics(db: Session, region: str = "br") -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[list[RadarItem]]]:
+    """(assuntos, manchetes sem assunto, horas do X) da região. No Brasil, títulos em escrita não latina saem."""
+    names = REGIONS[region]
+
+    def read(kind: str) -> list[RadarItem]:
+        if kind not in names:
+            return []
+        items = _items(db, _last_ok(db, names[kind]))
+        return [i for i in items if src.latin(i.title)] if region == "br" else items
+
+    x_hours = _x_hours(read("x"))
+    google, news, wiki = read("google"), read("news"), read("wiki")
     topics: list[dict[str, Any]] = []
 
     def topic_for(item: RadarItem) -> dict[str, Any]:
@@ -289,13 +330,17 @@ def build_topics(db: Session) -> tuple[list[dict[str, Any]], list[dict[str, Any]
         text = " ".join([topic["norm"]] + [src.norm(n["title"]) for n in topic["news"][:3]])
         topic["category"] = category_of(text)
         topic["ranks"] = {name: part["rank"] for name, part in topic["sources"].items()}
-        topic["sources"] = [name for name in SOURCES if name in topic["sources"]]
+        topic["sources"] = [name for name in WEIGHTS if name in topic["sources"]]
         seen, unique = set(), []
         for item in topic["news"]:
             if item["url"] not in seen:
                 seen.add(item["url"])
                 unique.append(item)
         topic["news"] = unique[:6]
+        if not topic["title"].startswith("#"):
+            topic["title"] = radar_ideas.clean_title(topic["title"])  # "mônica fonseca" → "Mônica Fonseca"
+        topic["blocked"] = blocked_text(text)
+        topic["engage"] = engage_of(topic)
     topics.sort(key=lambda t: (-t["heat"], t["rank_x"] or 99))
     return topics[:MAX_TOPICS], headlines[:12], x_hours
 
@@ -317,26 +362,30 @@ def predictions(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: -item["heat"])[:8]
 
 
-def board(db: Session, now: datetime | None = None) -> dict[str, Any]:
+def board(db: Session, now: datetime | None = None, region: str = "br") -> dict[str, Any]:
     now = now or _now()
-    reads = last_reads(db)
-    topics, headlines, _ = build_topics(db)
+    names = REGIONS[region]
+    reads = {kind: read for kind, real in names.items() if (read := last_reads(db).get(real)) is not None}
+    topics, headlines, _ = build_topics(db, region)
     today = now.astimezone(DEFAULT_TZ_INFO).date()
     ok_times = [_as_utc(r.fetched_at) for r in reads.values() if r.ok]
     public = [{key: t[key] for key in ("norm", "title", "sources", "ranks", "heat", "rank_x", "hours_x", "direction",
-                                         "volume", "category", "url")} | {"news": t["news"][:2]} for t in topics]
+                                         "volume", "category", "url", "engage", "blocked")}
+              | {"news": t["news"][:2], "ideas": radar_ideas.ideas(t)} for t in topics]
     return {
+        "region": region,
         "updated_at": max(ok_times).isoformat() if ok_times else None,
-        "sources": {name: {"ok": reads[name].ok, "at": _as_utc(reads[name].fetched_at).isoformat(), "error": reads[name].error}
-                    if name in reads else {"ok": None, "at": None, "error": None} for name in SOURCES},
+        "sources": {kind: {"ok": reads[kind].ok, "at": _as_utc(reads[kind].fetched_at).isoformat(), "error": reads[kind].error}
+                    if kind in reads else {"ok": None, "at": None, "error": None} for kind in names},
         "topics": public,
         "headlines": headlines,
-        "upcoming": predictions(topics) + seasonal.upcoming(today),
+        # Datas sazonais são do calendário brasileiro: só no Brasil.
+        "upcoming": predictions(topics) + (seasonal.upcoming(today) if region == "br" else []),
     }
 
 
-def topic_detail(db: Session, norm: str) -> dict[str, Any] | None:
-    topics, _, x_hours = build_topics(db)
+def topic_detail(db: Session, norm: str, region: str = "br") -> dict[str, Any] | None:
+    topics, _, x_hours = build_topics(db, region)
     key = src.norm(norm)
     topic = next((t for t in topics if t["norm"] == key), None) or next((t for t in topics if _same(t["norm"], key)), None)
     if topic is None:
@@ -347,6 +396,7 @@ def topic_detail(db: Session, norm: str) -> dict[str, Any] | None:
         history.append({"at": at, "rank": _rank_in(hour, topic["norm"])})
     detail = {key: value for key, value in topic.items() if key != "climb_3h"}
     detail["history_x"] = history
+    detail["ideas"] = radar_ideas.ideas(topic)
     return detail
 
 

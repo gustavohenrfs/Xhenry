@@ -1454,3 +1454,59 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 }
 .radar-term-x:hover, .radar-term-x:focus-visible { color: var(--bad); background: rgb(var(--c-ink) / .4); }
 .radar-post { display: flex; flex-direction: column; gap: .3rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+
+/* ---------- Radar: controles, gancho do momento e ideias de post ---------- */
+.radar-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+/* Brasil | Internacional: um trilho com a opção marcada acesa (não são abas, é um filtro da mesma tela). */
+.radar-seg { display: inline-flex; padding: .2rem; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); }
+.radar-seg button { min-height: 2.1rem; padding: 0 .9rem; border-radius: 999px; font-size: .8rem; color: var(--muted); transition: color .15s ease, background .15s ease; }
+.radar-seg button[aria-checked="true"] { color: var(--on-accent); background: var(--accent); }
+.radar-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.radar-switch { position: relative; display: inline-flex; align-items: center; gap: .5rem; min-height: 2.5rem; cursor: pointer; font-size: .8rem; color: var(--fg); }
+.radar-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.radar-switch-track { position: relative; width: 2.3rem; height: 1.3rem; border-radius: 999px; background: var(--line-strong); transition: background .2s ease; }
+.radar-switch-track i { position: absolute; top: .15rem; left: .15rem; width: 1rem; height: 1rem; border-radius: 999px; background: var(--fg); transition: transform .2s ease; }
+.radar-switch input:checked + .radar-switch-track { background: var(--accent); }
+.radar-switch input:checked + .radar-switch-track i { transform: translateX(1rem); background: var(--on-accent); }
+.radar-switch input:focus-visible + .radar-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Gancho do momento: o único destaque da aba. O assunto pequeno em cima, a frase pronta grande, e as ações. */
+.radar-hook {
+  position: relative; display: grid; gap: .9rem; padding: 1.25rem 1.4rem; border-radius: 1.75rem;
+  border: 1px solid rgb(var(--c-neon) / .45); background:
+    radial-gradient(120% 140% at 0% 0%, rgb(var(--c-neon) / .16), transparent 55%), var(--field);
+  box-shadow: 0 0 0 1px rgb(var(--c-neon) / .08), 0 18px 40px -24px var(--laser-a);
+}
+.radar-hook[hidden] { display: none; }
+.radar-hook-top { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; }
+.radar-hook-label { font-size: .75rem; color: var(--accent); }
+.radar-hook-topic { font-size: .95rem; color: var(--fg); text-decoration: underline dotted; text-underline-offset: 4px; }
+.radar-hook-line {
+  max-width: 34ch; font-family: var(--font-display, inherit); font-size: clamp(1.35rem, 1rem + 1.6vw, 2rem);
+  line-height: 1.2; color: var(--fg); overflow-wrap: anywhere; text-wrap: balance;
+}
+.radar-hook .idea-actions { gap: .5rem; }
+.radar-hook .idea-btn { min-height: 2.5rem; padding: 0 1.1rem; font-size: .85rem; }
+/* Botões de ideia: Copiar (contorno) e Postar (cheio, abre o X com o texto). */
+.idea-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem; flex-shrink: 0; }
+.idea-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 2rem; padding: 0 .75rem;
+  border: 1px solid var(--line-strong); border-radius: 999px; font-size: .75rem; color: var(--fg); text-decoration: none;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.idea-btn:hover, .idea-btn:focus-visible { border-color: var(--accent); outline: none; }
+.idea-btn.is-post { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+/* Linha do assunto na lista: a primeira ideia logo embaixo, para copiar sem abrir nada. */
+.radar-row { display: grid; }
+.radar-hookline { display: flex; align-items: center; gap: .6rem; margin: -.15rem 0 .35rem 2.75rem; padding: .45rem .7rem; border-left: 2px solid rgb(var(--c-neon) / .5); }
+.radar-hookline-text { flex: 1; min-width: 0; font-size: .82rem; color: var(--muted); line-height: 1.35; overflow-wrap: anywhere; }
+.idea-list { display: grid; gap: .5rem; }
+.idea-item { display: flex; flex-direction: column; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--field); }
+.idea-text { font-size: .95rem; color: var(--fg); line-height: 1.4; overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .radar-controls { width: 100%; }
+  .radar-hook { padding: 1.1rem; border-radius: 1.4rem; }
+  .radar-hookline { flex-direction: column; align-items: flex-start; margin-left: 2.35rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .radar-switch-track, .radar-switch-track i, .radar-seg button { transition: none; }
+}

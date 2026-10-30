@@ -172,3 +172,23 @@ celular, na barra de baixo no lugar de Arquivadas (Arquivadas vai para "Mais").
 
 Nomes internos, a lista exata de palavras-chave por categoria, os pesos finos do calor (dentro do descrito), o
 texto das dicas sazonais, o desenho do ícone.
+
+## Parte 3 — Brasil/Internacional, nicho +18 e ideias de post (pedido de 2026-10-30, aprovado)
+
+Por quê: o radar mostrava assuntos de fora (hashtag tailandesa, "Poland") e o dono quer usar as trends em contas de
+texto de modelos +18 no X, no tom dos exemplos dele: "Se o Lula ganhar nessa eleição eu mando fotinha", "Se o
+Flamengo ganhar eu vou fazer uma coisa muuito pra frente rs", "Fiquei sabendo que os flamenguistas têm … é vdd?".
+
+- **Brasil / Internacional**: seletor no topo. Brasil = fontes de hoje, sem títulos em escrita não latina.
+  Internacional = X mundial (trends24.in/) e Google Trends dos EUA (`geo=US`), mesmas regras de calor e direção.
+- **Bom pra engajar** (filtro ligado por padrão, dá para desligar): nota 0–100 por assunto. Sobem futebol/jogo,
+  reality/novela/TV, música/show, datas comemorativas, clima, feriado, política de eleição. Bloqueados sempre
+  (somem do filtro e nunca ganham ideia): morte, tragédia, acidente, crime, violência, doença, luto e qualquer
+  termo de criança/menor.
+- **Ideias de post**: 3–5 frases prontas por assunto no tom acima (promessa "se X acontecer eu…", pergunta
+  provocante à torcida/fãs, "quem tá vendo comigo?"), com "rs"/emoji; um toque copia. Grátis por modelos por tipo
+  (futebol com o nome da torcida: flamenguistas, corintianos…; eleição; reality/TV; música; data; genérico).
+  Botão opcional "Mais ideias com Grok" (chave xAI do usuário). Regras fixas nas duas: sugestivo, nunca explícito;
+  nunca sexualizar pessoa real com nome (a provocação vai para a torcida, o evento ou a situação); nada com menores.
+- **Visual**: redesenho da aba com a skill de design, no estilo do XHenry, com os engajáveis em destaque e as ideias
+  à mão.

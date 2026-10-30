@@ -148,8 +148,9 @@ def db():
 
 
 def test_refresh_saves_one_read_per_source(db):
-    assert radar.refresh(db, fetch=fake_fetch) == {"x": True, "google": True, "news": True, "wiki": True}
-    assert db.query(RadarSnapshot).count() == 4
+    assert radar.refresh(db, fetch=fake_fetch) == {"x": True, "google": True, "news": True, "wiki": True,
+                                                   "x_world": True, "google_world": True}
+    assert db.query(RadarSnapshot).count() == 6
     x_items = db.query(RadarItem).filter(RadarItem.source == "x").all()
     assert sorted((i.extra["hour"], i.rank, i.title) for i in x_items) == [(0, 1, "#Flamengo"), (0, 2, "Lula"), (1, 1, "Lula")]
 
@@ -160,7 +161,7 @@ def test_one_source_down_does_not_stop_the_others(db):
             raise TimeoutError("demorou")
         return fake_fetch(url)
 
-    assert radar.refresh(db, fetch=flaky) == {"x": False, "google": True, "news": True, "wiki": True}
+    assert radar.refresh(db, ["x", "google", "news", "wiki"], flaky) == {"x": False, "google": True, "news": True, "wiki": True}
     board = radar.board(db)
     assert board["sources"]["x"]["ok"] is False and "demorou" in board["sources"]["x"]["error"]
     assert any(t["norm"] == "flamengo" for t in board["topics"]), "o Google continua"
@@ -193,10 +194,10 @@ def test_refresh_due_and_pruning(db):
 
     now = datetime.now(timezone.utc)
     radar.refresh(db, fetch=fake_fetch, now=now - timedelta(days=3))
-    assert radar.refresh_due(db, now) == ["x", "google", "news", "wiki"]
-    radar.refresh(db, ["x", "google", "news", "wiki"], fake_fetch, now - timedelta(minutes=20))
-    assert db.query(RadarSnapshot).count() == 4, "leituras de mais de 2 dias somem"
-    assert radar.refresh_due(db, now) == ["x", "google"], "notícias (30 min) e Wikipédia (6 h) ainda valem"
+    assert radar.refresh_due(db, now) == list(radar.SOURCES)
+    radar.refresh(db, list(radar.SOURCES), fake_fetch, now - timedelta(minutes=20))
+    assert db.query(RadarSnapshot).count() == 6, "leituras de mais de 2 dias somem"
+    assert radar.refresh_due(db, now) == ["x", "google", "x_world", "google_world"], "notícias (30 min) e Wikipédia (6 h) ainda valem"
 
 
 def test_topic_detail_has_24h_history(db):
@@ -223,7 +224,7 @@ def test_watchdog_reads_due_sources(db, monkeypatch):
     calls = []
     monkeypatch.setenv("RADAR", "on")
     monkeypatch.setattr(radar, "refresh", lambda session, sources, *a, **k: calls.append(list(sources)))
-    assert watchdog.run_radar(db) == ["x", "google", "news", "wiki"] and calls == [["x", "google", "news", "wiki"]]
+    assert watchdog.run_radar(db) == list(radar.SOURCES) and calls == [list(radar.SOURCES)]
     monkeypatch.setenv("RADAR", "off")
     assert watchdog.run_radar(db) == []
 

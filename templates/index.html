@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=27">
+  <link rel="stylesheet" href="/static/css/styles.css?v=28">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=44"></script>
+  <script defer src="/static/js/app.js?v=45"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -251,12 +251,24 @@
         <section id="pane-radar" class="pane space-y-4">
           <div class="radar-head">
             <div class="min-w-0 flex-1">
-              <h2 class="font-display text-2xl text-white">Agora no Brasil</h2>
+              <h2 id="radar-heading" class="font-display text-2xl text-white">Agora no Brasil</h2>
               <p id="radar-updated" class="text-xs text-mute">Lendo o radar…</p>
             </div>
-            <div id="radar-sources" class="radar-sources" aria-label="Fontes"></div>
-            <button id="radar-refresh" type="button" class="rounded-full border border-neon/40 px-4 py-1.5 text-sm">Atualizar</button>
+            <div class="radar-controls">
+              <div class="radar-seg" role="radiogroup" aria-label="Região">
+                <button type="button" role="radio" data-radar-region="br" aria-checked="true">Brasil</button>
+                <button type="button" role="radio" data-radar-region="world" aria-checked="false">Internacional</button>
+              </div>
+              <label class="radar-switch">
+                <input id="radar-engage" type="checkbox" checked>
+                <span class="radar-switch-track" aria-hidden="true"><i></i></span>
+                <span>Bom pra engajar</span>
+              </label>
+              <div id="radar-sources" class="radar-sources" aria-label="Fontes"></div>
+              <button id="radar-refresh" type="button" class="rounded-full border border-neon/40 px-4 py-1.5 text-sm">Atualizar</button>
+            </div>
           </div>
+          <section id="radar-hook" class="radar-hook" aria-live="polite" hidden></section>
           <section aria-labelledby="radar-next-title">
             <h3 id="radar-next-title" class="mb-2 text-sm text-white">Próximos dias</h3>
             <div id="radar-upcoming" class="radar-strip"><i class="skel radar-skel-card"></i><i class="skel radar-skel-card"></i><i class="skel radar-skel-card"></i></div>

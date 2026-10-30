@@ -46,6 +46,8 @@ PROTECTED = [
     ("post", "/api/radar/terms", {"term": "Flamengo"}),
     ("delete", "/api/radar/terms/1", None),
     ("post", "/api/radar/posts", {"term": "Flamengo"}),
+    ("get", "/api/radar/ideas?norm=flamengo", None),
+    ("post", "/api/radar/ideas/grok", {"norm": "flamengo"}),
     ("get", "/api/dashboard?period=today", None),
     ("get", "/api/suggestions", None),
     ("get", "/api/folders", None),

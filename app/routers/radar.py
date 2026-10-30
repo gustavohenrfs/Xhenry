@@ -17,12 +17,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import radar
+from app import radar, radar_ideas, seasonal
 from app.database import SessionLocal, get_db
 from app.models import RadarTerm, User
 from app.radar_sources import norm as norm_of
 from app.routers.auth import approved_user
-from app.services import as_utc, now_utc, user_settings
+from app.services import as_utc, now_utc, user_settings, xai_key
 
 log = logging.getLogger("xhenry")
 router = APIRouter(dependencies=[Depends(approved_user)])
@@ -48,8 +48,16 @@ def _refresh_in_background() -> bool:
     return True
 
 
+REGION = Query("br", pattern="^(br|world)$")
+
+
 class TermIn(BaseModel):
     term: str = Field(min_length=1, max_length=80)
+
+
+class IdeasIn(BaseModel):
+    norm: str = Field(min_length=1, max_length=400)
+    region: str = Field(default="br", pattern="^(br|world)$")
 
 
 def with_my_terms(db: Session, user: User, payload: dict[str, Any]) -> dict[str, Any]:
@@ -59,8 +67,8 @@ def with_my_terms(db: Session, user: User, payload: dict[str, Any]) -> dict[str,
 
 
 @router.get("/api/radar")
-def read_radar(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    payload = with_my_terms(db, user, radar.board(db))
+def read_radar(region: str = REGION, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    payload = with_my_terms(db, user, radar.board(db, region=region))
     updated = payload["updated_at"]
     stale = updated is None or now_utc() - as_utc(radar.parse_iso(updated)) > STALE
     payload["refreshing"] = bool(stale and radar.radar_enabled() and _refresh_in_background())
@@ -68,17 +76,18 @@ def read_radar(user: User = Depends(approved_user), db: Session = Depends(get_db
 
 
 @router.post("/api/radar/refresh")
-def refresh_radar(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+def refresh_radar(region: str = REGION, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not radar.refresh_manual(db):
         raise HTTPException(429, "O radar acabou de ser atualizado. Tente de novo em 2 minutos.")
-    payload = with_my_terms(db, user, radar.board(db))
+    payload = with_my_terms(db, user, radar.board(db, region=region))
     payload["refreshing"] = False
     return payload
 
 
 @router.get("/api/radar/topic")
-def read_topic(norm: str = Query(..., min_length=1, max_length=400), db: Session = Depends(get_db)) -> dict[str, Any]:
-    detail = radar.topic_detail(db, norm)
+def read_topic(norm: str = Query(..., min_length=1, max_length=400), region: str = REGION,
+               db: Session = Depends(get_db)) -> dict[str, Any]:
+    detail = radar.topic_detail(db, norm, region)
     if detail is None:
         raise HTTPException(404, "Esse assunto saiu do radar.")
     return detail
@@ -127,3 +136,42 @@ def engaging_posts(payload: TermIn, user: User = Depends(approved_user), db: Ses
         raise HTTPException(400, str(exc)) from exc
     except radar.RadarError as exc:
         raise HTTPException(502, "A busca no Apify falhou: " + str(exc)) from exc
+
+
+def idea_subject(db: Session, norm: str, region: str) -> tuple[dict[str, Any], str | None]:
+    """O assunto (ou a data sazonal) para as ideias de post; 404 se saiu do radar."""
+    topic = radar.topic_detail(db, norm, region)
+    if topic is not None:
+        return topic, None
+    key = norm_of(norm)
+    for item in seasonal.upcoming(now_utc().astimezone(radar.DEFAULT_TZ_INFO).date(), 30):
+        if norm_of(item["name"]) == key:
+            return {"title": item["name"], "norm": key, "category": "Datas", "blocked": False}, "data"
+    raise HTTPException(404, "Esse assunto saiu do radar.")
+
+
+@router.get("/api/radar/ideas")
+def read_ideas(norm: str = Query(..., min_length=1, max_length=400), region: str = REGION,
+               db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Ideias de post grátis (modelos por tipo de assunto). Assunto sensível volta sem ideias."""
+    topic, kind = idea_subject(db, norm, region)
+    return {"norm": topic["norm"], "title": topic["title"], "blocked": bool(topic.get("blocked")),
+            "ideas": radar_ideas.ideas(topic, kind)}
+
+
+@router.post("/api/radar/ideas/grok")
+def grok_ideas(payload: IdeasIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Mais ideias com o Grok, pela chave xAI do usuário."""
+    topic, _ = idea_subject(db, payload.norm, payload.region)
+    if topic.get("blocked"):
+        raise HTTPException(400, "Assunto sensível (morte, tragédia, crime, doença ou criança): sem ideias de post.")
+    key = xai_key(db, user)
+    if not key:
+        raise HTTPException(400, "Cole a sua chave da xAI em Configurações para pedir ideias ao Grok.")
+    try:
+        lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, radar_ideas.grok_prompt(topic)))
+    except ValueError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    if not lines:
+        raise HTTPException(502, "O Grok não devolveu ideias. Tente de novo.")
+    return {"norm": topic["norm"], "title": topic["title"], "ideas": lines}
