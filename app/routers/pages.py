@@ -71,7 +71,7 @@ def live_user(request: Request, token: str = "", db: Session = Depends(get_db)):
 
 @router.get("/api/live")
 async def live(request: Request, once: bool = False, user=Depends(live_user)) -> Response:
-    """Painel ao vivo (app/live.py): eventos com os carimbos de dados, alertas e coletores.
+    """Painel ao vivo (app/live.py): eventos com os carimbos de dados e alertas.
 
     ?once=1 devolve só o carimbo atual em JSON (testes e diagnóstico).
     """

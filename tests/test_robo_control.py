@@ -1,4 +1,4 @@
-"""Controle do robô pela aba Configurações: liga/desliga, intervalo e "Atualizar Dados"."""
+"""Controle do robô pela aba Configurações: liga/desliga, intervalo do Apify e "Atualizar Dados"."""
 
 from __future__ import annotations
 
@@ -33,11 +33,15 @@ def clean(client):
             db.query(SyncRun).delete()
             db.query(AlertSent).delete()
             row = get_settings(db)
-            row.robo_enabled, row.robo_interval_min, row.robo_run_requested_at = True, 5, None
+            row.robo_enabled, row.apify_interval_min, row.robo_run_requested_at = True, 30, None
+            services.user_settings(db, services.ensure_admin(db).id).apify_token = "tok-admin"
             db.commit()
     reset()
     yield
     reset()
+    with SessionLocal() as db:
+        services.user_settings(db, services.ensure_admin(db).id).apify_token = None
+        db.commit()
 
 
 @pytest.fixture
@@ -59,8 +63,8 @@ def silence() -> bool:
 
 def test_defaults(client):
     body = client.get("/api/robo").json()
-    assert body["enabled"] is True and body["interval_min"] == 5
-    assert body["requested_at"] is None and body["last_run"] is None and 5 in body["intervals"]
+    assert body["enabled"] is True and body["apify"]["interval_min"] == 30 and body["apify"]["active"] is True
+    assert body["requested_at"] is None and body["last_run"] is None and "intervals" not in body
 
 
 def test_last_run_and_next(client):
@@ -71,13 +75,24 @@ def test_last_run_and_next(client):
 
 
 def test_change_interval_and_reject_odd_values(client):
-    assert client.put("/api/robo", json={"interval_min": 30}).json()["interval_min"] == 30
-    assert client.put("/api/robo", json={"interval_min": 7}).status_code == 400
+    assert client.put("/api/robo", json={"apify_interval_min": 60}).json()["apify"]["interval_min"] == 60
+    assert client.put("/api/robo", json={"apify_interval_min": 7}).status_code == 400
 
 
 def test_run_now_records_request(client):
+    # SQLite: sem leitura na hora, o pedido fica para o cron.
     body = client.post("/api/robo/run").json()
     assert body["requested_at"] is not None
+
+
+def test_last_failed_run_shows_the_reason(client):
+    when = now_utc() - timedelta(minutes=1)
+    with SessionLocal() as db:
+        db.add(SyncRun(kind=SyncKind.TWEETS, status=SyncStatus.FAILED, started_at=when, finished_at=when,
+                       error="a conta do Apify está sem crédito (402).", stats={"via": "apify"}))
+        db.commit()
+    run = client.get("/api/robo").json()["last_run"]
+    assert run["status"] == "failed" and "402" in run["error"]
 
 
 def test_turning_back_on_asks_for_a_run(client):
@@ -94,7 +109,7 @@ def test_watchdog_quiet_when_off(client, sent):
 
 
 def test_watchdog_follows_interval(client, sent):
-    client.put("/api/robo", json={"interval_min": 60})
+    client.put("/api/robo", json={"apify_interval_min": 60})
     beat(100)
     assert silence() is False  # limite: 2 x 60 + 5 = 125 min
     beat(130)
@@ -110,10 +125,10 @@ def test_watchdog_waits_for_pending_request(client, sent):
     assert silence() is False
 
 
-def test_health_counts_late_accounts_and_collectors(client):
+def test_health_counts_late_accounts(client):
     from uuid import uuid4
 
-    from app.models import Collector, Folder, XAccount
+    from app.models import Folder, XAccount
     from app.services import ensure_admin
 
     now = now_utc()
@@ -126,9 +141,6 @@ def test_health_counts_late_accounts_and_collectors(client):
             XAccount(folder_id=folder.id, username=f"em_dia_{tag}", collected_at=now - timedelta(minutes=10)),
             XAccount(folder_id=folder.id, username=f"atras_{tag}", collected_at=now - timedelta(days=2)),
             XAccount(folder_id=folder.id, username=f"nunca_{tag}"),
-            Collector(handle=f"livre_{tag}", is_active=True),
-            Collector(handle=f"cast_{tag}", is_active=True, paused_until=now + timedelta(minutes=30)),
-            Collector(handle=f"off_{tag}", is_active=False),
         ])
         db.commit()
     beat(3, contas=1)
@@ -138,14 +150,10 @@ def test_health_counts_late_accounts_and_collectors(client):
         assert {f"atras_{tag}", f"nunca_{tag}"} <= late and f"em_dia_{tag}" not in late
         assert body["stale"][0]["collected_at"] is None, "nunca coletada vem primeiro"
         assert body["fresh"] == body["accounts"] - len(body["stale"])
-        c = body["collectors"]
-        assert (c["free"], c["benched"], c["off"]) >= (1, 1, 1)
-        assert c["next_free_at"] is not None
-        assert body["late_after_min"] >= 60 and body["last_run"] is not None
-        assert "proxy" not in str(body) and "cookies" not in str(body)
+        assert body["late_after_min"] == 60 and body["last_run"] is not None, "2 x 30 min do Apify"
+        assert "collectors" not in body
     finally:
         with SessionLocal() as db:
             db.query(XAccount).filter(XAccount.username.like(f"%_{tag}")).delete(synchronize_session=False)
-            db.query(Collector).filter(Collector.handle.like(f"%_{tag}")).delete(synchronize_session=False)
             db.query(Folder).filter(Folder.name == f"Saude {tag}").delete(synchronize_session=False)
             db.commit()

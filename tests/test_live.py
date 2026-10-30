@@ -1,4 +1,4 @@
-"""Painel ao vivo: os carimbos mudam quando o robô grava, quando chega alerta e quando um coletor muda."""
+"""Painel ao vivo: os carimbos mudam quando o robô grava e quando chega alerta."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from app import live
 from conftest import admin_row
 from app.database import SessionLocal
 from app.routers.pages import live_user
-from app.models import AlertSent, Collector, Folder, TweetSample, XAccount
+from app.models import AlertSent, Folder, TweetSample, XAccount
 from app.services import ensure_admin
 from main import app
 
@@ -34,7 +34,7 @@ def stamp(client):
 
 def test_stamps_change_only_for_what_changed(client):
     first = stamp(client)
-    assert set(first) == {"data", "alerts", "collectors"}
+    assert set(first) == {"data", "alerts"}
     assert stamp(client) == first, "nada mudou, carimbo igual"
     tag = uuid4().hex[:6]
     with SessionLocal() as db:
@@ -55,10 +55,6 @@ def test_stamps_change_only_for_what_changed(client):
         db.commit()
     third = stamp(client)
     assert third["alerts"] != second["alerts"] and third["data"] == second["data"]
-    with SessionLocal() as db:
-        db.add(Collector(handle=f"lv{tag}", paused_until=datetime.now(timezone.utc) + timedelta(hours=1)))
-        db.commit()
-    assert stamp(client)["collectors"] != third["collectors"]
 
 
 def test_stream_sends_first_stamp_then_stops_on_disconnect(monkeypatch):

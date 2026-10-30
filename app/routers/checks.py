@@ -74,7 +74,7 @@ ALERT_FILTERS = {
     "views": {"viral", "marco_post", "marco_dia", "meta", "resumo"},
     "queda": {"queda"},
     "ban": {"ban"},
-    "falha": {"coletor", "erro", "silencio", "apify"},
+    "falha": {"erro", "silencio", "apify"},
     "acesso": {"acesso"},
 }
 

@@ -157,7 +157,7 @@ def test_users_never_see_each_other(client):
 
 def test_admin_only_routes_refuse_friends(client):
     friend = bearer(make_user())
-    for method, path in [("get", "/api/collectors"), ("get", "/api/robo"), ("post", "/api/robo/run"),
+    for method, path in [("get", "/api/robo"), ("post", "/api/robo/run"),
                          ("get", "/api/robo/health"), ("get", "/api/admin/users"), ("post", "/api/admin/invites"),
                          ]:
         resp = client.request(method, path, headers=friend, json={} if method == "post" else None)
@@ -249,7 +249,6 @@ def test_live_stamps_are_per_user(client):
     a, b = make_user(), make_user()
     first_a = client.get("/api/live?once=1", headers=bearer(a)).json()
     first_b = client.get("/api/live?once=1", headers=bearer(b)).json()
-    assert first_b["collectors"] == "", "coletores só para o admin"
     make_account(a)
     assert client.get("/api/live?once=1", headers=bearer(a)).json()["alerts"] != first_a["alerts"]
     assert client.get("/api/live?once=1", headers=bearer(b)).json()["alerts"] == first_b["alerts"]
@@ -327,7 +326,7 @@ def test_watchdog_waits_the_apify_interval(monkeypatch):
     with SessionLocal() as db:
         admin = ensure_admin(db)
         settings = get_settings(db)
-        settings.robo_enabled, settings.robo_interval_min, settings.apify_interval_min = True, 5, 60
+        settings.robo_enabled, settings.apify_interval_min = True, 60
         settings.robo_run_requested_at = None
         row = services.user_settings(db, admin.id)
         row.apify_token = "tok"
@@ -336,9 +335,11 @@ def test_watchdog_waits_the_apify_interval(monkeypatch):
         now = datetime.now(timezone.utc)
         monkeypatch.setattr(watchdog, "last_robot_beat", lambda _db: now - timedelta(minutes=40))
         assert watchdog.check_silence(db, now) is False, "40 min sem batimento é normal com Apify a cada 60"
-        row.apify_token = None
+        settings.apify_interval_min = 15
         db.commit()
-        assert watchdog.check_silence(db, now) is True, "só com coletores (5 min), 40 min é robô parado"
+        assert watchdog.check_silence(db, now) is True, "Apify a cada 15 min: 40 min é robô parado"
+        settings.apify_interval_min = 30
+        db.commit()
 
 
 def test_friend_reading_schedule_and_instant_read(client, monkeypatch):
@@ -362,7 +363,7 @@ def test_friend_reading_schedule_and_instant_read(client, monkeypatch):
     assert state["requested_at"] is None and state["running"] is True, "sem pedido para o cron (não lê duas vezes)"
 
 
-def test_admin_refresh_reads_now_when_apify_is_active(client, monkeypatch):
+def test_admin_refresh_reads_now_and_needs_a_token(client, monkeypatch):
     from app import reader
 
     admin = admin_headers()
@@ -380,8 +381,9 @@ def test_admin_refresh_reads_now_when_apify_is_active(client, monkeypatch):
         assert started and started[0][1] is True and robo["requested_at"] is None and robo["asked_at"]
         client.put("/api/settings", json={"apify_token": ""}, headers=admin)
         started.clear()
-        robo = client.post("/api/robo/run", headers=admin).json()
-        assert not started and robo["requested_at"], "sem Apify: pedido para o cron chamar os coletores"
+        resp = client.post("/api/robo/run", headers=admin)
+        assert resp.status_code == 400 and "Apify" in resp.json()["detail"], "sem token não há por onde ler"
+        assert not started and client.get("/api/robo", headers=admin).json()["requested_at"] is None
     finally:
         client.put("/api/settings", json={"apify_token": ""}, headers=admin)
         with SessionLocal() as db:

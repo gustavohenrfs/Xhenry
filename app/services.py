@@ -105,7 +105,6 @@ def ensure_user_auth_columns() -> None:
         kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
         added = {
             "robo_enabled": "BOOLEAN NOT NULL DEFAULT TRUE",
-            "robo_interval_min": "INTEGER NOT NULL DEFAULT 5",
             "robo_run_requested_at": kind,
             "vapid_private_key": "TEXT",
             "push_last_alert_id": "INTEGER",
@@ -115,14 +114,6 @@ def ensure_user_auth_columns() -> None:
             if column not in setting_cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE app_settings ADD COLUMN {column} {ddl}"))
-    if "collectors" in tables:
-        collector_cols = {col["name"] for col in insp.get_columns("collectors")}
-        kind = "TIMESTAMP WITH TIME ZONE" if engine.dialect.name == "postgresql" else "TIMESTAMP"
-        added = {"test_requested_at": kind, "test_status": "VARCHAR(16)", "test_detail": "TEXT", "test_at": kind}
-        for column, ddl in added.items():
-            if column not in collector_cols:
-                with engine.begin() as conn:
-                    conn.execute(text(f"ALTER TABLE collectors ADD COLUMN {column} {ddl}"))
     # Índices novos em tabelas que já existem (create_all também não cria esses).
     indexes = {
         "ix_tweet_samples_collected": "tweet_samples (collected_at)",
@@ -236,7 +227,7 @@ def admin_user_id(db: Session) -> int | None:
 
 
 def admin_apify_active(db: Session) -> bool:
-    """O admin tem token do Apify: as contas dele são lidas pelo Apify e os coletores ficam de reserva."""
+    """O admin tem token do Apify: sem ele o robô não lê as contas do admin."""
     token = db.scalar(
         select(UserSetting.apify_token)
         .join(User, User.id == UserSetting.owner_id)
@@ -291,11 +282,9 @@ def last_pause_end(row: UserSetting | None, now: datetime | None = None) -> date
     return end.astimezone(timezone.utc)
 
 
-def robot_interval(db: Session, settings: AppSetting) -> int:
-    """Minutos entre as rodadas do robô nas contas do admin: o do Apify quando ele está ativo."""
-    if admin_apify_active(db):
-        return settings.apify_interval_min or 30
-    return settings.robo_interval_min
+def robot_interval(settings: AppSetting) -> int:
+    """Minutos entre as leituras do robô (pelo Apify) nas contas do admin."""
+    return settings.apify_interval_min or 30
 
 
 def normalize_username(value: str) -> str:
@@ -1661,7 +1650,7 @@ NOTIFY_TYPES = [
     ("resumo", "Resumo do fim do dia (23:59)", "🎉", False),
     ("queda", "Queda de views", "📉", False),
     ("ban", "Possível restrição da conta", "⚠️", False),
-    ("falha", "Falhas de leitura (Apify, coletores, robô)", "🛠️", False),
+    ("falha", "Falhas de leitura (Apify, robô)", "🛠️", False),
     ("acesso", "Novo pedido de acesso", "👤", True),
 ]
 POST_STEPS = (0, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 1_000_000)
@@ -1673,7 +1662,7 @@ NOTIFY_DEFAULTS: dict[str, Any] = {
     "quiet": {"on": False, "from": "00:00", "to": "08:00"},
 }
 # alerts_sent.kind → grupo das preferências (o nível do viral vem do fim da chave).
-FAILURE_KINDS = {"coletor", "erro", "silencio", "apify"}
+FAILURE_KINDS = {"erro", "silencio", "apify"}
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -1734,7 +1723,6 @@ ALERT_TITLES = {
     "meta": ("🎯", "Meta do dia batida"),
     "resumo": ("🎉", "Resumo do dia"),
     "acesso": ("👤", "Novo pedido de acesso"),
-    "coletor": ("🛠️", "Coletor com problema"),
     "erro": ("❌", "Erro na leitura"),
     "silencio": ("🔇", "Robô parado"),
     "apify": ("🔑", "Leitura pelo Apify"),

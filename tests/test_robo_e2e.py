@@ -1,4 +1,4 @@
-"""robo.py ponta a ponta: schema do painel num Postgres de verdade + anyx falso.
+"""robo.py ponta a ponta: schema do painel num Postgres de verdade + Apify falso (apify_fetch trocado).
 
 O robô usa SQL de Postgres (NULLS FIRST, make_interval, ::json), então este teste só roda com
 ROBO_TEST_DATABASE_URL apontando para um Postgres DESCARTÁVEL: as tabelas são apagadas e recriadas.
@@ -12,36 +12,16 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-import time
-import types
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
 PG_URL = os.getenv("ROBO_TEST_DATABASE_URL", "").strip()
 pytestmark = pytest.mark.skipif(not PG_URL, reason="defina ROBO_TEST_DATABASE_URL (Postgres descartável)")
 
-TOKEN = "f" * 40
-NOW = datetime.now(timezone.utc)
-
-
-class RateLimited(Exception):
-    def __init__(self, msg, reset=None):
-        super().__init__(msg)
-        self.reset = reset
-
-
-class NotFound(Exception):
-    pass
-
-
-class SessionExpired(Exception):
-    pass
-
 
 class SentAlerts:
-    """Textos gravados em alerts_sent desde o último clear(), na ordem (antes era o Telegram)."""
+    """Textos gravados em alerts_sent desde o último clear(), na ordem."""
 
     def __init__(self, world):
         self.world, self.mark = world, 0
@@ -67,32 +47,17 @@ class SentAlerts:
 
 
 class World:
-    """Banco, anyx falso e o que o robô fez na última rodada."""
+    """Banco e relógio que o robô enxerga."""
 
     def __init__(self):
-        self.events: list[tuple] = []
-        self.vault: dict[str, object] = {"burner3": [{"name": "auth_token", "value": TOKEN}]}
-        self.cfg = {"default_browser": "chromium", "accounts": {}}
-        self.behavior: dict[tuple[str, str], str] = {}  # (coletor, conta ou "*") -> falha
         self.sent: list[str] = []
-        self.pauses: list[int] = []
-        self.proxy_dead = False
         self.ids: dict[str, int] = {}
-        # Modo paralelo: navegadores abertos agora, o máximo ao mesmo tempo e se um coletor abriu dois.
-        import threading
-        self.lock = threading.Lock()
-        self.live: set[str] = set()
-        self.max_live = 0
-        self.overlap = False
-        self.delay = 0.0          # segundos de "leitura" da timeline
-        self.config_delay = 0.0   # config.json lento: alarga a janela da corrida entre leituras
         self.clock = "12:00"       # hora de Brasília que o robô enxerga (pausa e resumo)
         self.summary_day = None    # dia do resumo das 23:59 (None = fora do horário)
 
     def run(self):
         import robo
 
-        self.events.clear()
         assert robo.main() == 0
 
     def q(self, sql, **params):
@@ -107,20 +72,11 @@ class World:
         with self.engine.begin() as conn:
             conn.execute(text(sql))
 
-    def collector(self, handle):
-        return self.q("select last_status, paused_until, last_error from collectors where handle=:h", h=handle)[0]
-
-    def opens(self):
-        return [e for e in self.events if e[0] == "open"]
-
-    def timelines(self):
-        return [(e[1], e[2]) for e in self.events if e[0] == "timeline"]
-
     def heartbeats(self):
         return self.q("select count(*) from sync_runs where kind='tweets' and account_id is null")[0][0]
 
     def last_beat(self):
-        return self.q("select status, stats from sync_runs order by id desc limit 1")[0]
+        return self.q("select status, stats, error from sync_runs order by id desc limit 1")[0]
 
     def settings(self, **values):
         from sqlalchemy.orm import Session
@@ -134,75 +90,6 @@ class World:
             db.commit()
 
 
-def fake_anyx(world: World) -> dict[str, types.ModuleType]:
-    class Session:
-        def __init__(self, handle):
-            self.handle = handle
-
-        def __enter__(self):
-            # Como o anyx: o Chrome lê o proxy do config.json na hora de abrir.
-            world.events.append(("open", self.handle, config.load()["accounts"].get(self.handle, {}).get("proxy")))
-            if world.behavior.get((self.handle, "*")) == "expired":
-                raise SessionExpired("X showed the login wall")
-            with world.lock:
-                world.overlap = world.overlap or self.handle in world.live
-                world.live.add(self.handle)
-                world.max_live = max(world.max_live, len(world.live))
-            return self
-
-        def __exit__(self, *exc):
-            with world.lock:
-                world.live.discard(self.handle)
-            world.events.append(("exit", self.handle))
-            return False
-
-        def user(self, username):
-            world.events.append(("user", self.handle, username))
-            return {"followers_count": 777}
-
-        def timeline(self, username, limit=20):
-            world.events.append(("timeline", self.handle, username))
-            if world.delay:
-                time.sleep(world.delay)
-            what = world.behavior.get((self.handle, username))
-            if what == "429":
-                raise RateLimited("429 on UserTweets", reset=int((NOW + timedelta(minutes=20)).timestamp()))
-            if what == "blocked":
-                raise NotFound(f"nothing loaded at https://x.com/{username} (no UserTweets)")
-            if what == "gone":
-                raise NotFound(f"@{username} is unavailable (Suspended)")
-            return [{"id": f"{username}-{self.handle}", "created_at": NOW.isoformat(), "view_count": 10, "like_count": 1}]
-
-    class Chromium:
-        @staticmethod
-        def stop(handle):
-            world.events.append(("stop", handle))
-
-    anyx = types.ModuleType("anyx")
-    anyx.Session = Session
-    anyx.__path__ = []
-    vault = types.ModuleType("anyx.vault")
-    vault.save = lambda handle, cookies: world.vault.__setitem__(handle, cookies)
-    vault.load = lambda handle: world.vault.get(handle)
-    config = types.ModuleType("anyx.config")
-
-    def load_config():
-        snapshot = json.loads(json.dumps(world.cfg))
-        if world.config_delay:
-            time.sleep(world.config_delay)
-        return snapshot
-
-    config.load = load_config
-    config.save = lambda cfg: (world.cfg.clear(), world.cfg.update(cfg))
-    browsers = types.ModuleType("anyx.browsers")
-    browsers.__path__ = []
-    chromium = types.ModuleType("anyx.browsers.chromium")
-    chromium.Chromium = Chromium
-    anyx.vault, anyx.config, anyx.browsers, browsers.chromium = vault, config, browsers, chromium
-    return {"anyx": anyx, "anyx.vault": vault, "anyx.config": config, "anyx.browsers": browsers,
-            "anyx.browsers.chromium": chromium}
-
-
 @pytest.fixture(scope="module")
 def w(tmp_path_factory):
     from sqlalchemy import create_engine
@@ -212,7 +99,7 @@ def w(tmp_path_factory):
     import robo
     from app import services
     from app.database import Base
-    from app.models import Collector, Folder, XAccount
+    from app.models import Folder, XAccount
 
     world = World()
     world.engine = create_engine(PG_URL.replace("postgresql://", "postgresql+psycopg://", 1))
@@ -227,295 +114,162 @@ def w(tmp_path_factory):
             db.add(acc)
             db.flush()
             world.ids[name] = acc.id
-        db.add_all([
-            Collector(handle="burner1", proxy="http://u:p@127.0.0.1:9", cookies=json.dumps({"auth_token": TOKEN})),
-            Collector(handle="burner2", cookies=json.dumps({"auth_token": TOKEN, "ct0": "x"})),
-            Collector(handle="burner3"),  # sem cookies: usa o login do anyx (o cofre falso tem)
-            Collector(handle="conta4", cookies=json.dumps({"auth_token": TOKEN})),  # @ de uma monitorada
-        ])
         db.commit()
-
-    import itertools
-
-    ports = itertools.count(40001)
-
-    class FakeRelay:
-        """Proxy do burner1: sobe sem rede; probe falha com world.proxy_dead. Como o de verdade, cada
-        leitura ganha uma porta nova (uma cópia velha do config.json aponta para porta errada)."""
-
-        def __init__(self, upstream, timeout=20.0):
-            self.upstream, self.failures, self.url = upstream, [], f"http://127.0.0.1:{next(ports)}"
-            world.events.append(("relay", upstream))
-            world.events.append(("relay_url", self.url))
-
-        def probe(self):
-            if world.proxy_dead:
-                raise robo.ProxyError("não conectou em 127.0.0.1:9 (recusada)")
-
-        def close(self):
-            world.events.append(("relay_close",))
 
     state = tmp_path_factory.mktemp("robo")
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("DATABASE_URL", PG_URL)
         mp.setenv("ROBO_ENV_FILE", str(state / "sem.env"))  # não lê o .env local
-        for name, module in fake_anyx(world).items():
-            mp.setitem(sys.modules, name, module)
         world.sent = SentAlerts(world)  # alertas só no banco (o painel manda por push)
         mp.setattr(robo, "OFFLINE_STAMP", state / "alerta_banco")
         mp.setattr(robo, "LOCK_FILE", state / "robo.lock")
-        mp.setattr(robo, "READS_FILE", state / "leituras.json")
-        # Os testes abaixo seguem a ordem exata de uma rodada em sequência e sem descanso; o modo
-        # paralelo, o descanso e o limite do dia têm testes próprios no fim do arquivo.
-        mp.setenv("ROBO_WORKERS", "1")
-        mp.setenv("ROBO_COLLECTOR_REST_MIN", "0")
-        mp.setattr(robo, "TIMELINE_RETRY_PAUSE", 0)
-        mp.setattr(robo, "pause", lambda: world.pauses.append(1))
         # Pausa da madrugada e resumo dependem do relógio: de dia, salvo nos testes deles.
         mp.setattr(robo, "br_clock", lambda now=None: world.clock)
         mp.setattr(robo, "summary_day", lambda now=None: world.summary_day)
-        mp.setattr(robo, "ProxyRelay", FakeRelay)
+        # Nenhum teste chama o Apify de verdade: quem precisa troca apify_fetch.
+        mp.setattr(robo, "apify_fetch", lambda token, handles: pytest.fail("Apify chamado sem resposta falsa"))
         yield world
     world.engine.dispose()
 
 
-def test_round_one_collector_per_account(w):
-    w.run()
-    assert [e[1] for e in w.opens()] == ["burner1", "burner2", "burner3"], "nunca usa o @conta4"
-    assert dict((u, h) for h, u in w.timelines()) == {"conta1": "burner1", "conta2": "burner2", "conta3": "burner3"}
-    opens = w.opens()
-    assert opens[0][2] == "http://127.0.0.1:40001" and ("relay", "http://u:p@127.0.0.1:9") in w.events
-    assert opens[1][2] is None
-    assert w.vault["burner1"] == {"auth_token": TOKEN}
-    assert [e[1] for e in w.events if e[0] == "stop"] == ["burner1", "burner1", "burner2", "burner2", "burner3", "burner3"]
-    assert len([e for e in w.events if e[0] == "user"]) == 3
-    assert len(w.pauses) == 5  # 3 entre perfil e timeline + 2 entre pares
-    assert w.q("select count(*) from tweet_samples")[0][0] == 3
-    assert w.q("select followers_count from daily_metrics where account_id=:a", a=w.ids["conta1"]) == [(777,)]
-    assert w.q("select collected_at from x_accounts where id=:a", a=w.ids["conta4"])[0][0] is None
-    status, stats = w.last_beat()
-    assert status == "ok" and stats["contas"] == 3
+def admin_id(w):
+    return w.q("select id from users where is_admin is true order by id limit 1")[0][0]
 
 
-def test_round_two_rotates_and_followers_hourly(w):
-    w.pauses.clear()
-    w.run()
-    assert [u for _, u in w.timelines()] == ["conta4", "conta1", "conta2"]
-    assert [e[2] for e in w.events if e[0] == "user"] == ["conta4"]
+def admin_token(w, token):
+    owner = admin_id(w)
+    if w.q("select count(*) from user_settings where owner_id=:o", o=owner)[0][0] == 0:
+        w.sql(f"insert into user_settings (owner_id, impression_goal) values ({owner}, 500)")
+    value = "NULL" if token is None else f"'{token}'"
+    w.sql(f"update user_settings set apify_token={value}, apify_checked_at=NULL, apify_status=NULL where owner_id={owner}")
 
 
-def test_block_and_429(w):
-    w.behavior[("burner1", "conta3")] = "blocked"
-    w.behavior[("burner2", "conta4")] = "429"
-    w.sent.clear()
-    w.run()
-    tl = w.timelines()
-    assert tl.count(("burner1", "conta3")) == 2, "bloqueio: 2 tentativas"
-    assert tl.count(("burner2", "conta4")) == 1 and not any(h == "burner3" for h, _ in tl), "429 para a rodada"
-    st, until, _err = w.collector("burner1")
-    assert st == "bloqueio" and timedelta(minutes=25) < until - datetime.now(timezone.utc) <= timedelta(minutes=31)
-    st, until, _err = w.collector("burner2")
-    assert st == "limite" and abs((until - NOW).total_seconds() - (20 * 60 + 60)) < 5
-    front = w.q("select username from x_accounts order by collected_at nulls first, id limit 2")
-    assert [r[0] for r in front] == ["conta3", "conta4"]
-    assert any(m.startswith("🚫 X bloqueou o coletor @burner1 ao ler @conta3") for m in w.sent)
-    assert any(m.startswith("⛔ X limitou o coletor @burner2 (429) ao ler @conta4.\nRodada parada.") for m in w.sent)
-    status, stats = w.last_beat()
-    assert status == "partial" and stats["parada_429"] is True
-
-
-def test_paused_collectors_wait(w):
-    w.behavior.clear()
-    w.run()
-    assert [e[1] for e in w.opens()] == ["burner3"]
-    assert [u for _, u in w.timelines()] == ["conta3"]
-
-
-def test_session_and_proxy_down(w):
-    w.sql("update collectors set paused_until = null")
-    w.behavior[("burner2", "*")] = "expired"
-    w.proxy_dead = True
-    w.sent.clear()
-    w.run()
-    assert not any(e[1] == "burner1" for e in w.opens()), "proxy fora: nem abre o navegador"
-    assert w.collector("burner1")[0] == "proxy" and any(m.startswith("🔌 Proxy do coletor @burner1") for m in w.sent)
-    assert w.collector("burner2")[0] == "sessao" and any(m.startswith("🔑 Coletor @burner2") for m in w.sent)
-    assert w.collector("burner3")[0] == "ok"
-
-
-def test_suspended_account_goes_to_the_back(w):
-    w.behavior.clear()
-    w.proxy_dead = False
-    w.sql("update collectors set paused_until = null")
-    first = w.q("select username from x_accounts order by collected_at nulls first, id limit 1")[0][0]
-    w.behavior[("burner1", first)] = "gone"
-    w.sent.clear()
-    w.run()
-    assert w.collector("burner1")[0] == "ok"
-    assert any(m.startswith("❌ Erro na leitura") and f"@{first} — lida por @burner1" in m for m in w.sent)
-    last = w.q("select username from x_accounts order by collected_at desc nulls last limit 3")
-    assert last.count((first,)) == 1
-    w.behavior.clear()
-
-
-def test_no_free_collector(w):
-    w.sql("update collectors set is_active = false")
-    w.sent.clear()
-    w.run()
-    assert not w.opens()
-    assert w.sent == ["⚠️ Robô sem coletor: todos desligados na aba Coletores.\nNenhuma timeline foi lida."]
-    w.run()
-    assert len(w.sent) == 1, "não repete o alerta"
-    assert w.last_beat()[0] == "partial"
-
-
-# ---- controle pela aba Configurações ----
-
-def test_within_interval_does_nothing(w):
-    w.sql("update collectors set is_active = true, paused_until = null")
-    w.sql("update sync_runs set finished_at = now() where kind='tweets' and account_id is null")
-    w.settings(robo_enabled=True, robo_interval_min=5, robo_run_requested_at=None)
-    before = w.heartbeats()
-    w.run()
-    assert not w.events and w.heartbeats() == before
-
-
-def test_interval_due_runs_automatic_round(w):
-    w.sql("update sync_runs set finished_at = now() - interval '10 minutes'")
-    before = w.heartbeats()
-    w.run()
-    assert len(w.opens()) == 3 and w.heartbeats() == before + 1
-    assert w.last_beat()[1]["manual"] is False
-
-
-def test_disabled_never_runs_alone(w):
-    w.sql("update sync_runs set finished_at = now() - interval '10 minutes'")
-    w.settings(robo_enabled=False)
-    before = w.heartbeats()
-    w.run()
-    assert not w.events and w.heartbeats() == before
-
-
-def test_refresh_button_reads_every_account(w):
-    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
-    w.run()
-    tl = w.timelines()
-    assert sorted(u for _, u in tl) == ["conta1", "conta2", "conta3", "conta4"]
-    assert [h for h, _ in tl] == ["burner1", "burner2", "burner3", "burner1"], "reveza os coletores"
-    assert w.q("select robo_run_requested_at from app_settings where id=1")[0][0] is None
-    assert w.last_beat()[1]["manual"] is True
-    w.run()
-    assert not w.events, "sem pedido, desligado fica quieto"
-
-
-def test_manual_round_skips_benched_collector(w):
-    for name in ("conta1", "conta2", "conta3", "conta4"):
-        w.behavior[("burner1", name)] = "blocked"
-    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
-    w.run()
-    tl = w.timelines()
-    b1 = [u for h, u in tl if h == "burner1"]
-    assert len(b1) == 2 and len(set(b1)) == 1, "depois do castigo, o 2º par do burner1 é pulado"
-    assert {h for h, _ in tl} == {"burner1", "burner2", "burner3"}
-    w.behavior.clear()
-
-
-# ---- leituras em paralelo e proteção dos coletores ----
-
-def relay_urls(w):
-    return [e[1] for e in w.events if e[0] == "relay_url"]
+def admin_items(w, views=700):
+    """Resposta do Apify para as contas do admin: um post de hoje por conta, com seguidores."""
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    return [{"id": f"77{n}", "createdAt": posted, "text": "via apify", "viewCount": views, "likeCount": 3,
+             "retweetCount": 1, "replyCount": 2, "quoteCount": 1, "bookmarkCount": 4,
+             "author": {"userName": name, "followers": 5000 + n}}
+            for n, name in enumerate(("conta1", "conta2", "conta3", "conta4"))]
 
 
 def due_round(w):
-    """Coleta automática ligada, intervalo vencido e todos os coletores livres e descansados."""
-    w.behavior.clear()
-    w.proxy_dead = False
-    w.sql("update collectors set is_active = true, paused_until = null, last_used_at = null")
-    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
-    w.settings(robo_enabled=True, robo_interval_min=5, robo_run_requested_at=None)
-    w.max_live, w.overlap = 0, False
-    import robo
-    robo.READS_FILE.unlink(missing_ok=True)
+    """Leitura automática do admin ligada, sem pedido e com o intervalo do Apify vencido."""
+    w.settings(robo_enabled=True, apify_interval_min=30, robo_run_requested_at=None)
+    w.sql(f"update user_settings set apify_checked_at = now() - interval '2 hours' where owner_id={admin_id(w)}")
 
 
-def test_parallel_round_reads_at_once_with_distinct_collectors(w, monkeypatch):
-    monkeypatch.setenv("ROBO_WORKERS", "4")
-    due_round(w)
-    w.delay = 0.3
-    w.run()
-    w.delay = 0.0
-    tl = w.timelines()
-    assert len(tl) == 3 and {h for h, _ in tl} == {"burner1", "burner2", "burner3"}
-    assert len({u for _, u in tl}) == 3, "cada conta uma vez"
-    assert w.max_live >= 2, "as leituras correram juntas"
-    assert not w.overlap, "nenhum coletor com dois navegadores ao mesmo tempo"
-    assert [e[2] for e in w.opens() if e[1] == "burner1"] == relay_urls(w), "burner1 sempre pelo proxy da leitura"
-    status, stats = w.last_beat()
-    assert status == "ok" and stats["contas"] == 3 and stats["em_paralelo"] == 3
+# ---- contas do admin pelo Apify ----
 
-
-def test_proxy_never_lost_when_opening_in_parallel(w, monkeypatch):
-    """O config.json do anyx é um só: sem a trava, a gravação de um coletor apagava o proxy de outro
-    e aquele Chrome abria pelo IP do VPS. Com o arquivo lento, a corrida apareceria aqui."""
-    monkeypatch.setenv("ROBO_WORKERS", "4")
-    for _ in range(3):
-        due_round(w)
-        w.config_delay = 0.05
-        w.run()
-        w.config_delay = 0.0
-        burner1 = [e[2] for e in w.opens() if e[1] == "burner1"]
-        assert burner1 == relay_urls(w) and len(burner1) == 1, (burner1, relay_urls(w))
-
-
-def test_rest_keeps_recent_collectors_out_without_alert(w, monkeypatch):
-    monkeypatch.setenv("ROBO_WORKERS", "4")
-    monkeypatch.setenv("ROBO_COLLECTOR_REST_MIN", "10")
-    due_round(w)
-    w.sql("update collectors set last_used_at = now() - interval '3 minutes' where handle in ('burner1', 'burner2')")
-    w.sql("update collectors set last_used_at = now() - interval '30 minutes' where handle = 'burner3'")
-    w.run()
-    assert [e[1] for e in w.opens()] == ["burner3"], "só quem descansou 10 min"
-    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+def test_admin_without_token_reads_nothing_and_says_so(w):
+    admin_token(w, None)
+    w.settings(robo_enabled=True, robo_run_requested_at=None)
     w.sent.clear()
+    w.run()  # apify_fetch falha o teste se for chamado
+    assert w.q("select apify_status from user_settings where owner_id=:o", o=admin_id(w)) == [("sem_token",)]
+    assert [m for m in w.sent if "Token do Apify em falta" in m], "aviso no painel do admin"
+    assert w.heartbeats() == 0 and w.q("select count(*) from tweet_samples")[0][0] == 0
     w.run()
-    assert not w.opens() and not w.sent, "todos descansando: espera quieto, sem alerta"
-    assert w.last_beat()[1]["descansando"] == 3
+    assert w.q("select count(*) from alerts_sent where kind='apify'")[0][0] == 1, "dentro do intervalo: nem repete"
 
 
-def test_daily_limit_stops_collector_and_alerts_once(w, monkeypatch):
+def test_admin_reads_by_apify(w, monkeypatch):
     import robo
 
-    monkeypatch.setenv("ROBO_WORKERS", "4")
-    monkeypatch.setenv("ROBO_COLLECTOR_DAILY_MAX", "2")
+    admin_token(w, "tok-admin")
     due_round(w)
+    calls = []
+
+    def fetch(token, handles):
+        calls.append((token, sorted(handles)))
+        return admin_items(w) if token == "tok-admin" else []
+
+    monkeypatch.setattr(robo, "apify_fetch", fetch)
     w.sent.clear()
     w.run()
-    w.sql("update collectors set last_used_at = null")
-    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
+    assert ("tok-admin", ["conta1", "conta2", "conta3", "conta4"]) in calls
+    status, stats, _ = w.last_beat()
+    assert status == "ok" and stats["via"] == "apify" and stats["contas"] == 4 and stats["manual"] is False
+    row = w.q("select view_count, like_count, retweet_count, reply_count, quote_count, bookmark_count "
+              "from tweet_samples where account_id=:a and tweet_id='770'", a=w.ids["conta1"])
+    assert row == [(700, 3, 1, 2, 1, 4)], "todas as métricas"
+    assert w.q("select followers_count from daily_metrics where account_id=:a and metric_date=current_date",
+               a=w.ids["conta1"]) == [(5000,)]
+    assert [m for m in w.sent if "viralizando" in m.lower()], "alerta de views do admin"
+    calls.clear()
     w.run()
-    reads = robo.reads_today()
-    assert sorted(reads.values()) == [2, 2, 2]
-    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
-    w.run()
-    assert not w.opens(), "limite do dia: nenhum coletor abre"
-    assert [m for m in w.sent if m.startswith("🧯")], "avisa que todos bateram o limite"
-    w.sql("update sync_runs set finished_at = now() - interval '30 minutes'")
-    before = len(w.sent)
-    w.run()
-    assert len(w.sent) == before, "o aviso do limite sai uma vez por dia"
+    assert not [c for c in calls if c[0] == "tok-admin"], "dentro dos 30 min: não lê de novo"
 
 
-def test_manual_round_in_parallel_reads_everything(w, monkeypatch):
-    monkeypatch.setenv("ROBO_WORKERS", "4")
+def test_disabled_never_reads_alone(w, monkeypatch):
+    import robo
+
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or [])
     due_round(w)
+    w.settings(robo_enabled=False)
+    before = w.heartbeats()
+    w.run()
+    assert "tok-admin" not in calls and w.heartbeats() == before
+
+
+def test_refresh_button_reads_right_away(w, monkeypatch):
+    import robo
+
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or admin_items(w, views=10))
     w.settings(robo_run_requested_at=datetime.now(timezone.utc))
-    w.delay = 0.2
     w.run()
-    w.delay = 0.0
-    tl = w.timelines()
-    assert sorted(u for _, u in tl) == ["conta1", "conta2", "conta3", "conta4"]
-    assert not w.overlap and w.max_live >= 2
-    assert w.last_beat()[1]["manual"] is True
+    assert "tok-admin" in calls, "com a leitura desligada, o botão lê"
+    assert w.last_beat()[1]["manual"] is True and w.last_beat()[1]["via"] == "apify"
+    assert w.q("select robo_run_requested_at from app_settings where id=1")[0][0] is None
+    calls.clear()
+    w.run()
+    assert "tok-admin" not in calls, "sem pedido, desligado fica quieto"
+    w.settings(robo_enabled=True)
+
+
+def test_zero_posts_is_not_a_failure(w, monkeypatch):
+    import robo
+
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [{"noResults": True}])
+    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
+    w.run()
+    status, stats, _ = w.last_beat()
+    assert status == "ok" and stats["via"] == "apify"
+
+
+def test_apify_failure_records_a_failed_beat_and_alerts(w, monkeypatch):
+    import robo
+
+    def refuse(token, handles):
+        raise robo.ApifyError("a conta do Apify está sem crédito (402).")
+
+    monkeypatch.setattr(robo, "apify_fetch", refuse)
+    due_round(w)
+    w.sent.clear()
+    w.run()
+    status, stats, error = w.last_beat()
+    assert status == "failed" and stats["via"] == "apify" and "402" in error
+    assert w.q("select apify_status from user_settings where owner_id=:o", o=admin_id(w)) == [("erro",)]
+    assert [m for m in w.sent if m.startswith("⚠️ Apify falhou") and "402" in m]
+    w.run()
+    assert len([m for m in w.sent if m.startswith("⚠️ Apify falhou")]) == 1, "só tenta de novo no próximo intervalo"
+
+
+def test_admin_read_now_failure_leaves_no_request(w, monkeypatch):
+    import robo
+
+    def refuse(token, handles):
+        raise robo.ApifyError("sem resposta do Apify (TimeoutError).")
+
+    monkeypatch.setattr(robo, "apify_fetch", refuse)
+    w.settings(robo_run_requested_at=None)
+    assert robo.read_now(admin_id(w)) == "erro"
+    assert w.q("select robo_run_requested_at from app_settings where id=1") == [(None,)]
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: admin_items(w, views=20))
+    assert robo.read_now(admin_id(w)) == "ok"
+    assert w.last_beat()[0] == "ok"
 
 
 # ---- Multiusuário: contas dos outros usuários pelo Apify ----
@@ -556,12 +310,11 @@ def test_apify_without_token_says_it_is_missing(w, monkeypatch):
     status, detail, _ = apify_state(w, owner_id)
     assert status == "sem_token" and "Token do Apify em falta" in detail
     assert apify_state(w, pending_id) is None, "pendente não é lido"
-    assert all(user != f"amiga{n}" for _, user in w.timelines() for n in range(20)), "coletor nunca lê conta de amigo"
-    alerts = w.q("select owner_id, kind from alerts_sent where kind='apify'")
+    alerts = w.q("select owner_id, kind from alerts_sent where kind='apify' and owner_id <> :a", a=admin_id(w))
     assert alerts == [(owner_id, "apify")]
     assert [m for m in w.sent if "Apify" in m], "o aviso fica no histórico do amigo (owner_id acima)"
     w.run()
-    assert w.q("select count(*) from alerts_sent where kind='apify'")[0][0] == 1, "um aviso por dia"
+    assert w.q("select count(*) from alerts_sent where kind='apify' and owner_id=:o", o=owner_id)[0][0] == 1, "um aviso por dia"
 
 
 def test_apify_reads_friend_accounts_with_their_token(w, monkeypatch):
@@ -614,109 +367,6 @@ def test_apify_error_shows_on_the_panel(w, monkeypatch):
     assert status == "erro" and "401" in detail and requested is None
 
 
-# ---- Fase 2: o admin lê pelo Apify primeiro; coletores só de reserva ----
-
-def admin_id(w):
-    return w.q("select id from users where is_admin is true order by id limit 1")[0][0]
-
-
-def admin_token(w, token):
-    owner = admin_id(w)
-    if w.q("select count(*) from user_settings where owner_id=:o", o=owner)[0][0] == 0:
-        w.sql(f"insert into user_settings (owner_id, impression_goal) values ({owner}, 500)")
-    value = "NULL" if token is None else f"'{token}'"
-    w.sql(f"update user_settings set apify_token={value}, apify_checked_at=NULL, apify_status=NULL where owner_id={owner}")
-
-
-def admin_items(w, views=700):
-    """Resposta do Apify para as contas do admin: um post de hoje por conta, com seguidores."""
-    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
-    return [{"id": f"77{n}", "createdAt": posted, "text": "via apify", "viewCount": views, "likeCount": 3,
-             "retweetCount": 1, "replyCount": 2, "quoteCount": 1, "bookmarkCount": 4,
-             "author": {"userName": name, "followers": 5000 + n}}
-            for n, name in enumerate(("conta1", "conta2", "conta3", "conta4"))]
-
-
-def test_admin_reads_by_apify_and_collectors_wait(w, monkeypatch):
-    import robo
-
-    due_round(w)
-    admin_token(w, "tok-admin")
-    calls = []
-
-    def fetch(token, handles):
-        calls.append((token, sorted(handles)))
-        return admin_items(w) if token == "tok-admin" else []
-
-    monkeypatch.setattr(robo, "apify_fetch", fetch)
-    w.sent.clear()
-    w.run()
-    assert ("tok-admin", ["conta1", "conta2", "conta3", "conta4"]) in calls
-    assert not w.opens(), "com o Apify funcionando nenhum coletor abre"
-    status, stats = w.last_beat()
-    assert status == "ok" and stats["via"] == "apify" and stats["contas"] == 4
-    row = w.q("select view_count, like_count, retweet_count, reply_count, quote_count, bookmark_count "
-              "from tweet_samples where account_id=:a and tweet_id='770'", a=w.ids["conta1"])
-    assert row == [(700, 3, 1, 2, 1, 4)], "todas as métricas, como os coletores"
-    assert w.q("select followers_count from daily_metrics where account_id=:a and metric_date=current_date",
-               a=w.ids["conta1"]) == [(5000,)]
-    assert [m for m in w.sent if "via apify" not in m and "Viralizando" in m or "viralizando" in m.lower()], \
-        "alerta de views do admin vai para o Telegram"
-    calls.clear()
-    w.run()
-    assert not [c for c in calls if c[0] == "tok-admin"] and not w.opens(), "dentro dos 30 min: nem Apify nem coletores"
-
-
-def test_refresh_button_uses_apify_right_away(w, monkeypatch):
-    import robo
-
-    calls = []
-    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or admin_items(w, views=10))
-    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
-    w.run()
-    assert "tok-admin" in calls and not w.opens()
-    assert w.last_beat()[1]["manual"] is True and w.last_beat()[1]["via"] == "apify"
-    assert w.q("select robo_run_requested_at from app_settings where id=1")[0][0] is None
-
-
-def test_zero_posts_is_not_a_failure(w, monkeypatch):
-    import robo
-
-    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [{"noResults": True}])
-    w.settings(robo_run_requested_at=datetime.now(timezone.utc))
-    w.run()
-    assert not w.opens(), "conta sem post hoje não chama os coletores"
-    assert w.last_beat()[1]["via"] == "apify"
-
-
-def test_collectors_take_over_when_apify_fails(w, monkeypatch):
-    import robo
-
-    def refuse(token, handles):
-        raise robo.ApifyError("a conta do Apify está sem crédito (402).")
-
-    monkeypatch.setattr(robo, "apify_fetch", refuse)
-    due_round(w)
-    w.sql(f"update user_settings set apify_checked_at = now() - interval '2 hours' where owner_id={admin_id(w)}")
-    w.sent.clear()
-    w.run()
-    read = sorted(u for _, u in w.timelines())
-    assert read == ["conta1", "conta2", "conta3", "conta4"], "na falha, os coletores leem tudo na mesma passada"
-    status, stats = w.last_beat()
-    assert stats["via"] == "coletores" and "402" in stats["apify_erro"]
-    assert w.q("select apify_status from user_settings where owner_id=:o", o=admin_id(w)) == [("erro",)]
-    assert [m for m in w.sent if m.startswith("⚠️ Apify falhou")], "avisa no Telegram do admin"
-
-
-def test_without_admin_token_collectors_work_as_before(w, monkeypatch):
-    import robo
-
-    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: pytest.fail("sem token do admin") if token is None else [])
-    admin_token(w, None)
-    due_round(w)
-    w.run()
-    assert w.opens(), "sem Apify, os coletores seguem o próprio intervalo"
-    assert w.last_beat()[1]["via"] == "coletores"
 
 
 def test_apify_skips_reposts(w, monkeypatch):
@@ -784,27 +434,6 @@ def test_friend_auto_off_and_own_interval(w, monkeypatch):
     w.sql(f"update user_settings set apify_auto=true, apify_interval_min=60 where owner_id={owner}")
 
 
-def test_admin_read_now_failure_goes_to_collectors_without_retrying_apify(w, monkeypatch):
-    import robo
-
-    due_round(w)
-    admin_token(w, "tok-admin")
-    tokens = []
-
-    def refuse(token, handles):
-        tokens.append(token)
-        raise robo.ApifyError("sem resposta do Apify (TimeoutError).")
-
-    monkeypatch.setattr(robo, "apify_fetch", refuse)
-    assert robo.read_now(admin_id(w)) == "erro"
-    assert w.q("select robo_run_requested_at is not null from app_settings where id=1") == [(True,)]
-    tokens.clear()
-    w.run()
-    assert "tok-admin" not in tokens, "o cron não repete o Apify que acabou de falhar"
-    assert w.opens() and w.last_beat()[1]["via"] == "coletores"
-    admin_token(w, None)
-
-
 # ---- Notificações: marcos de views (por post e do dia) e meta do dia ----
 
 def test_milestones_and_daily_goal(w, monkeypatch):
@@ -844,6 +473,7 @@ def test_night_pause_waits_but_the_button_reads(w, monkeypatch):
     friend = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
     calls = []
     monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(token) or [])
+    admin_token(w, "tok-admin")
     due_round(w)
     w.sql(f"update x_accounts set collected_at = now() - interval '5 hours' where owner_id={friend}")
     w.sql(f"update user_settings set apify_auto=true, apify_run_requested_at=NULL, pause_on=true, "
@@ -851,15 +481,16 @@ def test_night_pause_waits_but_the_button_reads(w, monkeypatch):
     w.sql(f"update user_settings set pause_on=true, pause_from='00:00', pause_to='06:00' where owner_id={admin_id(w)}")
     w.clock = "03:00"
     w.run()
-    assert not calls and not w.opens(), "madrugada: nem Apify nem coletores sozinhos"
+    assert not calls, "madrugada: ninguém lê sozinho"
     w.sql(f"update user_settings set apify_run_requested_at=now() where owner_id={friend}")
     w.settings(robo_run_requested_at=datetime.now(timezone.utc))
     w.run()
-    assert "tok-amiga" in calls and w.opens(), "o Atualizar dados lê mesmo na pausa"
+    assert "tok-amiga" in calls and "tok-admin" in calls, "o Atualizar dados lê mesmo na pausa"
+    calls.clear()
     w.clock = "06:00"
     due_round(w)
     w.run()
-    assert w.opens(), "acabou a pausa: a leitura automática volta sozinha"
+    assert "tok-admin" in calls, "acabou a pausa: a leitura automática volta sozinha"
     w.clock = "12:00"
 
 
@@ -884,11 +515,9 @@ def test_summary_reads_at_2355_and_congratulates_at_2359(w, monkeypatch):
     w.clock = "23:56"
     w.run()
     assert "tok-amiga" in calls, "23:55: lê tudo para o resumo, mesmo dentro do intervalo"
-    assert w.opens() and w.last_beat()[1]["manual"] is True, "o admin também lê (coletores, sem Apify)"
+    assert "tok-admin" in calls and w.last_beat()[1]["manual"] is True, "o admin também lê"
     calls.clear()
     w.clock = "23:57"
-    due_round(w)
-    w.sql("update sync_runs set finished_at = now()")
     w.run()
     assert "tok-amiga" not in calls, "a leitura do resumo é uma vez por dia"
     w.clock = "23:59"
@@ -908,3 +537,4 @@ def test_summary_reads_at_2355_and_congratulates_at_2359(w, monkeypatch):
     assert friend not in dict(w.q("select owner_id, detail from alerts_sent where kind='resumo'")), "desligado: sem resumo"
     w.clock, w.summary_day = "12:00", None
     w.sql("update user_settings set notify_prefs = NULL")
+    admin_token(w, None)

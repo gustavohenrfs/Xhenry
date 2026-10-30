@@ -178,32 +178,6 @@ class XAccount(IntPK, TimestampMixin, Base):
     )
 
 
-class Collector(IntPK, TimestampMixin, Base):
-    """Conta descartável que o robo.py usa para ler as timelines, cada uma com o seu proxy.
-
-    proxy e cookies ficam em texto puro porque o robô precisa deles; a API só devolve mascarado.
-    """
-
-    __tablename__ = "collectors"
-
-    handle: Mapped[str] = mapped_column(String(15), unique=True, nullable=False)
-    proxy: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # JSON {nome: valor} dos cookies do x.com; vazio = o robô usa o que já estiver no anyx do VPS.
-    cookies: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
-    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # ok, limite, bloqueio, verificacao, sessao, proxy, erro (gravado pelo robô)
-    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Botão Testar: o painel grava o pedido (e o resultado do proxy); o robô lê uma conta com este
-    # coletor no próximo minuto e grava test_status (os mesmos valores de last_status) e test_detail.
-    test_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    test_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    test_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-    test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class HealthCheck(IntPK, Base):
     __tablename__ = "health_checks"
     __table_args__ = (
@@ -364,10 +338,8 @@ class AppSetting(IntPK, Base):
     xai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Robô (aba Configurações): coleta automática, intervalo e o pedido do botão "Atualizar Dados".
     robo_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
-    robo_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     robo_run_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Com o token do Apify do admin salvo, as contas dele são lidas pelo Apify neste ritmo (os coletores
-    # ficam de reserva); robo_interval_min passa a valer só quando não há Apify.
+    # As contas do admin são lidas pelo Apify (token dele em user_settings) neste ritmo.
     apify_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
     # Web Push: chave VAPID gerada no primeiro uso e o último alerta (de qualquer tipo) já empurrado.
     vapid_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -442,7 +414,7 @@ class AlertSent(IntPK, Base):
         Index("ix_alerts_sent_kind_id", "kind", "id"),
     )
 
-    # Dono da conta do alerta; NULL = alerta do sistema (robô parado, coletor), só o admin vê.
+    # Dono da conta do alerta; NULL = alerta do sistema (robô parado), só o admin vê.
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     dedupe_key: Mapped[str] = mapped_column(String(160), nullable=False)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)

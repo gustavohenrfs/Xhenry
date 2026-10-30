@@ -96,7 +96,7 @@ def test_watchdog_quiet_during_pause_and_after_it_ends(monkeypatch):
         db.query(SyncRun).delete()
         db.query(AlertSent).filter(AlertSent.kind == "silencio").delete()
         settings = get_settings(db)
-        settings.robo_enabled, settings.robo_interval_min, settings.robo_run_requested_at = True, 5, None
+        settings.robo_enabled, settings.apify_interval_min, settings.robo_run_requested_at = True, 5, None
         row = user_settings(db, ensure_admin(db).id)
         row.pause_on, row.pause_from, row.pause_to, row.apify_token = True, "00:00", "06:00", None
         last = utc_at(23, 50, day=27)
@@ -105,7 +105,7 @@ def test_watchdog_quiet_during_pause_and_after_it_ends(monkeypatch):
         assert watchdog.check_silence(db, utc_at(3)) is False, "madrugada sem leitura é a pausa"
         assert watchdog.check_silence(db, utc_at(6, 10)) is False, "pausa acabou há 10 min: ainda dentro do limite"
         assert watchdog.check_silence(db, utc_at(6, 30)) is True, "30 min depois da pausa sem ler: robô parado"
-        row.pause_on = False
+        row.pause_on, settings.apify_interval_min = False, 30
         db.query(SyncRun).delete()
         db.query(AlertSent).filter(AlertSent.kind == "silencio").delete()
         db.commit()

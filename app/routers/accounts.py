@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.cache import cached_json
 from app.database import get_db
-from app.models import DEFAULT_TZ, Collector, Folder, FolderKind, User, XAccount
+from app.models import DEFAULT_TZ, Folder, FolderKind, User, XAccount
 from app.routers.auth import approved_user
 from app.services import (
     NO_X_TOKEN,
@@ -125,10 +125,6 @@ def create_account(payload: AccountIn, user: User = Depends(approved_user), db: 
         raise HTTPException(409, "Essa conta está arquivada nesta pasta. Desarquive na aba Arquivadas.")
     if exists:
         raise HTTPException(409, "Essa conta já está na pasta.")
-    if user.is_admin and db.scalar(select(Collector).where(Collector.handle == username)):
-        # O robô entra logado nos coletores; uma conta monitorada não pode ser um deles. Só vale para o
-        # admin: os coletores são dele, e para os outros a resposta revelaria quais @ são coletores.
-        raise HTTPException(400, f"@{username} é um coletor. Remova-o da aba Coletores antes de monitorar.")
     account = XAccount(
         folder_id=folder.id,
         owner_id=user.id,

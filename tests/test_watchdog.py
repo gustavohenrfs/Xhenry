@@ -23,12 +23,17 @@ def tables():
 
 @pytest.fixture
 def sent(monkeypatch):
-    """Alertas gravados (vão para o push e o histórico). Começa sem batimentos nem alertas."""
+    """Alertas gravados (vão para o push e o histórico). Começa sem batimentos nem alertas, com o Apify
+    a cada 5 min: o limite do silêncio fica nos 15 min de ROBO_SILENCE_MIN."""
     with SessionLocal() as db:
         db.query(SyncRun).delete()
         db.query(AlertSent).delete()
+        services.get_settings(db).apify_interval_min = 5
         db.commit()
-    return AlertLog()
+    yield AlertLog()
+    with SessionLocal() as db:
+        services.get_settings(db).apify_interval_min = 30
+        db.commit()
 
 
 def beat(minutes_ago: int, status: SyncStatus = SyncStatus.OK) -> None:

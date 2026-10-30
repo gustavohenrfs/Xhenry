@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 INDEX = ROOT / "templates" / "index.html"
 X_API = "https://api.x.com/2"
 LOCAL_EMAIL = "local@suzana"
-# Único admin: aprova quem entra, vê Coletores e controla o robô. ADMIN_EMAIL no .env troca.
+# Único admin: aprova quem entra e controla o robô. ADMIN_EMAIL no .env troca.
 DEFAULT_ADMIN_EMAIL = "henrfs@proton.me"
 
 STATUS_LABELS = {

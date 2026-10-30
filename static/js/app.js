@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", collectors: "Coletores", users: "Usuários" };
+const titles = { dashboard: "Dashboard", ops: "Operações", post: "Verificar post", cloaker: "Metadados", settings: "Configurações", archived: "Arquivadas", users: "Usuários" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
@@ -7,12 +7,12 @@ const state = {
 };
 const SESSION_EXPIRED = "Sua sessão expirou. Entre novamente.";
 const PENDING = "Seu acesso está aguardando aprovação do administrador.";
-// Multiusuário: o admin vê Coletores, robô e Usuários; os outros leem as contas pelo Apify. O CSS
+// Multiusuário: o admin vê robô e Usuários; os outros leem as contas pelo Apify. O CSS
 // esconde [data-admin-only] / [data-user-only] pelo <body data-role>; o papel da última visita já
 // pinta certo antes do /api/me responder.
 const ROLE_KEY = "user_role";
 const USER_KEY = "user_id";
-const ADMIN_TABS = ["collectors", "users"];
+const ADMIN_TABS = ["users"];
 try { const role = localStorage.getItem(ROLE_KEY); if (role) document.body.dataset.role = role; } catch { /* sem storage */ }
 // O navegador só oferece login salvo na tela de entrada: o resto dos campos não preenche sozinho.
 document.querySelectorAll("input:not([autocomplete]), textarea:not([autocomplete])").forEach((field) => {
@@ -77,13 +77,13 @@ if (window.Chart) {
   if (document.fonts) document.fonts.ready.then(() => [lineChart, barChart, mixChart].forEach((chart) => chart && chart.update("none")));
 }
 function num(value) { return value === null || value === undefined ? "—" : fmt.format(value); }
-// Avisos com tipo: ícone e cor de sucesso, erro, coletor (🛡️) ou informação, e uma barrinha que mostra
+// Avisos com tipo: ícone e cor de sucesso, erro, escudo (🛡️) ou informação, e uma barrinha que mostra
 // quanto falta para sumir. O tipo vem do próprio texto quando quem chama não diz.
 const TOAST_ICONS = { ok: "✓", error: "!", shield: "🛡️", info: "i" };
 const TOAST_MS = 4200;
 function toastKind(message) {
   if (/^🛡/.test(message)) return "shield";
-  if (/^(✅|Salv|Pronto|Teste (enviado|mostrado|pedido)|Criad|Removid|Excluíd|Atualizad|Arquivad|Desarquivad|Senha (alterada|atualizada)|XHenry instalado|Notificações ligadas|Coletor (adicionado|salvo))/i.test(message)) return "ok";
+  if (/^(✅|Salv|Pronto|Teste (enviado|mostrado|pedido)|Criad|Removid|Excluíd|Atualizad|Arquivad|Desarquivad|Senha (alterada|atualizada)|XHenry instalado|Notificações ligadas)/i.test(message)) return "ok";
   if (/^(❌|⛔|Falha|Erro|Não |Sem |Sua sessão|Notificações bloqueadas)|não (foi|deu|carregou)|inválid|recus/i.test(message)) return "error";
   return "info";
 }
@@ -347,7 +347,6 @@ function setTab(tab) {
   if (tab === "ops") closeOpsFolder();
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
-  if (tab === "collectors") loadCollectors();
   if (tab === "users") loadUsers();
 }
 function el(tag, className, text) {
@@ -663,7 +662,7 @@ function renderRanking(posts) {
 }
 const ALERT_KINDS = {
   viral: ["Viral", "#7cf0b5"], queda: ["Queda", "#ffb4c4"], ban: ["Restrição", "#ffb4c4"],
-  coletor: ["Coletor", "#ffc46b"], erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"],
+  erro: ["Erro", "#ffc46b"], silencio: ["Robô parado", "#ffc46b"],
   apify: ["Apify", "#ffc46b"], marco_post: ["Marco do post", "#7cf0b5"], marco_dia: ["Marco do dia", "#4fe3ff"],
   meta: ["Meta batida", "#ffd36b"], acesso: ["Pedido de acesso", "#d6ccff"], resumo: ["Resumo do dia", "#ff63c3"]
 };
@@ -737,28 +736,26 @@ function ring(done, total) {
   return svg;
 }
 // Selos vermelhos nos ícones das abas: Dashboard = alertas de views não vistos (como o sininho);
-// Coletores = ligados de castigo ou com erro. A soma vai também para o ícone do app instalado
+// Usuários = pedidos de acesso esperando. A soma vai também para o ícone do app instalado
 // (barra de tarefas do Windows, tela de início do celular).
-const tabBadges = { alerts: 0, collectors: 0, users: 0 };
+const tabBadges = { alerts: 0, users: 0 };
 function paintTabBadge(name, count) {
   tabBadges[name] = count || 0;
   document.querySelectorAll('[data-badge="' + name + '"]').forEach((badge) => {
     badge.textContent = count > 9 ? "9+" : String(count || "");
     badge.classList.toggle("hidden", !count);
   });
-  const total = tabBadges.alerts + tabBadges.collectors + tabBadges.users;
+  const total = tabBadges.alerts + tabBadges.users;
   try {
     if (total && navigator.setAppBadge) navigator.setAppBadge(total).catch(() => {});
     else if (!total && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
   } catch { /* navegador sem selo no ícone */ }
 }
-function paintCollectorBadge(count) { paintTabBadge("collectors", count); }
 function renderHealth(health) {
-  paintCollectorBadge((health.collectors && health.collectors.attention) || 0);
   const host = document.getElementById("health-body");
   const note = document.getElementById("health-note");
   const late = health.late_after_min >= 120 ? Math.round(health.late_after_min / 60) + " h" : health.late_after_min + " min";
-  note.textContent = (health.apify && health.apify.active ? "Lendo pelo Apify a cada " + intervalLabel(health.apify.interval_min) + ", coletores em espera. " : "")
+  note.textContent = (health.apify && health.apify.active ? "Lendo pelo Apify a cada " + intervalLabel(health.apify.interval_min) + ". " : "Sem token do Apify: nada é lido. ")
     + (health.enabled
       ? "Atrasada é a conta sem leitura há mais de " + late + "."
       : "Leitura automática desligada: só lê quando você clica em Atualizar dados.");
@@ -769,27 +766,11 @@ function renderHealth(health) {
   const summary = el("div", "min-w-0 flex-1 text-left");
   summary.append(
     el("p", "text-sm text-white", behind ? behind + (behind === 1 ? " conta atrasada" : " contas atrasadas") : "Todas as contas em dia"),
-    el("p", "mt-1 text-xs text-mute", last ? "Última rodada " + agoText(last.finished_at) + ", às " + stampBR(last.finished_at) + (last.via === "apify" ? ", pelo Apify" : ", pelos coletores") : "O robô ainda não rodou")
+    el("p", "mt-1 text-xs text-mute", last ? "Última leitura " + agoText(last.finished_at) + ", às " + stampBR(last.finished_at) + (last.status === "failed" ? " (falhou)" : "") : "O robô ainda não rodou")
   );
   const top = el("div", "flex items-center gap-4");
   top.append(gauge, summary);
-  const c = health.collectors;
-  const seg = el("div", "seg-bar mt-2");
-  [["free", c.free], ["benched", c.benched], ["off", c.off]].forEach(([kind, count]) => {
-    if (!count) return;
-    const part = el("span", "seg seg-" + kind);
-    part.style.flexGrow = String(count);
-    seg.append(part);
-  });
-  const legend = el("div", "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-mute");
-  [["free", "livres", c.free], ["benched", "de castigo", c.benched], ["off", "desligados", c.off]].forEach(([kind, label, count]) => {
-    const item = el("span", "inline-flex items-center gap-1.5");
-    item.append(el("span", "seg-dot seg-" + kind), el("span", "", count + " " + label));
-    legend.append(item);
-  });
-  const parts = [top, el("p", "mt-4 text-xs text-mute", c.total ? c.total + (c.total === 1 ? " coletor" : " coletores") : "Nenhum coletor cadastrado. Cadastre na aba Coletores.")];
-  if (c.total) parts.push(seg, legend);
-  if (c.next_free_at) parts.push(el("p", "mt-2 text-xs text-mute", "Próximo coletor livre em " + stampBR(c.next_free_at)));
+  const parts = [top];
   if (behind) {
     const list = el("ul", "mt-4 flex flex-wrap gap-2");
     health.stale.slice(0, 6).forEach((item) => list.append(el("li", "stale-chip", "@" + item.username + " " + (item.collected_at ? agoText(item.collected_at) : "sem leitura"))));
@@ -817,7 +798,7 @@ function apifyIssue(apify) {
   return null;
 }
 function apifyStatusText(apify) {
-  if (!apify.token_set) return isAdmin() ? "Sem token: o robô lê as suas contas pelos coletores." : "Sem token: o robô não lê as suas contas.";
+  if (!apify.token_set) return "Sem token: o robô não lê as suas contas.";
   if (apify.requested_at) return "Leitura pedida às " + stampBR(apify.requested_at) + ", aguardando o robô.";
   if (!apify.status) return "Token salvo. A primeira leitura sai em até 1 minuto.";
   const when = apify.checked_at ? stampBR(apify.checked_at) : "—";
@@ -922,7 +903,7 @@ async function loadDevices() {
       const here = mine && mine.endsWith(device.tail);
       text.append(el("p", "truncate text-sm text-white", deviceName(device.user_agent) + (here ? " · este aparelho" : "")),
         el("p", "text-xs text-mute", device.created_at ? "Desde " + stampBR(device.created_at) : ""));
-      const remove = collectorButton("Remover", async () => {
+      const remove = cardButton("Remover", async () => {
         if (!(await showConfirm("Remover este aparelho?", "Ele para de receber as notificações até você ativar de novo nele."))) return;
         try {
           await api("/api/push/devices/" + device.id, { method: "DELETE" });
@@ -999,11 +980,11 @@ function userCard(user, actions) {
   who.append(el("p", "truncate font-medium text-white", user.nome_exibicao || user.email), el("p", "truncate text-xs text-mute", user.email));
   head.append(userAvatar(user), who);
   card.append(head);
-  if (user.is_admin) card.append(collectorLine("Papel", "Administrador (você)", false));
+  if (user.is_admin) card.append(infoLine("Papel", "Administrador (você)", false));
   if (user.is_approved) {
-    card.append(collectorLine("Acesso desde", user.approved_at ? stampBR(user.approved_at) : "—", false));
-    card.append(collectorLine("Contas", String(user.accounts), false));
-  } else card.append(collectorLine("Pediu em", user.created_at ? stampBR(user.created_at) : "—", false));
+    card.append(infoLine("Acesso desde", user.approved_at ? stampBR(user.approved_at) : "—", false));
+    card.append(infoLine("Contas", String(user.accounts), false));
+  } else card.append(infoLine("Pediu em", user.created_at ? stampBR(user.created_at) : "—", false));
   if (actions.length) {
     const row = el("div", "mt-4 flex flex-wrap gap-2");
     row.append(...actions);
@@ -1033,7 +1014,7 @@ function inviteRow(invite) {
     link.title = "Copiar link";
     link.addEventListener("click", () => copyLink(invite.link));
     const actions = el("div", "mt-2 flex flex-wrap gap-2");
-    actions.append(collectorButton("Copiar link", () => copyLink(invite.link)), collectorButton("Cancelar", () => cancelInvite(invite)));
+    actions.append(cardButton("Copiar link", () => copyLink(invite.link)), cardButton("Cancelar", () => cancelInvite(invite)));
     row.append(link, actions);
   }
   return row;
@@ -1052,8 +1033,8 @@ async function loadUsers() {
     const name = (user) => user.nome_exibicao || user.email;
     document.getElementById("users-pending").replaceChildren(...(users.pending.length
       ? users.pending.map((user) => userCard(user, [
-        collectorButton("Aprovar", () => userAction("/api/admin/users/" + user.id + "/approve", "POST", "Acesso liberado para " + name(user) + ".")),
-        collectorButton("Recusar", async () => {
+        cardButton("Aprovar", () => userAction("/api/admin/users/" + user.id + "/approve", "POST", "Acesso liberado para " + name(user) + ".")),
+        cardButton("Recusar", async () => {
           if (await showConfirm("Recusar o pedido?", "O cadastro de " + name(user) + " é apagado. Para entrar depois, a pessoa precisa de um convite novo.")) {
             userAction("/api/admin/users/" + user.id, "DELETE", "Pedido recusado.");
           }
@@ -1061,7 +1042,7 @@ async function loadUsers() {
       ]))
       : [emptyState("users", "Nenhum pedido esperando", "Gere um convite e mande o link. Quem se cadastrar por ele aparece aqui para você aprovar.", "Gerar convite", newInvite)]));
     document.getElementById("users-approved").replaceChildren(...users.approved.map((user) => userCard(user, user.is_admin ? [] : [
-      collectorButton("Revogar acesso", async () => {
+      cardButton("Revogar acesso", async () => {
         if (await showConfirm("Tirar o acesso de " + name(user) + "?", "A pessoa sai na hora e volta para a tela de espera. As pastas e contas dela ficam guardadas.")) {
           userAction("/api/admin/users/" + user.id + "/revoke", "POST", "Acesso revogado.");
         }
@@ -2219,27 +2200,7 @@ async function loadArchived() {
     host.replaceChildren(message(error.message || "Erro ao carregar."));
   }
 }
-// Coletores: contas descartáveis que o robô usa para ler. Proxy e cookies chegam mascarados.
-const COLLECTOR_STATES = { ready: ["Pronto", "st-healthy"], paused: ["Pausado", "st-search_ban"], off: ["Desligado", "st-none"] };
-const COLLECTOR_RESULTS = {
-  ok: "Última leitura ok", limite: "X limitou (429)", bloqueio: "X bloqueou a leitura",
-  verificacao: "🛡️ X pediu verificação de humanidade (Cloudflare): entre no x.com com este coletor, resolva e aperte Testar",
-  sessao: "Sessão caiu: cole cookies novos", proxy: "Proxy não respondeu", erro: "Erro na última leitura"
-};
-// Resultado do botão Testar (pending = o robô ainda vai ler; o resto é o que ele gravou).
-const COLLECTOR_TESTS = {
-  pending: ["⏳ Testando", false], ok: ["✅ Funcionando", false], conta: ["✅ Coletor ok, a conta lida deu erro", false],
-  proxy: ["❌ Proxy fora do ar", true], verificacao: ["🛡️ X pediu verificação", true], sessao: ["🔑 Sessão caiu", true],
-  limite: ["⛔ X limitou (429)", true], bloqueio: ["🚫 X bloqueou a leitura", true], erro: ["⚠️ Erro no teste", true]
-};
-let collectorsPolledAt = 0;
-let collectorsSig = "";
-let collectorsPending = new Set();
-let collectorEditing = null;
-function timeBR(iso) {
-  return iso ? new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
-}
-function collectorLine(label, value, warn) {
+function infoLine(label, value, warn) {
   const p = document.createElement("p");
   p.className = "mt-1 break-all text-xs " + (warn ? "text-amber-200" : "text-mute");
   const b = document.createElement("span");
@@ -2248,7 +2209,7 @@ function collectorLine(label, value, warn) {
   p.append(b, document.createTextNode(value));
   return p;
 }
-function collectorButton(text, onClick) {
+function cardButton(text, onClick) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "rounded-full border border-neon/40 px-3 py-1 text-xs";
@@ -2256,240 +2217,6 @@ function collectorButton(text, onClick) {
   button.addEventListener("click", onClick);
   return button;
 }
-function collectorCard(collector) {
-  const card = document.createElement("article");
-  card.className = "glow rounded-2xl border border-neon/20 bg-card p-4";
-  card.dataset.collectorId = String(collector.id);
-  const head = document.createElement("div");
-  head.className = "flex items-start justify-between gap-3";
-  const name = document.createElement("p");
-  name.className = "min-w-0 truncate font-medium text-white";
-  name.textContent = "@" + collector.handle;
-  const [label, style] = COLLECTOR_STATES[collector.state] || COLLECTOR_STATES.off;
-  const badge = document.createElement("span");
-  badge.className = "shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium " + style;
-  const pausedAs = collector.last_status === "verificacao" ? "🛡️ Verificação" : label;
-  badge.textContent = collector.state === "paused" ? pausedAs + " até " + timeBR(collector.paused_until) : label;
-  head.append(name, badge);
-
-  card.append(
-    head,
-    collectorLine("Proxy", collector.proxy || "nenhum: sai pelo IP do VPS", !collector.proxy),
-    collectorLine("Cookies", collector.cookies || "nenhum: usa o login do anyx no VPS", false),
-    collectorLine("Última leitura", timeBR(collector.last_used_at), false)
-  );
-  if (collector.last_status && collector.last_status !== "ok") {
-    const detail = COLLECTOR_RESULTS[collector.last_status] || collector.last_status;
-    card.append(collectorLine("Aviso", collector.last_error ? detail + " — " + collector.last_error : detail, true));
-  }
-  if (collector.test_status || collector.test_detail) {
-    const [title, warn] = COLLECTOR_TESTS[collector.test_status || "pending"] || [collector.test_status, true];
-    const when = collector.test_at ? " (" + timeBR(collector.test_at) + ")" : "";
-    card.append(collectorLine("Teste" + when, title + (collector.test_detail ? ": " + collector.test_detail : ""), warn));
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "mt-4 flex flex-wrap gap-2";
-  const testing = collector.test_status === "pending";
-  const test = collectorButton(testing ? "Testando…" : "Testar", (event) => testCollector(collector, event.currentTarget));
-  test.disabled = testing;
-  test.classList.add("collector-test");
-  actions.append(
-    test,
-    collectorButton("Editar", () => editCollector(collector)),
-    collectorButton(collector.is_active ? "Desligar" : "Ligar", () => saveCollector(collector.id, { is_active: !collector.is_active })),
-  );
-  if (collector.proxy) actions.append(collectorButton("Tirar proxy", () => saveCollector(collector.id, { proxy: "" })));
-  actions.append(collectorButton("Remover", () => removeCollector(collector)));
-  card.append(actions);
-  return card;
-}
-// Aba Coletores em espera: com o Apify do admin ativo, os coletores só entram quando ele falha.
-function paintStandby(robo) {
-  const banner = document.getElementById("apify-standby");
-  const apify = robo.apify || {};
-  banner.classList.toggle("hidden", !apify.active);
-  if (!apify.active) return;
-  const run = robo.last_run;
-  const failed = apify.status === "erro" || Boolean(run && run.apify_error);
-  banner.classList.toggle("is-ok", !failed);
-  banner.classList.toggle("is-bad", failed);
-  document.getElementById("apify-standby-text").textContent = failed
-    ? "Apify falhou" + (apify.checked_at ? " às " + stampBR(apify.checked_at) : "") + ": " + ((run && run.apify_error) || apify.detail || "erro") + " Os coletores assumiram."
-    : "Apify ativo · coletores em espera. Eles só entram se o Apify falhar.";
-}
-async function loadCollectors({ silent = false } = {}) {
-  const host = document.getElementById("collector-list");
-  if (!host) return;
-  api("/api/robo").then(paintStandby).catch(() => {});
-  const message = (text) => {
-    const p = document.createElement("p");
-    p.className = "text-sm text-mute";
-    p.textContent = text;
-    return p;
-  };
-  collectorsPolledAt = Date.now();
-  try {
-    const collectors = await api("/api/collectors");
-    // Teste que acabou de sair do "pending": avisa o resultado sem precisar olhar o card.
-    const pending = new Set();
-    collectors.forEach((collector) => {
-      if (collector.test_status === "pending") pending.add(collector.id);
-      else if (collectorsPending.has(collector.id)) {
-        const [title] = COLLECTOR_TESTS[collector.test_status] || ["Teste concluído"];
-        toast("@" + collector.handle + ": " + title + (collector.test_detail ? " — " + collector.test_detail : ""));
-      }
-    });
-    collectorsPending = pending;
-    paintCollectorBadge(collectors.filter((c) => c.is_active && (c.state === "paused" || (c.last_status && c.last_status !== "ok"))).length);
-    const sig = JSON.stringify(collectors);
-    if (silent && sig === collectorsSig) return;  // nada mudou: não mexe no DOM
-    collectorsSig = sig;
-    host.replaceChildren(...(collectors.length ? collectors.map(collectorCard) : [emptyState("collectors", "Nenhum coletor ainda", "Sem coletores o robô não lê nenhuma timeline. Cadastre uma conta descartável com o proxy dela.", "Adicionar coletor", () => document.getElementById("collector-handle").focus())]));
-  } catch (error) {
-    if (!silent) host.replaceChildren(message(error.message || "Erro ao carregar."));
-  }
-}
-async function testCollector(collector, button) {
-  button.disabled = true;
-  button.textContent = "Testando…";
-  try {
-    const result = await api("/api/collectors/" + collector.id + "/test", { method: "POST" });
-    toast(result.test_status === "proxy"
-      ? "❌ Proxy de @" + collector.handle + " fora do ar: " + (result.test_detail || "")
-      : "✅ " + (result.test_detail || "Teste pedido."));
-  } catch (error) {
-    toast(error.message || "Não foi possível testar.");
-  }
-  await loadCollectors();
-}
-// Aba Coletores aberta: atualiza sozinha a cada 30 s, ou a cada 5 s enquanto um teste está na fila.
-setInterval(() => {
-  if (state.tab !== "collectors" || document.hidden || !token()) return;
-  if (Date.now() - collectorsPolledAt >= (collectorsPending.size ? 5000 : 30000)) loadCollectors({ silent: true });
-}, 5000);
-function resetCollectorForm() {
-  collectorEditing = null;
-  const handle = document.getElementById("collector-handle");
-  handle.value = "";
-  handle.disabled = false;
-  document.getElementById("collector-proxy").value = "";
-  clearCollectorFile();
-  document.getElementById("collector-proxy").placeholder = "Proxy: ip:porta:usuario:senha";
-  document.getElementById("collector-submit").textContent = "Adicionar coletor";
-  document.getElementById("collector-cancel").classList.add("hidden");
-  document.getElementById("collector-hint").textContent = "Proxy e cookies ficam mascarados no painel; só o robô lê os valores.";
-}
-function editCollector(collector) {
-  collectorEditing = collector;
-  const handle = document.getElementById("collector-handle");
-  handle.value = "@" + collector.handle;
-  handle.disabled = true;
-  document.getElementById("collector-proxy").value = "";
-  clearCollectorFile();
-  document.getElementById("collector-proxy").placeholder = collector.proxy ? "Atual: " + collector.proxy + " (vazio = mantém)" : "Proxy: ip:porta:usuario:senha";
-  document.getElementById("collector-submit").textContent = "Salvar @" + collector.handle;
-  document.getElementById("collector-cancel").classList.remove("hidden");
-  document.getElementById("collector-hint").textContent = "Campos vazios mantêm o que está salvo.";
-  document.getElementById("collector-form").scrollIntoView({ behavior: "smooth", block: "start" });
-}
-async function saveCollector(id, body) {
-  try {
-    await api("/api/collectors/" + id, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    await loadCollectors();
-    return true;
-  } catch (error) {
-    toast(error.message || "Não salvou o coletor.");
-    return false;
-  }
-}
-async function removeCollector(collector) {
-  const ok = await showConfirm("Remover coletor", "O robô deixa de usar @" + collector.handle + ". Proxy e cookies salvos são apagados.");
-  if (!ok) return;
-  try {
-    await api("/api/collectors/" + collector.id, { method: "DELETE" });
-    if (collectorEditing && collectorEditing.id === collector.id) resetCollectorForm();
-    await loadCollectors();
-  } catch (error) { toast(error.message || "Não removeu."); }
-}
-// Cookies: só o arquivo .json exportado pela extensão (arrastar ou escolher). O servidor filtra x.com e exige auth_token.
-let collectorCookies = "";
-const COLLECTOR_FILE_HINT = document.getElementById("collector-file-label").textContent;
-function clearCollectorFile() {
-  collectorCookies = "";
-  document.getElementById("collector-file").value = "";
-  const label = document.getElementById("collector-file-label");
-  label.textContent = COLLECTOR_FILE_HINT;
-  label.classList.add("text-mute");
-  document.getElementById("collector-file-clear").classList.add("hidden");
-}
-function countXCookies(data) {
-  if (data && !Array.isArray(data) && Array.isArray(data.cookies)) data = data.cookies;
-  if (Array.isArray(data)) {
-    const mine = data.filter((c) => c && c.name && /(^|\.)(x|twitter)\.com$/.test(String(c.domain || ".x.com")));
-    return { total: mine.length, token: mine.some((c) => c.name === "auth_token" && c.value) };
-  }
-  if (data && typeof data === "object") return { total: Object.keys(data).length, token: Boolean(data.auth_token) };
-  return { total: 0, token: false };
-}
-async function loadCollectorFile(file) {
-  if (!file) return;
-  clearCollectorFile();
-  if (file.size > 200000) { toast("Arquivo grande demais para ser de cookies."); return; }
-  const text = (await file.text()).trim();
-  let data;
-  try { data = JSON.parse(text); } catch { toast("Esse arquivo não é um JSON válido."); return; }
-  const { total, token } = countXCookies(data);
-  if (!token) { toast("O arquivo não tem o cookie auth_token do x.com. Exporte os cookies com a conta logada."); return; }
-  collectorCookies = text;
-  const label = document.getElementById("collector-file-label");
-  label.textContent = "✓ " + file.name + " — " + total + " cookies do x.com, com auth_token";
-  label.classList.remove("text-mute");
-  document.getElementById("collector-file-clear").classList.remove("hidden");
-}
-const collectorDrop = document.getElementById("collector-drop");
-document.getElementById("collector-file").addEventListener("change", (event) => loadCollectorFile(event.target.files[0]));
-document.getElementById("collector-file-clear").addEventListener("click", (event) => { event.preventDefault(); clearCollectorFile(); });
-["dragenter", "dragover"].forEach((name) => collectorDrop.addEventListener(name, (event) => {
-  event.preventDefault();
-  collectorDrop.classList.add("border-neon");
-}));
-["dragleave", "drop"].forEach((name) => collectorDrop.addEventListener(name, () => collectorDrop.classList.remove("border-neon")));
-collectorDrop.addEventListener("drop", (event) => {
-  event.preventDefault();
-  loadCollectorFile(event.dataTransfer.files[0]);
-});
-document.getElementById("collector-cancel").addEventListener("click", resetCollectorForm);
-document.getElementById("collector-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const proxy = document.getElementById("collector-proxy").value.trim();
-  const cookies = collectorCookies;
-  if (collectorEditing) {
-    const body = {};
-    if (proxy) body.proxy = proxy;
-    if (cookies) body.cookies = cookies;
-    if (!Object.keys(body).length) { resetCollectorForm(); return; }
-    if (await saveCollector(collectorEditing.id, body)) {
-      toast("@" + collectorEditing.handle + " atualizado.");
-      resetCollectorForm();
-    }
-    return;
-  }
-  try {
-    const created = await api("/api/collectors", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handle: document.getElementById("collector-handle").value.trim(), proxy, cookies })
-    });
-    toast("@" + created.handle + " adicionado.");
-    resetCollectorForm();
-    await loadCollectors();
-  } catch (error) { toast(error.message || "Não adicionou o coletor."); }
-});
 document.getElementById("profile-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const body = new FormData();
@@ -2710,13 +2437,11 @@ function paintRobo(robo) {
   paintPause("robo", robo.pause);
   const toggle = document.getElementById("robo-enabled");
   toggle.checked = robo.enabled;
-  fillIntervals(document.getElementById("robo-interval"), robo.intervals, robo.interval_min, !robo.enabled);
   fillIntervals(document.getElementById("robo-apify-interval"), robo.apify.intervals, robo.apify.interval_min, !robo.enabled);
-  paintStandby(robo);
-  const parts = [robo.apify.active ? "Lendo pelo Apify; coletores em espera." : "Sem token do Apify: lendo pelos coletores."];
+  const parts = [robo.apify.active ? "Lendo pelo Apify." : "Sem token do Apify: cole o seu em Configurações para o robô ler as suas contas."];
   if (robo.last_run) {
     const run = robo.last_run;
-    let text = "Última rodada (" + (run.via === "apify" ? "Apify" : "coletores") + "): " + stampBR(run.finished_at);
+    let text = "Última leitura: " + stampBR(run.finished_at);
     if (run.contas !== null && run.contas !== undefined) text += " · " + run.contas + " contas, " + (run.tweets || 0) + " tweets";
     if (run.status === "failed") text += " · falhou";
     else if (run.status === "partial") text += " · com falhas";
@@ -2735,21 +2460,19 @@ async function saveRobo(body) {
   try {
     const robo = await api("/api/robo", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     paintRobo(robo);
-    const every = body.apify_interval_min ? robo.apify.interval_min : robo.interval_min;
     if (body.pause) toast(robo.pause.on ? "Pausa salva: de " + robo.pause.from + " às " + robo.pause.to + "." : "Pausa da madrugada desligada.");
-    else toast(body.enabled === false ? "Leitura automática desligada." : body.enabled ? "Leitura automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(every) + ".");
+    else toast(body.enabled === false ? "Leitura automática desligada." : body.enabled ? "Leitura automática ligada: a primeira rodada sai em até 1 minuto." : "Intervalo salvo: a cada " + intervalLabel(robo.apify.interval_min) + ".");
   } catch (error) {
     toast(error.message || "Não salvou o robô.");
     loadRobo();
   }
 }
 document.getElementById("robo-enabled").addEventListener("change", (event) => saveRobo({ enabled: event.target.checked }));
-document.getElementById("robo-interval").addEventListener("change", (event) => saveRobo({ interval_min: Number(event.target.value) }));
 watchPause("robo", saveRobo);
 document.getElementById("robo-apify-interval").addEventListener("change", (event) => saveRobo({ apify_interval_min: Number(event.target.value) }));
 
 const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô não está pegando os pedidos
-const ROBO_RUN_MS = 12 * 60000;     // uma rodada manual pode levar alguns minutos (um Chrome por coletor)
+const ROBO_RUN_MS = 12 * 60000;     // uma leitura com muitas contas pode levar alguns minutos no Apify
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const READ_POLL_MS = 2000;
 async function refreshByApify(btn) {
@@ -2784,12 +2507,8 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     const askedAt = Date.parse(asked.asked_at || asked.requested_at);
     const started = Date.now();
     let robo = asked;
-    // Com o Apify ativo o painel já está lendo; sem ele (ou se o Apify falhar) o robô chama os coletores.
-    const say = (r) => {
-      btn.textContent = r.running ? "Lendo pelo Apify..." : r.requested_at
-        ? (r.apify && r.apify.active ? "Apify falhou, chamando os coletores..." : "Chamando os coletores...")
-        : "Lendo...";
-    };
+    // O painel lê na hora pelo Apify; sem Postgres o robô pega o pedido em até 1 minuto.
+    const say = (r) => { btn.textContent = r.running ? "Lendo pelo Apify..." : r.requested_at ? "Esperando o robô..." : "Lendo..."; };
     say(robo);
     let pickedFrom = Date.now();
     for (;;) {
@@ -2806,8 +2525,8 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     }
     await load();
     const run = robo.last_run;
-    const via = run.via === "apify" ? " pelo Apify" : run.apify_error ? " pelos coletores (o Apify falhou)" : "";
-    toast(run.status === "failed" ? "A leitura falhou. Veja o aviso no Telegram." : "Leitura feita" + via + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
+    if (run.status === "failed") toast("A leitura falhou: " + (run.error || "erro no Apify") + ".", "error");
+    else toast("Leitura feita pelo Apify: " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
     if (state.tab === "settings") paintRobo(robo);
   } catch (error) { toast(error.message || "Falha ao atualizar."); }
   btn.disabled = false;
@@ -3427,7 +3146,7 @@ document.getElementById("theme-btn").addEventListener("click", (event) => {
 // (--rx/--ry). Um ouvinte só para a página toda, pintado uma vez por quadro. Só com mouse; sem
 // inclinação com "reduzir movimento". Formulários não se mexem (o laser deles acende ao digitar).
 const GLASS_SELECTOR = ".glow, .kpi-card, #pane-dashboard article, #cloaker-results";
-const TILT_SELECTOR = ".kpi-card, #pane-dashboard article.glow, .account-card, #folder-cards > .glow, #ops-accounts > .glow, #collector-list > .glow, #archived-accounts > .glow";
+const TILT_SELECTOR = ".kpi-card, #pane-dashboard article.glow, .account-card, #folder-cards > .glow, #ops-accounts > .glow, #archived-accounts > .glow";
 const finePointer = matchMedia("(hover: hover) and (pointer: fine)");
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let litCard = null;
@@ -3495,7 +3214,6 @@ const ICONS = {
   dashboard: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
   ops: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>',
   archived: '<rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/>',
-  collectors: '<circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/>',
   post: '<path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/>',
   cloaker: '<path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/>',
   settings: '<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/>',
@@ -3548,8 +3266,8 @@ function markLive(ok) {
   paintLive();
 }
 setInterval(paintLive, 10000);
-// Painel ao vivo: o servidor avisa (/api/live, app/live.py) quando o robô grava dados, chega um alerta
-// ou um coletor muda, e só a parte que mudou é recarregada, sem F5. O EventSource reconecta sozinho;
+// Painel ao vivo: o servidor avisa (/api/live, app/live.py) quando o robô grava dados ou chega um
+// alerta, e só a parte que mudou é recarregada, sem F5. O EventSource reconecta sozinho;
 // o auto-refresh de 60 s continua como reserva.
 let liveSource = null;
 let liveStamp = null;
@@ -3572,10 +3290,6 @@ function startLive() {
       else dashboardDirty = true;  // recarrega quando o Dashboard voltar à tela
     }
     if (stamp.alerts !== before.alerts) { checkViral(); loadAlerts(); }
-    if (stamp.collectors !== before.collectors) {
-      loadHealth();
-      if (state.tab === "collectors") loadCollectors({ silent: true });
-    }
   };
 }
 function flash(node) {
@@ -3774,11 +3488,10 @@ function renderDrawer(account, detail) {
 }
 
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["collectors", "Coletores"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["users", "Usuários"], ["settings", "Configurações"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["ops", "Operações"], ["archived", "Arquivadas"], ["post", "Verificar post"], ["cloaker", "Metadados"], ["users", "Usuários"], ["settings", "Configurações"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
 let paletteIndex = 0;
-let paletteCollectors = null;
 function paletteOpen() { return document.getElementById("palette").classList.contains("open"); }
 function paletteSource() {
   const items = visibleTabs().map(([tab, label], index) => ({ icon: tab, title: label, hint: "Aba · tecla " + (index + 1), run: () => setTab(tab) }));
@@ -3792,12 +3505,6 @@ function paletteSource() {
     hint: "Conta · @" + account.username + " · " + account.folder_name,
     run: () => { setTab("dashboard"); openDrawer(account.id); }
   }));
-  (paletteCollectors || []).forEach((collector) => items.push({
-    icon: "collectors",
-    title: "@" + collector.handle,
-    hint: "Coletor · " + ({ ready: "pronto", paused: "pausado", off: "desligado" }[collector.state] || collector.state),
-    run: () => { setTab("collectors"); revealCollector(collector.id); }
-  }));
   return items;
 }
 function paintPalette() {
@@ -3806,7 +3513,7 @@ function paintPalette() {
   paletteIndex = Math.min(paletteIndex, Math.max(0, paletteItems.length - 1));
   const list = document.getElementById("palette-list");
   if (!paletteItems.length) {
-    list.replaceChildren(el("li", "palette-empty", "Nada encontrado. Tente o nome de uma aba, conta ou coletor."));
+    list.replaceChildren(el("li", "palette-empty", "Nada encontrado. Tente o nome de uma aba ou conta."));
     return;
   }
   list.replaceChildren(...paletteItems.map((item, index) => {
@@ -3833,7 +3540,6 @@ function openPalette() {
   paletteIndex = 0;
   paintPalette();
   input.focus();
-  if (isAdmin()) api("/api/collectors").then((list) => { paletteCollectors = list; if (paletteOpen()) paintPalette(); }).catch(() => {});
 }
 function closePalette() {
   const palette = document.getElementById("palette");
@@ -3846,15 +3552,6 @@ function runPalette(index) {
   if (!item) return;
   closePalette();
   item.run();
-}
-function revealCollector(id) {
-  let tries = 0;
-  const look = () => {
-    const card = document.querySelector('#collector-list [data-collector-id="' + id + '"]');
-    if (card) { card.scrollIntoView({ behavior: "smooth", block: "center" }); flash(card); return; }
-    if (++tries < 20) setTimeout(look, 100);
-  };
-  look();
 }
 document.getElementById("palette-input").addEventListener("input", () => { paletteIndex = 0; paintPalette(); });
 document.getElementById("palette-input").addEventListener("keydown", (event) => {
@@ -3906,7 +3603,6 @@ document.addEventListener("keydown", (event) => {
 // No navegador o próprio Chrome já faz isso; no app instalado não existe, então fazemos aqui.
 async function refreshCurrentTab() {
   if (state.tab === "dashboard") await load();
-  else if (state.tab === "collectors") await loadCollectors();
   else if (state.tab === "users") await loadUsers();
   else if (state.tab === "archived") await loadArchived();
   else if (state.tab === "settings") await loadSettings();

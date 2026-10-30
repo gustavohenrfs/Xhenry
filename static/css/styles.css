@@ -624,12 +624,6 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 .gauge-fill { stroke: var(--accent-2); transition: stroke-dasharray .6s ease; }
 .gauge-fill.gauge-warn { stroke: var(--warn); }
 .gauge-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-.seg-bar { display: flex; gap: 3px; height: .5rem; }
-.seg { border-radius: 999px; min-width: .5rem; }
-.seg-dot { width: .5rem; height: .5rem; border-radius: 999px; }
-.seg-free { background: var(--accent-2); }
-.seg-benched { background: var(--warn); }
-.seg-off { background: var(--line-strong); }
 .stale-chip { border: 1px solid var(--warn-line); border-radius: 999px; padding: .15rem .6rem; color: var(--warn); font-size: .72rem; }
 
 .growth-stat {
@@ -690,9 +684,8 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
 #folder-cards > button.glow:hover { background: var(--glass) !important; }
 #pane-settings > div { align-items: stretch; }
 #pane-settings form, #pane-settings article { text-align: left; }
-#tg-status, #robo-card label.flex, #verdict, #collector-drop, #cloaker-drop { border-color: var(--line-strong) !important; background: rgb(var(--c-ink) / .45) !important; }
-#collector-drop:hover, #cloaker-drop:hover { border-color: var(--accent) !important; }
-.collector-test:disabled { opacity: .55; cursor: progress; }
+#tg-status, #robo-card label.flex, #verdict, #cloaker-drop { border-color: var(--line-strong) !important; background: rgb(var(--c-ink) / .45) !important; }
+#cloaker-drop:hover { border-color: var(--accent) !important; }
 
 /* ---------- modais e aviso ---------- */
 .auth-modal {
@@ -802,7 +795,7 @@ input[type="file"]::file-selector-button { color: #fff; background: linear-gradi
   bottom: calc(.6rem + env(safe-area-inset-bottom));
   z-index: 40;
   display: grid;
-  /* Uma coluna por aba visível: sem Coletores (usuário comum) não sobra buraco. */
+  /* Uma coluna por aba visível: sem Usuários (usuário comum) não sobra buraco. */
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   padding: .35rem;
@@ -1190,7 +1183,7 @@ body.drawer-lock { overflow: hidden; }
 .ptr.spin svg { animation: ptr-spin .8s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
 
-/* ---------- selo de atenção nos ícones das abas (coletores de castigo ou com erro) ---------- */
+/* ---------- selo de atenção nos ícones das abas (alertas não vistos, pedidos de acesso) ---------- */
 .tab-badge {
   position: absolute;
   top: -.15rem;
@@ -1264,7 +1257,7 @@ body.drawer-lock { overflow: hidden; }
 }
 
 /* ---------- Multiusuário ---------- */
-/* app.js põe <body data-role="admin|user"> depois do /api/me. Coletores, robô, Telegram e Usuários são
+/* app.js põe <body data-role="admin|user"> depois do /api/me. Robô, Telegram e Usuários são
    do admin; o aviso e o token do Apify, de quem lê pelo Apify. Sem papel ainda, o que é do admin some. */
 body:not([data-role="admin"]) [data-admin-only] { display: none !important; }
 body[data-role="admin"] [data-user-only] { display: none !important; }

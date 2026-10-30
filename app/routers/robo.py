@@ -1,16 +1,15 @@
 """Controle do robo.py pelo painel: leitura automática, intervalo e "Atualizar Dados" (ler agora).
 
 O robô roda no cron do VPS a cada minuto e lê estas opções em app_settings no começo de cada
-execução: com a leitura automática desligada, só roda quando há pedido do botão; ligada, roda
-quando a última rodada tem mais que o intervalo. Ao começar, ele apaga o pedido.
+execução: lê as contas do admin pelo Apify (token dele em Configurações) quando a última leitura tem
+mais que o intervalo e a leitura automática está ligada, ou quando há pedido do botão (apaga o pedido).
 
-Robô e coletores são só do admin. Os outros usuários leem pelo Apify com o próprio token: para eles
-há só /api/apify (estado da última leitura) e /api/apify/run (o "Atualizar dados" deles).
+/api/robo é só do admin. Os outros usuários leem pelo Apify com o próprio token: para eles há só
+/api/apify (estado da última leitura) e /api/apify/run (o "Atualizar dados" deles).
 """
 
 from __future__ import annotations
 
-import math
 from datetime import timedelta
 from typing import Any
 
@@ -21,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app import reader
 from app.database import get_db
-from app.models import Collector, SyncKind, SyncRun, User
+from app.models import SyncKind, SyncRun, User
 from app.routers.auth import admin_user, approved_user
 from app.services import (
     admin_apify_active,
@@ -39,7 +38,6 @@ from app.services import (
 router = APIRouter()
 user_router = APIRouter()
 
-ROBO_INTERVALS = (5, 10, 15, 30, 60, 120, 180, 360, 720, 1440)
 # Cada leitura pelo Apify cobra no mínimo 50 posts: nada abaixo de 15 min.
 APIFY_INTERVALS = (15, 30, 60, 120, 180, 360, 720, 1440)
 
@@ -58,14 +56,13 @@ class ApifyIn(BaseModel):
 
 class RoboIn(BaseModel):
     enabled: bool | None = None
-    interval_min: int | None = None
     apify_interval_min: int | None = None
     pause: PauseIn | None = None
 
 
 def robo_payload(db: Session) -> dict[str, Any]:
     row = get_settings(db)
-    interval = robot_interval(db, row)
+    interval = robot_interval(row)
     last = db.scalars(
         select(SyncRun)
         .where(SyncRun.kind == SyncKind.TWEETS, SyncRun.account_id.is_(None), SyncRun.finished_at.is_not(None))
@@ -83,9 +80,7 @@ def robo_payload(db: Session) -> dict[str, Any]:
             "contas": stats.get("contas"),
             "tweets": stats.get("tweets"),
             "manual": bool(stats.get("manual")),
-            # Por onde a rodada leu: "apify" ou "coletores" (rodadas antigas não diziam: coletores).
-            "via": stats.get("via") or "coletores",
-            "apify_error": stats.get("apify_erro"),
+            "error": last.error,
         }
         if row.robo_enabled:
             next_run = (finished + timedelta(minutes=interval)).isoformat()
@@ -94,8 +89,6 @@ def robo_payload(db: Session) -> dict[str, Any]:
     apify = user_settings(db, admin.id) if admin else None
     return {
         "enabled": row.robo_enabled,
-        "interval_min": row.robo_interval_min,
-        "intervals": list(ROBO_INTERVALS),
         "apify": {
             "active": admin_apify_active(db),
             "interval_min": row.apify_interval_min,
@@ -122,10 +115,6 @@ def read_robo(db: Session = Depends(get_db)) -> dict[str, Any]:
 @router.put("/api/robo", dependencies=[Depends(admin_user)])
 def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     row = get_settings(db)
-    if payload.interval_min is not None:
-        if payload.interval_min not in ROBO_INTERVALS:
-            raise HTTPException(400, "Intervalo inválido.")
-        row.robo_interval_min = payload.interval_min
     if payload.apify_interval_min is not None:
         if payload.apify_interval_min not in APIFY_INTERVALS:
             raise HTTPException(400, "Intervalo do Apify inválido.")
@@ -144,9 +133,11 @@ def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]
 
 @router.post("/api/robo/run")
 def request_run(user: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Botão "Atualizar dados": com o Apify ativo, lê na hora (app/reader.py); se ele falhar, ou sem
-    Apify, o robô pega o pedido na próxima passada do cron (até 1 min) e chama os coletores."""
-    if not (admin_apify_active(db) and reader.start(user.id, True)):
+    """Botão "Atualizar dados": lê na hora pelo Apify (app/reader.py); sem Postgres o robô pega o
+    pedido na próxima passada do cron (até 1 min)."""
+    if not admin_apify_active(db):
+        raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
+    if not reader.start(user.id, True):
         row = get_settings(db)
         row.robo_run_requested_at = now_utc()
         db.commit()
@@ -154,20 +145,12 @@ def request_run(user: User = Depends(admin_user), db: Session = Depends(get_db))
 
 
 def collection_health(db: Session, admin: User) -> dict[str, Any]:
-    """Cartão "Saúde da leitura": contas atrasadas e estado dos coletores (só contagens, nada de proxy)."""
+    """Cartão "Saúde da leitura": contas do admin que o Apify não lê há tempo demais."""
     now = now_utc()
     payload = robo_payload(db)
-    collectors = db.scalars(select(Collector)).all()
-    benched = [row for row in collectors if row.is_active and row.paused_until and as_utc(row.paused_until) > now]
-    free = [row for row in collectors if row.is_active and row not in benched]
     accounts = selected_accounts(db, admin.id, None)
-    if payload["apify"]["active"]:
-        # Pelo Apify cada rodada lê todas as contas: a volta é um intervalo só.
-        cycle = payload["apify"]["interval_min"]
-    else:
-        # Cada rodada lê uma conta por coletor livre: a volta completa leva ceil(contas/coletores) intervalos.
-        cycle = math.ceil(len(accounts) / max(1, len(free))) * payload["interval_min"]
-    late_after = max(60, 2 * cycle)
+    # Cada leitura pelo Apify lê todas as contas: atrasada é a que passou de dois intervalos.
+    late_after = max(60, 2 * payload["apify"]["interval_min"])
     stale = []
     for account in accounts:
         when = as_utc(account.collected_at) if account.collected_at else None
@@ -180,23 +163,12 @@ def collection_health(db: Session, admin: User) -> dict[str, Any]:
                 }
             )
     stale.sort(key=lambda item: item["collected_at"] or "")
-    next_free = min((as_utc(row.paused_until) for row in benched), default=None)
-    # Selo vermelho da aba Coletores: ligados que estão de castigo ou cuja última leitura deu erro.
-    attention = sum(1 for row in collectors if row.is_active and (row in benched or (row.last_status or "ok") != "ok"))
     payload.update(
         {
             "accounts": len(accounts),
             "fresh": len(accounts) - len(stale),
             "stale": stale,
             "late_after_min": late_after,
-            "collectors": {
-                "total": len(collectors),
-                "free": len(free),
-                "benched": len(benched),
-                "off": len(collectors) - len(free) - len(benched),
-                "next_free_at": next_free.isoformat() if next_free else None,
-                "attention": attention,
-            },
         }
     )
     return payload

@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=23">
+  <link rel="stylesheet" href="/static/css/styles.css?v=24">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=40"></script>
+  <script defer src="/static/js/app.js?v=41"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -40,7 +40,6 @@
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><b class="tab-badge hidden" data-badge="alerts" aria-label="alertas não vistos"></b><span>Dashboard</span></button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
         <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
-        <button type="button" data-tab="collectors" data-admin-only class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><b class="tab-badge hidden" data-badge="collectors" aria-label="coletores precisando de atenção"></b><span>Coletores</span></button>
         <button type="button" data-tab="post" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg><span>Verificar post</span></button>
         <button type="button" data-tab="cloaker" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
         <button type="button" data-tab="users" data-admin-only class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/></svg><b class="tab-badge hidden" data-badge="users" aria-label="pedidos de acesso esperando"></b><span>Usuários</span></button>
@@ -82,7 +81,7 @@
             <span>Instalar</span>
           </button>
           <span id="live-pill" class="live-pill" role="status" title="Os números se atualizam sozinhos a cada minuto"><i></i><span id="live-text">ao vivo</span></span>
-          <button id="palette-btn" type="button" class="palette-btn" aria-label="Buscar (Ctrl+K)" title="Buscar aba, conta ou coletor (Ctrl+K)">
+          <button id="palette-btn" type="button" class="palette-btn" aria-label="Buscar (Ctrl+K)" title="Buscar aba ou conta (Ctrl+K)">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
             <kbd>Ctrl K</kbd>
           </button>
@@ -156,7 +155,7 @@
             </article>
             <article id="health-card" data-admin-only class="glow rounded-3xl border border-neon/20 bg-card p-4 lg:col-span-2 xl:col-span-1">
               <h2 class="font-display text-xl text-white">Saúde da leitura</h2>
-              <p id="health-note" class="mb-3 text-xs text-mute">Contas lidas pelos coletores no ritmo esperado</p>
+              <p id="health-note" class="mb-3 text-xs text-mute">Contas lidas pelo Apify no ritmo esperado</p>
               <div id="health-body"><div class="skel-stack"><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i><i class="skel skel-line"></i></div></div>
             </article>
           </div>
@@ -250,30 +249,6 @@
         <section id="pane-archived" class="pane space-y-4">
           <p class="text-sm text-mute">Contas arquivadas saem do dashboard e o robô para de ler. O histórico fica guardado aqui.</p>
           <div id="archived-accounts" class="grid gap-3 lg:grid-cols-2"></div>
-        </section>
-        <section id="pane-collectors" class="pane space-y-4">
-          <div id="apify-standby" class="notice-banner is-ok hidden" role="status">
-            <span class="notice-ico" aria-hidden="true">⚡</span>
-            <p id="apify-standby-text" class="min-w-0 flex-1 text-sm"></p>
-          </div>
-          <p class="text-sm text-mute">Contas descartáveis que o robô usa para ler as timelines das contas monitoradas. Cada rodada lê uma conta por coletor, cada uma saindo pelo proxy do seu coletor. Nunca use aqui uma conta que gera dinheiro.</p>
-          <form id="collector-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-4">
-            <div class="flex flex-wrap gap-2">
-              <input id="collector-handle" maxlength="16" required placeholder="@burner1" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-              <input id="collector-proxy" maxlength="1000" autocomplete="off" spellcheck="false" placeholder="Proxy: ip:porta:usuario:senha" class="min-w-64 flex-[2] rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
-            </div>
-            <label id="collector-drop" class="flex cursor-pointer flex-wrap items-center gap-3 rounded-2xl border-2 border-dashed border-neon/30 bg-ink px-4 py-5 text-sm transition hover:border-neon">
-              <input id="collector-file" type="file" accept=".json,application/json" class="hidden">
-              <span id="collector-file-label" class="flex-1 text-mute">Arraste aqui o arquivo .json dos cookies do x.com (exportado pela extensão) ou clique para escolher. Sem arquivo = usa o login que já está no anyx do VPS.</span>
-              <button id="collector-file-clear" type="button" class="hidden rounded-xl border border-neon/40 px-3 py-1 text-xs">Tirar arquivo</button>
-            </label>
-            <div class="flex flex-wrap items-center gap-2">
-              <button id="collector-submit" class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Adicionar coletor</button>
-              <button id="collector-cancel" class="hidden rounded-2xl border border-neon/40 px-4 py-3 text-sm" type="button">Cancelar</button>
-              <p id="collector-hint" class="text-xs text-mute">Proxy e cookies ficam mascarados no painel; só o robô lê os valores.</p>
-            </div>
-          </form>
-          <div id="collector-list" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
         </section>
         <section id="pane-users" class="pane space-y-4" data-admin-only>
           <p class="text-sm text-mute">Quem entra pelo link de convite fica esperando aqui até você aprovar. Cada pessoa só vê as próprias pastas, contas e alertas e lê as contas pelo Apify, com o token dela.</p>
@@ -449,8 +424,6 @@
             </label>
             <label class="block text-sm text-mute" for="robo-apify-interval">Ler pelo Apify a cada</label>
             <select id="robo-apify-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
-            <label class="block text-sm text-mute" for="robo-interval">Coletores a cada (sem Apify)</label>
-            <select id="robo-interval" class="w-full rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon"></select>
             <label class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-neon/20 bg-ink px-4 py-3">
               <span>
                 <span class="block text-sm text-white">Pausar de madrugada</span>
@@ -465,7 +438,7 @@
               <input id="robo-pause-to" type="time" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
             </div>
             <p id="robo-status" class="text-xs text-mute">—</p>
-            <p class="text-xs text-mute">Com o token do Apify salvo, o robô lê as suas contas pelo Apify e os coletores ficam em espera: só entram se o Apify falhar. Sem token, lê só pelos coletores. O botão Atualizar dados (no topo do Dashboard) lê na hora, mesmo com a leitura automática desligada; o robô pega o pedido em até 1 minuto.</p>
+            <p class="text-xs text-mute">O robô lê as suas contas pelo Apify, com o token salvo em Configurações; sem token, nada é lido. O botão Atualizar dados (no topo do Dashboard) lê na hora, mesmo com a leitura automática desligada. Cada leitura usa créditos da sua conta do Apify.</p>
           </article>
           <article id="notify-card" class="glow space-y-4 rounded-3xl border border-neon/25 bg-card p-6 lg:col-span-2">
             <div class="flex flex-wrap items-center justify-between gap-3">
@@ -532,14 +505,13 @@
   <nav id="bottom-nav" class="bottom-nav md:hidden" aria-label="Abas">
     <button type="button" data-tab="dashboard" class="tab-btn active"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><b class="tab-badge hidden" data-badge="alerts" aria-label="alertas não vistos"></b><span>Dashboard</span></button>
     <button type="button" data-tab="ops" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
-    <button type="button" data-tab="collectors" data-admin-only class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14"/></svg><b class="tab-badge hidden" data-badge="collectors" aria-label="coletores precisando de atenção"></b><span>Coletores</span></button>
+    <button type="button" data-tab="users" data-admin-only class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/></svg><b class="tab-badge hidden" data-badge="users" aria-label="pedidos de acesso esperando"></b><span>Usuários</span></button>
     <button type="button" data-tab="archived" class="tab-btn"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
     <button type="button" id="more-btn" class="tab-btn" aria-haspopup="menu" aria-expanded="false"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18.5" cy="12" r="1.4"/></svg><span>Mais</span></button>
   </nav>
   <div id="more-sheet" class="more-sheet md:hidden" role="menu" aria-label="Outras abas">
     <button type="button" data-tab="post" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 19 6v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V6Z"/><path d="m8.8 12 2.2 2.2 4.2-4.4"/></svg><span>Verificar post</span></button>
     <button type="button" data-tab="cloaker" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 8.5 4.5-8.5 4.5L3.5 8Z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg><span>Metadados</span></button>
-    <button type="button" data-tab="users" data-admin-only class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/></svg><b class="tab-badge hidden" data-badge="users" aria-label="pedidos de acesso esperando"></b><span>Usuários</span></button>
     <button type="button" data-tab="settings" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
   </div>
   <!-- Gaveta da conta: gráfico, melhores posts e histórico de status de uma conta. -->
@@ -552,12 +524,12 @@
       <div id="drawer-body"></div>
     </section>
   </div>
-  <!-- Busca rápida (Ctrl+K ou /): abas, contas, coletores e ações. -->
+  <!-- Busca rápida (Ctrl+K ou /): abas, contas e ações. -->
   <div id="palette" class="palette" aria-hidden="true">
     <div class="palette-box" role="dialog" aria-modal="true" aria-label="Busca rápida">
       <label class="palette-input">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
-        <input id="palette-input" type="text" autocomplete="off" spellcheck="false" placeholder="Ir para aba, conta ou coletor…" aria-controls="palette-list">
+        <input id="palette-input" type="text" autocomplete="off" spellcheck="false" placeholder="Ir para aba ou conta…" aria-controls="palette-list">
       </label>
       <ul id="palette-list" class="palette-list" role="listbox"></ul>
       <p class="palette-hint"><kbd>↑</kbd><kbd>↓</kbd> escolher <kbd>Enter</kbd> abrir <kbd>Esc</kbd> fechar</p>

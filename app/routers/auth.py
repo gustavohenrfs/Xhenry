@@ -257,7 +257,7 @@ def approved_user(user: User = Depends(current_user)) -> User:
 
 
 def admin_user(user: User = Depends(approved_user)) -> User:
-    """Só o admin: Coletores, robô, Usuários, Telegram e verificação com o token do .env."""
+    """Só o admin: robô, Usuários, Telegram e verificação com o token do .env."""
     if not user.is_admin:
         raise HTTPException(403, "Só o administrador pode fazer isso.")
     return user

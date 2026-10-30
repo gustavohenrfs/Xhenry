@@ -98,13 +98,13 @@ def check_silence(db: Session, now: datetime | None = None) -> bool:
     if pause_end is not None and pause_end > last:
         last = pause_end  # o silêncio só conta depois que a pausa acabou
     quiet = now - last
-    if quiet <= silence_limit(robot_interval(db, settings)):
+    if quiet <= silence_limit(robot_interval(settings)):
         return False
     when = last.astimezone(zone(DEFAULT_TZ)).strftime("%d/%m/%Y %H:%M")
     text = (
         "🔇 Robô parado\n"
         f"Nenhuma leitura há {int(quiet.total_seconds() // 60)} min (última: {when}).\n"
-        "Confira o robo.py no VPS: cron, sessão do anyx e conexão com o banco."
+        "Confira o robo.py no VPS: cron, token do Apify e conexão com o banco."
     )
     # Uma mensagem por apagão: a chave muda quando o robô volta e para de novo.
     return record_alert(db, f"silencio:{last.isoformat()}", "silencio", text)
