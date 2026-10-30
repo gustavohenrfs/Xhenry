@@ -19,8 +19,6 @@ URLS = {
     "google": "https://trends.google.com/trending/rss?geo=BR",
     "google_world": "https://trends.google.com/trending/rss?geo=US",
     "news": "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419",
-    # A Wikipédia publica o dia anterior inteiro: {date} = AAAA/MM/DD de ontem (UTC).
-    "wiki": "https://wikimedia.org/api/rest_v1/metrics/pageviews/top/pt.wikipedia/all-access/{date}",
 }
 HT = "{https://trends.google.com/trending/rss}"
 
@@ -124,20 +122,4 @@ def parse_news(xml: str) -> list[dict[str, Any]]:
         if sep and head:
             title, source = head.strip(), source or tail.strip()
         out.append({"title": title, "url": url, "source": source})
-    return out
-
-
-def parse_wiki(data: Any) -> list[dict[str, Any]]:
-    """Páginas mais lidas da Wikipédia em português, sem as páginas especiais e a principal."""
-    try:
-        articles = data["items"][0]["articles"]
-    except (KeyError, IndexError, TypeError):
-        return []
-    out = []
-    for row in articles:
-        name = str(row.get("article") or "")
-        if not name or ":" in name or name.startswith("Página_principal"):
-            continue
-        out.append({"title": name.replace("_", " "), "url": "https://pt.wikipedia.org/wiki/" + name,
-                    "views": int(row.get("views") or 0)})
     return out

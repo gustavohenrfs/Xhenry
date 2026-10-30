@@ -3515,9 +3515,9 @@ function renderDrawer(account, detail) {
 // O que está em alta no Brasil (X, Google Trends, Google Notícias, Wikipédia), datas sazonais e o que pode
 // virar trend. A aba só lê /api/radar; as fontes são lidas pelo servidor. Todo texto das fontes entra por
 // textContent (el), nunca como HTML.
-const RADAR_SOURCES = { x: "X Brasil", google: "Google", news: "Notícias", wiki: "Wikipédia" };
-const RADAR_SHORT = { x: "X", google: "Google", news: "Notícias", wiki: "Wiki" };
-const RADAR_CATEGORIES = ["Futebol", "Política", "Famosos/TV", "Música", "Economia", "Outros"];
+const RADAR_SOURCES = { x: "X", google: "Google", news: "Notícias" };
+const RADAR_SHORT = { x: "X", google: "Google", news: "Notícias" };
+const RADAR_CATEGORIES = ["Futebol", "Lutas", "Esportes", "Games", "Carros", "Resenha", "Política", "Famosos/TV", "Música", "Economia", "Outros"];
 const RADAR_DIRECTIONS = { novo: ["Novo", "is-new"], subindo: ["▲ Subindo", "is-up"], caindo: ["▼ Caindo", "is-down"] };
 let radarData = null;
 let radarFilter = "";
@@ -3530,6 +3530,7 @@ let radarHookAt = 0;  // qual ideia do gancho está na tela ("Outra ideia" gira)
 try {
   radarRegion = localStorage.getItem("radar_region") === "world" ? "world" : "br";
   radarEngage = localStorage.getItem("radar_engage") !== "off";
+  if (radarEngage) radarRegion = "br";
 } catch { /* sem storage */ }
 const ENGAGE_MIN = 55;
 function radarRemember(key, value) { try { localStorage.setItem(key, value); } catch { /* sem storage */ } }
@@ -3683,6 +3684,10 @@ function paintRadarTopics() {
   host.replaceChildren(...rows);
 }
 function paintRadarControls() {
+  // "Bom pra engajar" é o nicho (público masculino) e só do Brasil: Internacional fica travado com ele ligado.
+  const world = document.querySelector('[data-radar-region="world"]');
+  world.disabled = radarEngage;
+  world.title = radarEngage ? "Desligue \"Bom pra engajar\" para ver o Internacional" : "";
   document.getElementById("radar-heading").textContent = radarRegion === "world" ? "Agora no mundo" : "Agora no Brasil";
   document.querySelectorAll("[data-radar-region]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.radarRegion === radarRegion)));
   document.getElementById("radar-engage").checked = radarEngage;
@@ -3732,6 +3737,14 @@ document.getElementById("radar-engage").addEventListener("change", (event) => {
   radarEngage = event.target.checked;
   radarRemember("radar_engage", radarEngage ? "on" : "off");
   radarAll = false;
+  if (radarEngage && radarRegion !== "br") {
+    radarRegion = "br";
+    radarRemember("radar_region", "br");
+    paintRadarControls();
+    loadRadar();
+    return;
+  }
+  paintRadarControls();
   if (radarData) paintRadarTopics();
 });
 // Meus termos: o radar avisa (kind=radar: push, sininho, histórico) quando um deles aparece.

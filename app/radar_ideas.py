@@ -1,7 +1,8 @@
 """Ideias de post para contas de texto (modelos +18 no X) a partir de um assunto do Radar.
 
 O tom é o dos exemplos do dono do painel: promessa ("se o Flamengo ganhar eu…"), pergunta provocante à torcida ou
-aos fãs, "quem tá vendo comigo?", com "rs" e emoji. Regras fixas, nos modelos e no pedido ao Grok:
+aos fãs, "quem tá vendo comigo?", com "rs" e emoji. Só engajamento viral: nunca chama para link, bio, grupo
+ou Telegram. Regras fixas, nos modelos e no pedido ao Grok:
 - sugestivo, nunca explícito;
 - nunca sexualizar uma pessoa real com nome (a provocação vai para a torcida, o evento ou a situação);
 - nada com menor de idade; assunto bloqueado pelo radar (morte, tragédia, crime, doença, criança) não ganha ideia.
@@ -38,6 +39,13 @@ FOOTBALL_TEAM = [
     "Quem vai ver o jogo do {team} comigo hoje? Prometo torcer de um jeito diferente rs",
     "Se o {team} fizer gol eu mando fotinha pra quem comentar 🔥",
     "Não sei por quê, mas os {fans} sempre foram meus preferidos rs",
+]
+# Jogo "A x B" sem um dos grandes no topo: enquete, que é o que mais gera comentário.
+MATCH = [
+    "{a} ou {b}? Comenta quem ganha hoje que o torcedor do vencedor ganha um presentinho meu 😏",
+    "Se tiver gol em {topic} eu posto aquela foto que vocês pediram rs",
+    "Quem vai ver {topic} comigo hoje? Prometo torcer de um jeito diferente rs",
+    "Torcedor nervoso é o mais carinhoso, concordam? rs",
 ]
 FOOTBALL = [
     "Se meu time ganhar hoje eu posto aquela foto que vocês pediram rs",
@@ -81,6 +89,36 @@ SHOW_RE = re.compile(r"\b(?:bbb|big brother|novela|reality|serie|filme|a fazenda
                      r"programa|final|episodio|temporada|ilha|masterchef|the voice|show|copa|jogo)\b")
 ACRONYMS = {"bbb", "stf", "pec", "cpi", "ufc", "nba", "nfl", "psg", "inss", "pix", "enem", "cbf", "fifa", "pl", "pt", "psol", "mdb"}
 SMALL_WORDS = {"de", "do", "da", "dos", "das", "e", "x", "vs", "em", "no", "na", "nos", "nas", "o", "a", "os", "as"}
+FIGHT = [
+    "Se o brasileiro ganhar no {topic} eu solto uma foto que vocês vão gostar rs",
+    "Homem que assiste {topic} até o fim tem minha atenção 👀",
+    "Vendo {topic} e pensando que eu também sei ser agressiva… rs",
+    "Quem vai ver {topic} comigo hoje? Comenta que eu respondo 😏",
+]
+SPORTS = [
+    "Se o Brasil mandar bem em {topic} eu posto aquela foto rs",
+    "Acordar cedo pra ver {topic}? Só se for comigo 😏",
+    "Homem que entende de {topic} me ganha fácil rs",
+    "Quem tá vendo {topic}? Me conta quem vai ganhar 👀",
+]
+GAMES = [
+    "Se vocês me chamarem pra jogar {topic} eu deixo vocês ganharem rs",
+    "Gamer que joga {topic} até de madrugada… eu tô acordada também 😏",
+    "Prefiro vocês jogando {topic} ou me dando atenção? Comenta 👀",
+    "Quem zerar {topic} primeiro ganha um presentinho meu rs",
+]
+CARS = [
+    "Homem que entende de {topic} tem minha atenção 👀",
+    "Me leva pra dar uma volta? Prometo me comportar… ou não rs",
+    "Todo mundo falando de {topic} e eu só querendo uma carona 😏",
+    "Qual carro vocês têm? Me conta que eu digo se eu entro rs",
+]
+HANGOUT = [
+    "{topic}! Quem vai pra resenha hoje? Me chama que eu levo a festa pra outro nível rs",
+    "E eu aqui sem ninguém pra beber comigo… quem vem? 😏",
+    "Homem que faz churrasco bem feito já tá na frente rs",
+    "Se esse post bater 100 comentários hoje eu posto aquela foto 👀",
+]
 GENERIC = [
     "Todo mundo falando de {topic} e eu aqui pensando em outra coisa rs",
     "Alguém me explica {topic}? Em troca eu… rs",
@@ -89,10 +127,15 @@ GENERIC = [
 ]
 
 
+# Prefixos que o Google Trends põe nas buscas de jogo: "Classificações de A x B" → "A x B".
+GOOGLE_PREFIX = re.compile(r"^(?:classifica[cç](?:oes|ões)|escala[cç](?:oes|ões)|estat[ií]sticas|onde assistir|"
+                           r"palpite|palpites|resultado|placar)(?:\s+(?:de|do|da|dos|das))?\s+", re.IGNORECASE)
+
+
 def clean_title(title: str) -> str:
     """"#Flamengo" → "Flamengo"; hashtag CamelCase vira palavras; tudo minúsculo ou tudo maiúsculo vira
     "Copa do Brasil Sub 20" (palavras pequenas ficam minúsculas)."""
-    text = (title or "").strip()
+    text = GOOGLE_PREFIX.sub("", (title or "").strip())
     if text.startswith("#"):
         text = re.sub(r"(?<=[a-zà-ú])(?=[A-ZÀ-Ú])", " ", text[1:])
     words = text.split()
@@ -115,8 +158,10 @@ def is_person(norm: str, category: str) -> bool:
 
 
 def team_of(norm: str) -> tuple[str, str] | None:
+    """O time quando ele é o assunto: "santos", "santos x vasco", "flamengo campeao". "Andrey Santos" é jogador."""
     for key, value in TEAMS.items():
-        if re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])", norm):
+        if norm == key or norm.startswith(key + " ") or (" x " in f" {norm} " and re.search(
+                r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])", norm)):
             return value
     return None
 
@@ -137,8 +182,20 @@ def ideas(topic: dict[str, Any], kind: str | None = None) -> list[str]:
         lines = FOOTBALL_TEAM
     elif topic.get("sources") == ["wiki"] and 2 <= len(norm.split()) <= 4:
         lines = PERSON  # verbete da Wikipédia com nome de gente
+    elif category == "Futebol" and " x " in title.lower():
+        lines = MATCH
     elif category == "Futebol":
         lines = FOOTBALL
+    elif category == "Lutas":
+        lines = FIGHT
+    elif category == "Esportes":
+        lines = SPORTS
+    elif category == "Games":
+        lines = GAMES
+    elif category == "Carros":
+        lines = CARS
+    elif category == "Resenha":
+        lines = HANGOUT
     elif category == "Política":
         # "Se X ganhar" só faz sentido com nome curto (Lula, Tarcísio), não com frase de protesto.
         lines = POLITICS if len(title.split()) <= 2 else POLITICS[1:]
@@ -152,7 +209,9 @@ def ideas(topic: dict[str, Any], kind: str | None = None) -> list[str]:
         lines = GENERIC
     out: list[str] = []
     for line in lines:
-        text = line.format(topic=title, team=team[0] if team else title, fans=team[1] if team else "")
+        side_a, _, side_b = title.partition(" x ") if " x " in title else title.partition(" X ")
+        text = line.format(topic=title, team=team[0] if team else title, fans=team[1] if team else "",
+                           a=side_a.strip() or title, b=side_b.strip() or title)
         text = text[0].upper() + text[1:]
         if text not in out:
             out.append(text)
@@ -162,8 +221,9 @@ def ideas(topic: dict[str, Any], kind: str | None = None) -> list[str]:
 def grok_prompt(topic: dict[str, Any]) -> str:
     title = clean_title(topic.get("title") or topic.get("name") or "")
     return (
-        "Você escreve posts curtos de texto para contas de modelos adultas (+18) no X, em português do Brasil, para "
-        "pegar carona num assunto em alta e gerar comentários.\n"
+        "Você escreve posts curtos de texto para contas de modelos adultas (+18) no X, em português do Brasil. O "
+        "público é de homens. O objetivo é só engajamento viral: pegar carona num assunto em alta e gerar curtidas, "
+        "respostas e comentários.\n"
         f"Assunto em alta agora: {title} (categoria: {topic.get('category') or 'geral'}).\n"
         "Tom dos posts que funcionam: \"Se o Lula ganhar nessa eleição eu mando fotinha\", \"Se o Flamengo ganhar eu "
         "vou fazer uma coisa muuito pra frente rs\", \"Fiquei sabendo que os flamenguistas são os mais safadinhos… é "
@@ -171,7 +231,8 @@ def grok_prompt(topic: dict[str, Any]) -> str:
         "Regras: sugestivo, nunca explícito (sem descrever sexo nem partes do corpo); nunca sexualizar uma pessoa "
         "real com nome (a provocação vai para a torcida, o evento ou a situação); nada envolvendo menor de idade; "
         "nada de ódio ou ofensa.\n"
-        "Escreva 5 posts diferentes, um por linha, sem numeração, cada um com até 200 caracteres."
+        "Escreva 5 posts diferentes, um por linha, sem numeração, cada um com até 200 caracteres. Nunca mencione "
+        "link, bio, grupo, Telegram, canal ou privado: o post vive só do engajamento."
     )
 
 

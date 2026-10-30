@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=7">
-  <link rel="stylesheet" href="/static/css/styles.css?v=29">
+  <link rel="stylesheet" href="/static/css/styles.css?v=30">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=46"></script>
+  <script defer src="/static/js/app.js?v=47"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -258,7 +258,7 @@
                 <button type="button" role="radio" data-radar-region="br" aria-checked="true">Brasil</button>
                 <button type="button" role="radio" data-radar-region="world" aria-checked="false">Internacional</button>
               </div>
-              <label class="radar-switch">
+              <label class="radar-switch" title="Assuntos que atraem o público masculino, só do Brasil">
                 <input id="radar-engage" type="checkbox" checked>
                 <span class="radar-switch-track" aria-hidden="true"><i></i></span>
                 <span>Bom pra engajar</span>

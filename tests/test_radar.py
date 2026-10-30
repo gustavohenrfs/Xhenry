@@ -30,14 +30,6 @@ NEWS_XML = """<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel>
 <item><title>Chuva forte em SP - Folha de S.Paulo</title><link>https://news.google.com/b</link></item>
 </channel></rss>"""
 
-WIKI = {"items": [{"articles": [
-    {"article": "Wikipédia:Página_principal", "views": 900000},
-    {"article": "Especial:Pesquisar", "views": 500000},
-    {"article": "Patrick_Stewart", "views": 40000},
-    {"article": "Luiz_Inácio_Lula_da_Silva", "views": 30000},
-]}]}
-
-
 def test_norm_joins_spellings():
     assert src.norm("#Flamengo ") == "flamengo"
     assert src.norm("São  Paulo!") == "sao paulo"
@@ -65,17 +57,10 @@ def test_parse_news_cuts_the_source_suffix():
     assert items[1]["title"] == "Chuva forte em SP" and items[1]["source"] == "Folha de S.Paulo"
 
 
-def test_parse_wiki_skips_special_pages():
-    items = src.parse_wiki(WIKI)
-    assert [i["title"] for i in items] == ["Patrick Stewart", "Luiz Inácio Lula da Silva"]
-    assert items[0]["url"] == "https://pt.wikipedia.org/wiki/Patrick_Stewart" and items[0]["views"] == 40000
-
-
 def test_broken_input_never_raises():
     assert src.parse_x("<html>mudou tudo</html>") == []
     assert src.parse_google("não é xml") == []
     assert src.parse_news("") == []
-    assert src.parse_wiki({}) == []
 
 
 # ---- calendário sazonal ----
@@ -109,7 +94,6 @@ def test_upcoming_window():
 
 # ---- leitura, gravação e montagem (banco de teste, fetch falso) ----
 
-import json  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -117,7 +101,6 @@ from app import radar  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import RadarItem, RadarSnapshot  # noqa: E402
 
-WIKI_JSON = json.dumps(WIKI)
 
 
 def fake_fetch(url):
@@ -127,8 +110,6 @@ def fake_fetch(url):
         return GOOGLE_XML
     if "news.google" in url:
         return NEWS_XML
-    if "wikimedia" in url:
-        return WIKI_JSON
     raise AssertionError(url)
 
 
@@ -148,9 +129,9 @@ def db():
 
 
 def test_refresh_saves_one_read_per_source(db):
-    assert radar.refresh(db, fetch=fake_fetch) == {"x": True, "google": True, "news": True, "wiki": True,
+    assert radar.refresh(db, fetch=fake_fetch) == {"x": True, "google": True, "news": True,
                                                    "x_world": True, "google_world": True}
-    assert db.query(RadarSnapshot).count() == 6
+    assert db.query(RadarSnapshot).count() == 5
     x_items = db.query(RadarItem).filter(RadarItem.source == "x").all()
     assert sorted((i.extra["hour"], i.rank, i.title) for i in x_items) == [(0, 1, "#Flamengo"), (0, 2, "Lula"), (1, 1, "Lula")]
 
@@ -161,7 +142,7 @@ def test_one_source_down_does_not_stop_the_others(db):
             raise TimeoutError("demorou")
         return fake_fetch(url)
 
-    assert radar.refresh(db, ["x", "google", "news", "wiki"], flaky) == {"x": False, "google": True, "news": True, "wiki": True}
+    assert radar.refresh(db, ["x", "google", "news"], flaky) == {"x": False, "google": True, "news": True}
     board = radar.board(db)
     assert board["sources"]["x"]["ok"] is False and "demorou" in board["sources"]["x"]["error"]
     assert any(t["norm"] == "flamengo" for t in board["topics"]), "o Google continua"
@@ -174,10 +155,9 @@ def test_board_joins_sources_and_scores(db):
     assert fla["sources"] == ["x", "google"] and fla["volume"] == "2000+" and fla["category"] == "Futebol"
     assert fla["direction"] == "novo" and fla["hours_x"] == 1 and fla["rank_x"] == 1
     lula = topics["lula"]
-    assert lula["hours_x"] == 2 and set(lula["sources"]) >= {"x", "news", "wiki"}, "manchete e Wikipédia entram no Lula"
+    assert lula["hours_x"] == 2 and set(lula["sources"]) == {"x", "news"}, "a manchete entra no Lula"
     assert lula["category"] == "Política"
     assert fla["heat"] > topics["anitta"]["heat"], "duas fontes no topo esquentam mais"
-    assert "patrick stewart" in topics
 
 
 def test_headlines_without_topic_and_upcoming(db):
@@ -196,8 +176,8 @@ def test_refresh_due_and_pruning(db):
     radar.refresh(db, fetch=fake_fetch, now=now - timedelta(days=3))
     assert radar.refresh_due(db, now) == list(radar.SOURCES)
     radar.refresh(db, list(radar.SOURCES), fake_fetch, now - timedelta(minutes=20))
-    assert db.query(RadarSnapshot).count() == 6, "leituras de mais de 2 dias somem"
-    assert radar.refresh_due(db, now) == ["x", "google", "x_world", "google_world"], "notícias (30 min) e Wikipédia (6 h) ainda valem"
+    assert db.query(RadarSnapshot).count() == 5, "leituras de mais de 2 dias somem"
+    assert radar.refresh_due(db, now) == ["x", "google", "x_world", "google_world"], "notícias (30 min) ainda valem"
 
 
 def test_topic_detail_has_24h_history(db):
@@ -246,7 +226,7 @@ def test_radar_routes(db, monkeypatch):
             board = client.get("/api/radar").json()
             assert board["refreshing"] is False, "leitura nova e RADAR=off: não lê de novo"
             assert {t["norm"] for t in board["topics"]} >= {"flamengo", "lula"}
-            assert set(board["sources"]) == {"x", "google", "news", "wiki"}
+            assert set(board["sources"]) == {"x", "google", "news"}
             assert client.post("/api/radar/refresh").status_code == 429, "acabou de ler"
             topic = client.get("/api/radar/topic", params={"norm": "Flamengo"}).json()
             assert topic["title"] == "#Flamengo" and len(topic["history_x"]) == 2

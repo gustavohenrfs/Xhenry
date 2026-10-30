@@ -15,7 +15,6 @@ Guarda só 2 dias de leituras: a do X já traz as 24 horas, mais que isso só oc
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 import os
@@ -36,12 +35,12 @@ from app.models import DEFAULT_TZ, RadarItem, RadarPostCache, RadarSnapshot, Rad
 
 log = logging.getLogger("xhenry")
 
-SOURCES = ("x", "google", "news", "wiki", "x_world", "google_world")
-INTERVALS = {"x": 15, "google": 15, "news": 30, "wiki": 360, "x_world": 15, "google_world": 15}  # minutos
-WEIGHTS = {"x": 40, "google": 30, "news": 20, "wiki": 10}
-# Cada região usa as suas leituras com os nomes genéricos da tela (x, google, news, wiki).
+SOURCES = ("x", "google", "news", "x_world", "google_world")
+INTERVALS = {"x": 15, "google": 15, "news": 30, "x_world": 15, "google_world": 15}  # minutos
+WEIGHTS = {"x": 45, "google": 35, "news": 20}
+# Cada região usa as suas leituras com os nomes genéricos da tela (x, google, news).
 REGIONS = {
-    "br": {"x": "x", "google": "google", "news": "news", "wiki": "wiki"},
+    "br": {"x": "x", "google": "google", "news": "news"},
     "world": {"x": "x_world", "google": "google_world"},
 }
 # Nunca bom pra engajar (e nunca ganha ideia de post): morte, tragédia, crime, doença e qualquer coisa com criança.
@@ -51,19 +50,41 @@ BLOCK_RE = re.compile(
     r"ataque|atentado|massacre|sequestro|desaparecid\w*|doenca|cancer|hospital|internad\w*|uti|vitima|vitimas|"
     r"enchente|desabamento|incendio|guerra|bomba|crianca|criancas|menor|menores|infantil|bebe|bebes|adolescente|"
     r"pedofil\w*|suicidio|overdose|preso|presa|prisao|policia)\b")
-# Quanto cada categoria rende para conta de texto (+ bônus de data e clima e do calor do assunto).
-ENGAGE_BASE = {"Futebol": 80, "Famosos/TV": 70, "Música": 65, "Política": 55, "Outros": 40, "Economia": 30}
+# Quanto cada categoria rende para conta de texto +18 com público masculino (+ bônus e calor do assunto).
+ENGAGE_BASE = {"Futebol": 85, "Lutas": 80, "Esportes": 72, "Resenha": 70, "Games": 68, "Carros": 62, "Política": 60,
+               "Famosos/TV": 45, "Economia": 35, "Outros": 35, "Música": 30}
+# Futebol daqui: jogo "A x B" sem time nem campeonato brasileiro (Elversberg x Mainz, Colo-Colo…) quase não rende.
+BR_FOOTBALL_RE = re.compile(
+    r"\b(?:flamengo|mengao|corinthians|timao|palmeiras|verdao|vasco|sao paulo|spfc|gremio|internacional|inter|cruzeiro|"
+    r"atletico|galo|botafogo|fluminense|santos|bahia|fortaleza|sport|vitoria|ceara|goias|coritiba|athletico|juventude|"
+    r"chapecoense|avai|figueirense|criciuma|ponte preta|guarani|america mineiro|america mg|remo|paysandu|novorizontino|"
+    r"mirassol|cuiaba|vila nova|crb|csa|abc|operario|amazonas|botafogo sp|ituano|brusque|londrina|nautico|santa cruz|"
+    r"bragantino|red bull bragantino|brasileirao|serie a|serie b|copa do brasil|libertadores|sul americana|selecao|"
+    r"paulistao|carioca|gauchao|mineiro|neymar|ancelotti|cbf)\b")
+# Assunto que puxa público feminino (novela, K-pop, beleza, moda, signos): fora do "Bom pra engajar".
+FEMALE_RE = re.compile(
+    r"\b(?:novela|novelas|kpop|k pop|bts|blackpink|army|maquiagem|skincare|moda|look|looks|signo|signos|astrologia|"
+    r"horoscopo|beleza|unha|unhas|cabelo|vestido|desfile|met gala|taylor swift|harry styles|one direction|dorama|doramas|"
+    r"jungkook|jimin|stray kids|twice|newjeans|bridgerton|romance|casamento)\b")
 ENGAGE_BONUS_RE = re.compile(
     r"\b(?:feriado|carnaval|natal|reveillon|ano novo|black friday|halloween|namorados|dia das maes|dia dos pais|"
-    r"pascoa|sao joao|festa junina|calor|frio|chuva|praia|verao|sextou|final|classico|jogo|bbb|reality|show)\b")
+    r"pascoa|sao joao|festa junina|calor|frio|chuva|praia|verao|sextou|final|classico|jogo|bbb|reality|a fazenda|"
+    r"ilha|paredao|ufc|luta|f1|gp|cerveja|churrasco|bet|aposta)\b")
 KEEP = timedelta(days=2)
 TIMEOUT = 15.0
-WIKI_TOP = 40
 MAX_TOPICS = 60
 MANUAL_GAP = timedelta(minutes=2)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 # Palavras (já normalizadas) que dão a categoria do assunto; a primeira que bater vence, nesta ordem.
 CATEGORIES = [
+    ("Lutas", r"ufc|mma|luta|lutas|lutador|boxe|boxeador|cinturao|nocaute|bellator|pfl|jiu jitsu|muay thai|fight|octogono"),
+    ("Esportes", r"f1|formula 1|formula1|gp|grande premio|interlagos|verstappen|hamilton|bortoleto|nba|nfl|super bowl|"
+                 r"motogp|stock car|corrida|tenis|volei|olimpiada|olimpiadas"),
+    ("Games", r"game|games|gta|gta 6|ea fc|call of duty|cod|minecraft|free fire|fortnite|valorant|cs2|counter strike|lol|"
+              r"playstation|ps5|ps6|xbox|nintendo|switch 2|steam|twitch|gamer|esports"),
+    ("Carros", r"carro|carros|moto|motos|bmw|porsche|ferrari|lamborghini|tesla|fiat|chevrolet|volkswagen|honda|yamaha|"
+               r"detran|cnh|ipva|uber|99"),
+    ("Resenha", r"cerveja|churrasco|picanha|bar|boteco|chopp|chope|whisky|cachaca|resenha|sextou|happy hour|pagode|bet|aposta"),
     ("Futebol", r"flamengo|palmeiras|corinthians|sao paulo fc|spfc|vasco|botafogo|fluminense|gremio|internacional|"
                 r"cruzeiro|atletico|santos|bahia|fortaleza|brasileirao|libertadores|copa do brasil|sul americana|"
                 r"selecao|neymar|ancelotti|futebol|campeonato|gol|var|tecnico|\w+ x \w+"),
@@ -124,11 +145,6 @@ def read_source(source: str, fetch: Callable[[str], str], now: datetime | None =
     elif source == "news":
         for rank, item in enumerate(src.parse_news(fetch(src.URLS["news"])), 1):
             rows.append({"rank": rank, "title": item["title"], "url": item["url"], "extra": {"source": item["source"]}})
-    elif source == "wiki":
-        day = ((now or _now()) - timedelta(days=1)).strftime("%Y/%m/%d")
-        items = src.parse_wiki(json.loads(fetch(src.URLS["wiki"].format(date=day)) or "{}"))
-        for rank, item in enumerate(items[:WIKI_TOP], 1):
-            rows.append({"rank": rank, "title": item["title"], "url": item["url"], "extra": {"views": item["views"]}})
     else:
         raise RadarError(f"fonte desconhecida: {source}")
     if not rows:
@@ -257,10 +273,12 @@ def engage_of(topic: dict[str, Any]) -> int:
     if topic["blocked"]:
         return 0
     text = " ".join([topic["norm"]] + [src.norm(n["title"]) for n in topic["news"][:3]])
-    base = 40 if radar_ideas.is_person(topic["norm"], topic["category"]) else ENGAGE_BASE.get(topic["category"], 40)
+    base = 40 if radar_ideas.is_person(topic["norm"], topic["category"]) else ENGAGE_BASE.get(topic["category"], 35)
     score = base + (15 if ENGAGE_BONUS_RE.search(text) else 0) + topic["heat"] * 0.2
-    if topic.get("sources") == ["wiki"]:
-        score *= 0.6  # só a Wikipédia: gente lida ontem, quase nunca é assunto do X agora
+    if topic["category"] == "Futebol" and " x " in f" {topic['norm']} " and not BR_FOOTBALL_RE.search(text):
+        score -= 45  # jogo de fora: o público daqui não comenta
+    if FEMALE_RE.search(text):
+        score = min(score, 25)  # público do nicho é masculino: não sobe no "Bom pra engajar"
     return max(1, min(100, round(score)))
 
 
@@ -275,7 +293,7 @@ def build_topics(db: Session, region: str = "br") -> tuple[list[dict[str, Any]],
         return [i for i in items if src.latin(i.title)] if region == "br" else items
 
     x_hours = _x_hours(read("x"))
-    google, news, wiki = read("google"), read("news"), read("wiki")
+    google, news = read("google"), read("news")
     topics: list[dict[str, Any]] = []
 
     def topic_for(item: RadarItem) -> dict[str, Any]:
@@ -286,7 +304,7 @@ def build_topics(db: Session, region: str = "br") -> tuple[list[dict[str, Any]],
         topics.append(topic)
         return topic
 
-    lists = [("x", x_hours[0] if x_hours else []), ("google", google), ("wiki", wiki)]
+    lists = [("x", x_hours[0] if x_hours else []), ("google", google)]
     for source, items in lists:
         size = max(1, len(items))
         for item in items:
@@ -439,7 +457,7 @@ def my_terms(db: Session, owner_id: int, topics: list[dict[str, Any]], headlines
 def alert_text(term: str, hit: dict[str, Any]) -> str:
     where = " · ".join(
         f"{src_label} #{hit['ranks'][name]}" if hit["ranks"].get(name) else src_label
-        for name, src_label in (("x", "X Brasil"), ("google", "Google"), ("news", "Notícias"), ("wiki", "Wikipédia"))
+        for name, src_label in (("x", "X Brasil"), ("google", "Google"), ("news", "Notícias"))
         if name in hit["sources"]
     )
     return f"📡 {term} em alta\nEm: {where}\nAssunto: {hit['title']}\nhttps://x.com/search?q={quote(term)}"

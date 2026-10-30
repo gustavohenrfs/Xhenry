@@ -151,4 +151,67 @@ def test_people_get_buzz_lines_and_titles_are_tidy():
     assert radar_ideas.clean_title("NÃO ENGAJE A EXTREMA-DIREITA") == "Não Engaje a Extrema-direita"
     wiki_person = radar_ideas.ideas({"title": "Patrick Stewart", "norm": "patrick stewart", "category": "Futebol", "sources": ["wiki"]})
     assert all("time" not in line for line in wiki_person) and "Patrick Stewart" in wiki_person[0]
-    assert radar.engage_of({"blocked": False, "norm": "patrick stewart", "news": [], "category": "Outros", "heat": 10, "sources": ["wiki"]}) < 40
+
+
+# ---- público masculino, só Brasil, sem Wikipédia, chamada para o grupo ----
+
+def male(norm, category=None, heat=50):
+    cat = category or radar.category_of(norm)
+    return radar.engage_of({"blocked": False, "norm": norm, "news": [], "category": cat, "heat": heat, "sources": ["x"]}), cat
+
+
+def test_male_audience_ranking():
+    assert male("flamengo x palmeiras")[0] >= 85
+    assert male("ufc 320") == (male("ufc 320")[0], "Lutas") and male("ufc 320")[0] >= 80
+    assert male("gp de sao paulo f1")[1] == "Esportes" and male("gp de sao paulo f1")[0] >= 70
+    assert male("gta 6")[1] == "Games" and male("gta 6")[0] >= 65
+    assert male("churrasco de domingo")[1] == "Resenha"
+    assert male("bbb 27")[0] >= 60, "reality com votação ainda rende"
+    for weak in ("novela das nove", "#bts", "skincare coreano", "horoscopo de hoje", "look do dia"):
+        assert male(weak)[0] < 55, weak
+
+
+def test_wikipedia_is_gone():
+    assert "wiki" not in radar.SOURCES and "wiki" not in radar.REGIONS["br"]
+    assert "wiki" not in src.URLS and not hasattr(src, "parse_wiki")
+
+
+def test_ideas_never_call_for_a_link():
+    """Só engajamento: nenhuma frase chama para link, bio, grupo ou Telegram, nem nos modelos nem no pedido ao Grok."""
+    banned = ("link", "bio", "grupo", "telegram", "http", "canal", "privado", "dm")
+    lists = [getattr(radar_ideas, name) for name in dir(radar_ideas) if name.isupper() and isinstance(getattr(radar_ideas, name), list)]
+    for lines in lists:
+        for line in lines:
+            assert not any(word in line.lower().split() or word in line.lower() for word in banned[:5]), line
+    for topic in (
+        {"title": "#Flamengo", "norm": "flamengo", "category": "Futebol"},
+        {"title": "UFC 320", "norm": "ufc 320", "category": "Lutas"},
+        {"title": "GTA 6", "norm": "gta 6", "category": "Games"},
+        {"title": "Lula", "norm": "lula", "category": "Política"},
+    ):
+        lines = radar_ideas.ideas(topic)
+        assert 3 <= len(lines) <= 5 and not any("link" in l.lower() or "grupo" in l.lower() for l in lines)
+    prompt = radar_ideas.grok_prompt({"title": "Flamengo", "category": "Futebol"})
+    assert "homens" in prompt and "nunca mencione link" in prompt.lower()
+
+
+def test_brazilian_football_first_and_google_prefixes_go():
+    br, _ = male("criciuma x ponte preta", "Futebol")
+    foreign, _ = male("elversberg x mainz 05", "Futebol")
+    assert br >= 85 and foreign < 55, (br, foreign)
+    assert male("libertadores final", "Futebol")[0] >= 85
+    assert radar_ideas.clean_title("Classificações de Elversberg x Mainz 05") == "Elversberg x Mainz 05"
+    assert radar_ideas.clean_title("escalações de flamengo x vasco") == "Flamengo x Vasco"
+    assert radar_ideas.clean_title("onde assistir corinthians x santos") == "Corinthians x Santos"
+
+
+def test_match_people_and_hangout_lines():
+    player = radar_ideas.ideas({"title": "Andrey Santos", "norm": "andrey santos", "category": "Futebol"})
+    assert not any("Se o Santos" in line for line in player), "jogador não é o time"
+    assert radar_ideas.team_of("santos x vasco") and radar_ideas.team_of("flamengo campeao") and not radar_ideas.team_of("andrey santos")
+    match = radar_ideas.ideas({"title": "Criciúma x Ponte Preta", "norm": "criciuma x ponte preta", "category": "Futebol"})
+    assert match[0].startswith("Criciúma ou Ponte Preta?")
+    sextou = radar_ideas.ideas({"title": "Sextou", "norm": "sextou", "category": "Resenha"})
+    assert not any("Sextou com Sextou" in line or line.count("Sextou") > 1 for line in sextou)
+    volei = radar_ideas.ideas({"title": "Superliga Feminina", "norm": "superliga feminina", "category": "Esportes"})
+    assert not any("pódio" in line for line in volei)
