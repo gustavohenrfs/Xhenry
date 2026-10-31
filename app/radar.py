@@ -70,6 +70,13 @@ ENGAGE_BONUS_RE = re.compile(
     r"\b(?:feriado|carnaval|natal|reveillon|ano novo|black friday|halloween|namorados|dia das maes|dia dos pais|"
     r"pascoa|sao joao|festa junina|calor|frio|chuva|praia|verao|sextou|final|classico|jogo|bbb|reality|a fazenda|"
     r"ilha|paredao|ufc|luta|f1|gp|cerveja|churrasco|bet|aposta)\b")
+# Polêmica: o público masculino comenta para defender um lado (vira discussão, que o X entrega mais).
+POLAR_RE = re.compile(
+    r"\b(?:eleicao|eleicoes|segundo turno|debate|votacao|eliminacao|eliminad\w*|lula|bolsonaro|tarcisio|stf|pec|"
+    r"polemica|treta|briga|cancelad\w*|vaiad\w*|expuls\w*|demitid\w*|vexame|rebaixad\w*)\b")
+# Assunto com vencedor: a "promessa condicional" ("se X ganhar eu…") é o formato que mais rende.
+WINNER_RE = re.compile(r"\b(?:final|semifinal|classico|jogo|luta|ufc|eleicao|segundo turno|paredao|eliminacao|"
+                       r"votacao|gp|f1|decisao|campeao|titulo)\b")
 KEEP = timedelta(days=2)
 TIMEOUT = 15.0
 MAX_TOPICS = 60
@@ -274,12 +281,22 @@ def engage_of(topic: dict[str, Any]) -> int:
         return 0
     text = " ".join([topic["norm"]] + [src.norm(n["title"]) for n in topic["news"][:3]])
     base = 40 if radar_ideas.is_person(topic["norm"], topic["category"]) else ENGAGE_BASE.get(topic["category"], 35)
-    score = base + (15 if ENGAGE_BONUS_RE.search(text) else 0) + topic["heat"] * 0.2
+    score = base + (15 if ENGAGE_BONUS_RE.search(text) else 0) + (8 if POLAR_RE.search(text) else 0) + topic["heat"] * 0.2
     if topic["category"] == "Futebol" and " x " in f" {topic['norm']} " and not BR_FOOTBALL_RE.search(text):
         score -= 45  # jogo de fora: o público daqui não comenta
     if FEMALE_RE.search(text):
         score = min(score, 25)  # público do nicho é masculino: não sobe no "Bom pra engajar"
     return max(1, min(100, round(score)))
+
+
+def angle_of(topic: dict[str, Any]) -> str:
+    """Melhor formato de post para o assunto: enquete no "A x B", promessa quando tem vencedor, senão pergunta."""
+    norm = topic["norm"]
+    if " x " in f" {norm} ":
+        return "enquete"
+    if topic["category"] in ("Futebol", "Lutas", "Esportes", "Política") or WINNER_RE.search(norm):
+        return "promessa"
+    return "pergunta"
 
 
 def build_topics(db: Session, region: str = "br") -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[list[RadarItem]]]:
@@ -359,6 +376,7 @@ def build_topics(db: Session, region: str = "br") -> tuple[list[dict[str, Any]],
             topic["title"] = radar_ideas.clean_title(topic["title"])  # "mônica fonseca" → "Mônica Fonseca"
         topic["blocked"] = blocked_text(text)
         topic["engage"] = engage_of(topic)
+        topic["angle"] = angle_of(topic)
     topics.sort(key=lambda t: (-t["heat"], t["rank_x"] or 99))
     return topics[:MAX_TOPICS], headlines[:12], x_hours
 
@@ -380,7 +398,7 @@ def predictions(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: -item["heat"])[:8]
 
 
-def board(db: Session, now: datetime | None = None, region: str = "br") -> dict[str, Any]:
+def board(db: Session, now: datetime | None = None, region: str = "br", heat: str = "leve") -> dict[str, Any]:
     now = now or _now()
     names = REGIONS[region]
     reads = {kind: read for kind, real in names.items() if (read := last_reads(db).get(real)) is not None}
@@ -388,10 +406,11 @@ def board(db: Session, now: datetime | None = None, region: str = "br") -> dict[
     today = now.astimezone(DEFAULT_TZ_INFO).date()
     ok_times = [_as_utc(r.fetched_at) for r in reads.values() if r.ok]
     public = [{key: t[key] for key in ("norm", "title", "sources", "ranks", "heat", "rank_x", "hours_x", "direction",
-                                         "volume", "category", "url", "engage", "blocked")}
-              | {"news": t["news"][:2], "ideas": radar_ideas.ideas(t)} for t in topics]
+                                         "volume", "category", "url", "engage", "blocked", "angle")}
+              | {"news": t["news"][:2], "ideas": radar_ideas.ideas(t, heat=heat)} for t in topics]
     return {
         "region": region,
+        "heat": heat,
         "updated_at": max(ok_times).isoformat() if ok_times else None,
         "sources": {kind: {"ok": reads[kind].ok, "at": _as_utc(reads[kind].fetched_at).isoformat(), "error": reads[kind].error}
                     if kind in reads else {"ok": None, "at": None, "error": None} for kind in names},
@@ -402,7 +421,7 @@ def board(db: Session, now: datetime | None = None, region: str = "br") -> dict[
     }
 
 
-def topic_detail(db: Session, norm: str, region: str = "br") -> dict[str, Any] | None:
+def topic_detail(db: Session, norm: str, region: str = "br", heat: str = "leve", seed: int = 0) -> dict[str, Any] | None:
     topics, _, x_hours = build_topics(db, region)
     key = src.norm(norm)
     topic = next((t for t in topics if t["norm"] == key), None) or next((t for t in topics if _same(t["norm"], key)), None)
@@ -414,7 +433,7 @@ def topic_detail(db: Session, norm: str, region: str = "br") -> dict[str, Any] |
         history.append({"at": at, "rank": _rank_in(hour, topic["norm"])})
     detail = {key: value for key, value in topic.items() if key != "climb_3h"}
     detail["history_x"] = history
-    detail["ideas"] = radar_ideas.ideas(topic)
+    detail["ideas"] = radar_ideas.ideas(topic, heat=heat, seed=seed)
     return detail
 
 
@@ -498,10 +517,14 @@ APIFY_ERRORS = {
 
 def apify_search(token: str, term: str) -> list[dict[str, Any]]:
     """Busca os posts em português mais fortes do momento sobre o termo (mesmo ator do robô, sort Top)."""
+    return apify_run(token, {"searchTerms": [term], "sort": "Top", "tweetLanguage": "pt", "maxItems": 20})
+
+
+def apify_run(token: str, body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Roda o ator do robô com o pedido dado e devolve os itens; erro vira RadarError legível."""
     import robo
 
     url = f"{robo.APIFY_API}/acts/{robo.apify_actor()}/run-sync-get-dataset-items?timeout={int(APIFY_SEARCH_TIMEOUT) - 10}"
-    body = {"searchTerms": [term], "sort": "Top", "tweetLanguage": "pt", "maxItems": 20}
     try:
         response = httpx.post(url, json=body, headers={"Authorization": f"Bearer {token}"}, timeout=APIFY_SEARCH_TIMEOUT)
     except httpx.HTTPError as exc:

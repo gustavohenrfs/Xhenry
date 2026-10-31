@@ -488,3 +488,26 @@ class RadarPostCache(IntPK, Base):
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     posts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class HotText(IntPK, Base):
+    """Texto quente do nicho (+18, público masculino) que engajou no X; biblioteca compartilhada do Radar hot.
+
+    Vem das caçadas no Apify (owner_id = quem pagou). fmt = formato do texto (app/radar_hot.FORMATS)."""
+
+    __tablename__ = "hot_texts"
+    __table_args__ = (Index("ix_hot_texts_score", "score"),)
+
+    tweet_id: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    author: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    views: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    likes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    retweets: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    replies: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    score: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    fmt: Mapped[str] = mapped_column(String(16), nullable=False, default="provocacao")
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

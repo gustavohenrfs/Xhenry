@@ -1502,6 +1502,40 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 .idea-list { display: grid; gap: .5rem; }
 .idea-item { display: flex; flex-direction: column; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--field); }
 .idea-text { font-size: .95rem; color: var(--fg); line-height: 1.4; overflow-wrap: anywhere; }
+/* Selo de custo em cada botão: Grátis (verde), Apify (âmbar, gasta crédito), Grok (lilás, gasta a chave xAI). */
+.cost-btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; flex-wrap: wrap; }
+.cost {
+  display: inline-flex; align-items: center; padding: .05rem .45rem; border-radius: 999px; border: 1px solid;
+  font-size: .62rem; font-weight: 500; line-height: 1.5; letter-spacing: .01em; white-space: nowrap;
+}
+.cost.is-free { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-line); }
+.cost.is-apify { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-line); }
+.cost.is-grok { color: var(--info); background: var(--info-bg); border-color: var(--info-line); }
+.cost-legend { margin-top: .6rem; font-size: .7rem; color: var(--muted); line-height: 1.9; }
+/* Textos quentes do nicho: cabeçalho com as duas ações, a pergunta quente em destaque e a biblioteca. */
+.hot-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .75rem 1rem; }
+.hot-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.hot-btn {
+  min-height: 2.5rem; padding: 0 1rem; border-radius: 999px; border: 1px solid rgb(var(--c-neon) / .4);
+  font-size: .85rem; color: var(--fg); transition: border-color .15s ease, background .15s ease;
+}
+.hot-btn:hover, .hot-btn:focus-visible { border-color: var(--accent); outline: none; }
+.hot-btn:disabled { opacity: .6; cursor: progress; }
+.hot-question:not(:empty) {
+  display: grid; gap: .7rem; margin-top: .9rem; padding: 1rem 1.1rem; border-radius: 1.25rem;
+  border: 1px solid rgb(var(--c-neon) / .35); background: radial-gradient(120% 140% at 100% 0%, rgb(var(--c-neon) / .12), transparent 60%), var(--field);
+}
+.hot-question-line { font-size: clamp(1.1rem, .95rem + .8vw, 1.45rem); line-height: 1.25; color: var(--fg); overflow-wrap: anywhere; text-wrap: balance; }
+#hot-grok-out:not([hidden]) { margin-top: .9rem; display: grid; gap: .5rem; }
+.hot-list { display: grid; gap: .6rem; margin-top: .6rem; }
+@media (min-width: 1024px) { .hot-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.hot-item { display: flex; flex-direction: column; gap: .45rem; padding: .85rem .95rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--field); min-width: 0; }
+.hot-item-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.hot-fmt { justify-self: start; color: var(--accent); border-color: rgb(var(--c-neon) / .4); }
+.hot-text { font-size: .95rem; line-height: 1.45; color: var(--fg); overflow-wrap: anywhere; white-space: pre-line; }
+.hot-why { font-size: .72rem; color: var(--muted); }
+.hot-remix:not([hidden]) { display: grid; gap: .5rem; padding-top: .35rem; }
+.hot-remix[hidden] { display: none; }
 @media (max-width: 767px) {
   .radar-controls { width: 100%; }
   .radar-hook { padding: 1.1rem; border-radius: 1.4rem; }
