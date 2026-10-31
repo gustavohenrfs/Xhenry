@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Folder
+from app.models import DailyMetric, Folder
 from app.services import (
     STATUS_LABELS, latest_metrics, load_samples, period_window, selected_accounts, within,
 )
@@ -82,6 +82,64 @@ def phase_of(followers: int | None) -> dict[str, Any] | None:
         if followers < limit:
             return {"label": label, "kpi": kpi, "tip": tip}
     return None
+
+
+def followers_series(db: Session, accounts: list, start: date, end: date) -> dict[str, Any]:
+    """Seguidores por dia (soma das contas, cada uma com a última leitura até aquele dia) e o saldo de cada conta
+    no período. Sem leitura nenhuma, tudo None."""
+    ids = [account.id for account in accounts]
+    readings: dict[int, list[tuple[date, int]]] = {}
+    if ids:
+        for account_id, day, count in db.execute(
+            select(DailyMetric.account_id, DailyMetric.metric_date, DailyMetric.followers_count)
+            .where(DailyMetric.account_id.in_(ids), DailyMetric.followers_count.is_not(None), DailyMetric.metric_date <= end)
+            .order_by(DailyMetric.account_id, DailyMetric.metric_date)
+        ):
+            readings.setdefault(account_id, []).append((day, int(count)))
+    if not readings:
+        return {"series": [], "gained": None, "by_account": {}}
+    series = []
+    day = start
+    while day <= end:
+        known = [next((c for d, c in reversed(rows) if d <= day), None) for rows in readings.values()]
+        known = [c for c in known if c is not None]
+        series.append({"date": day.isoformat(), "total": sum(known) if known else None})
+        day += timedelta(days=1)
+    by_account = {}
+    for account_id, rows in readings.items():
+        inside = [c for d, c in rows if start <= d <= end]
+        before = [c for d, c in rows if d < start]
+        if inside:
+            by_account[account_id] = inside[-1] - (before[-1] if before else inside[0])
+    gained = sum(by_account.values()) if by_account else None
+    return {"series": series, "gained": gained, "by_account": by_account}
+
+
+def vanity(now: dict[str, Any], rows: list, followers: dict[str, Any]) -> list[dict[str, Any]]:
+    """As métricas de vaidade do guia, com os números de verdade: o que parece bom e o algoritmo quase ignora."""
+    posts = [row for row in rows if not is_own_reply(row)]
+    interactions = now["likes"] + now["retweets"] + now["replies"] + now["quotes"] + now["bookmarks"]
+    like_share = round(now["likes"] * 100 / interactions) if interactions else None
+    like_points = round(now["likes"] * POINTS["likes"] * 100 / now["points"]) if now["points"] else None
+    silent = [row for row in posts if row.view_count and not row.reply_count and not row.bookmark_count and not row.quote_count]
+    silent_pct = round(len(silent) * 100 / len(posts)) if posts else None
+    total_followers = followers["series"][-1]["total"] if followers["series"] else None
+    ratio = round(now["retweets"] / now["quotes"], 1) if now["quotes"] else None
+    return [
+        {"key": "likes", "title": "Curtidas", "value": now["likes"], "fact": (
+            f"São {like_share}% das interações, mas só {like_points}% dos pontos: cada uma vale 0,5." if like_share is not None
+            else "Cada curtida vale 0,5: é o sinal mais fácil e o mais barato."), "fix": "Troque pedido de curtida por pergunta que faça responder."},
+        {"key": "silent", "title": "Views sem conversa", "value": len(silent), "unit": "posts", "fact": (
+            f"{silent_pct}% dos posts tiveram views e nenhuma reply, salvamento ou citação." if silent_pct is not None
+            else "Post visto e ignorado piora o alcance dos próximos."), "fix": "Termine com pergunta, enquete ou desafio."},
+        {"key": "followers", "title": "Seguidores", "value": total_followers, "fact": (
+            f"Saldo no período: {followers['gained']:+d}. Mil seguidores que conversam valem mais que 100 mil parados."
+            if followers["gained"] is not None else "Mil seguidores que conversam valem mais que 100 mil parados."),
+         "fix": "Olhe a nota por mil views, não só o número de seguidores."},
+        {"key": "retweets", "title": "Repost sem comentário", "value": now["retweets"], "fact": (
+            f"Para cada citação, {str(ratio).replace('.', ',')} reposts puros. A citação vale 3 vezes mais." if ratio is not None
+            else "A citação entra em 3 sistemas e vale 3 vezes o repost puro."), "fix": "Na sua rede, cite com comentário em vez de só repostar."},
+    ]
 
 
 def post_item(account: Any, row: Any) -> dict[str, Any]:
@@ -153,6 +211,14 @@ def algo_metrics(db: Session, owner_id: int, period: str, folder_id: int | None)
         slot["points"] = round(slot["points"], 1)
 
     latest = latest_metrics(db, [account.id for account in accounts])
+    follow = followers_series(db, accounts, chart_start, end)
+    follow_period = followers_series(db, accounts, start, end) if chart_start != start else follow
+    # Ritmo: posts por conta por dia (o guia fala de 3 a 5 originais por dia, uns 95 por semana com replies).
+    active = max(1, len(accounts))
+    now["posts_per_day"] = round(now["posts"] / span / active, 2) if not is_total else round(
+        now["posts"] / max(1, len(series)) / active, 2)
+    if before is not None:
+        before["posts_per_day"] = round(before["posts"] / span / active, 2)
     by_account: dict[int, list] = {}
     for account, row in current:
         by_account.setdefault(account.id, []).append(row)
@@ -176,6 +242,7 @@ def algo_metrics(db: Session, owner_id: int, period: str, folder_id: int | None)
             "followers": followers, "phase": phase_of(followers), "status": status,
             "status_label": STATUS_LABELS.get(status or "", "Sem verificação"),
             "points_per_k_prev": prior["points_per_k"] if prior else None,
+            "followers_gained": follow_period["by_account"].get(account.id),
             "spark": [round(v, 1) for v in sparks.get(account.id, [])],
         })
     rows.sort(key=lambda r: (-(r["points"] or 0), r["username"]))
@@ -196,6 +263,8 @@ def algo_metrics(db: Session, owner_id: int, period: str, folder_id: int | None)
                 lambda r: points_of(r) * 1000 / r.view_count if r.view_count >= 500 else 0),
         },
         "weights": POINTS,
+        "followers": {"series": follow["series"], "gained": follow_period["gained"]},
+        "vanity": vanity(now, cur_rows, follow_period | {"series": follow["series"]}),
         # O que o X não entrega para quem está de fora: a tela explica em vez de inventar.
         "available": {"dwell": False, "own_replies": now["own_replies"] > 0 or any(
             is_own_reply(row) for _, row, _ in loaded)},

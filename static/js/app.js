@@ -24,6 +24,7 @@ let lineChart = null;
 let mxSignalsChart = null;  // gráficos da aba Métricas
 let mxQualityChart = null;
 let mxHoursChart = null;
+let mxFollowersChart = null;
 let metricsData = null;
 let metricsSeq = 0;
 let metricsStale = true;
@@ -46,7 +47,7 @@ function applyChartTheme() {
   Chart.defaults.color = cssVar("--muted");
   Chart.defaults.borderColor = cssVar("--line");
   if (mixChart) mixChart.data.datasets[0].borderColor = cssVar("--slice-gap");
-  [lineChart, barChart, mixChart, drawerChart, mxSignalsChart, mxQualityChart, mxHoursChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
+  [lineChart, barChart, mixChart, drawerChart, mxSignalsChart, mxQualityChart, mxHoursChart, mxFollowersChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
 }
 function setTheme(theme, remember) {
   document.documentElement.dataset.theme = theme;
@@ -4912,7 +4913,7 @@ const MX_SIGNALS = {
 };
 const MX_COLUMNS = [
   ["username", "Conta"], ["phase", "Fase"], ["posts", "Posts"], ["bookmarks_per_post", "Salv./post"],
-  ["replies_per_post", "Replies/post"], ["quotes", "Citações"], ["points_per_k", "Nota/mil"], ["spark", "14 dias"],
+  ["replies_per_post", "Replies/post"], ["quotes", "Citações"], ["points_per_k", "Nota/mil"], ["followers_gained", "Seguidores +"], ["spark", "14 dias"],
 ];
 function dec(value, digits) {
   if (value === null || value === undefined) return "—";
@@ -4949,7 +4950,9 @@ function paintMetrics(data) {
   deltaNode.className = "mx-score-delta" + (d ? " is-" + d.dir : "");
   deltaNode.textContent = d ? d.text + " " + (COMPARE_TEXT[state.period] || "") : (t.posts ? "" : "Sem posts lidos nesse período.");
   paintMxStack(data.mix);
+  paintMxHeroStats(data);
   paintMxKpis(data);
+  paintMxVanity(data.vanity || []);
   paintMxCharts(data);
   paintMxTable();
   paintMxTop();
@@ -4969,6 +4972,38 @@ function countMx(node, value, format, fromZero) {
     else node.textContent = format(value);
   };
   requestAnimationFrame(step);
+}
+function paintMxHeroStats(data) {
+  const t = data.totals;
+  const gained = data.followers ? data.followers.gained : null;
+  const stats = [["Pontos", num(Math.round(t.points))], ["Posts", num(t.posts)], ["Views", num(t.views)],
+    ["Seguidores", gained === null || gained === undefined ? "—" : (gained > 0 ? "+" : "") + num(gained)]];
+  document.getElementById("mx-hero-stats").replaceChildren(...stats.map(([label, value]) => {
+    const box = el("div");
+    box.append(el("dt", "", label), el("dd", "font-mono", value));
+    return box;
+  }));
+}
+function paintMxVanity(items) {
+  document.getElementById("mx-vanity").replaceChildren(...items.map((item) => {
+    const li = el("li", "mx-vanity-item");
+    const head = el("div", "mx-vanity-head");
+    head.append(el("b", "", item.title), el("span", "font-mono", item.value === null || item.value === undefined ? "—" : num(item.value) + (item.unit ? " " + item.unit : "")));
+    li.append(head, el("p", "", item.fact), el("p", "mx-vanity-fix", item.fix));
+    return li;
+  }));
+}
+// Preenchimento em degradê do gráfico (some na base), na cor da linha.
+function mxFill(hex) {
+  return (context) => {
+    const { chart } = context;
+    const area = chart.chartArea;
+    if (!area) return hex + "22";
+    const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+    gradient.addColorStop(0, hex + "55");
+    gradient.addColorStop(1, hex + "00");
+    return gradient;
+  };
 }
 function paintMxStack(mix) {
   const total = mix.reduce((sum, item) => sum + item.points, 0);
@@ -4995,36 +5030,44 @@ function paintMxStack(mix) {
     return li;
   }));
 }
-function mxKpi({ label, value, unit, cur, prev, lines, tone, off }) {
-  const card = el("article", "mx-kpi glow" + (off ? " is-off" : "") + (tone ? " is-" + tone : ""));
-  card.append(el("p", "mx-kpi-label", label));
+function mxKpi({ label, value, unit, cur, prev, lines, tone, spark }) {
+  const card = el("article", "mx-kpi glow" + (tone ? " is-" + tone : ""));
+  const top = el("div", "mx-kpi-top");
+  top.append(el("p", "mx-kpi-label", label));
+  const d = cur !== undefined && prev !== undefined && prev !== null ? mxDeltaText(cur, prev) : null;
+  if (d) top.append(el("span", "mx-kpi-delta is-" + d.dir, d.text));
+  card.append(top);
   const big = el("p", "mx-kpi-value font-display", value);
   if (unit) big.append(el("small", "", unit));
   card.append(big);
-  const d = cur !== undefined && prev !== undefined && prev !== null ? mxDeltaText(cur, prev) : null;
-  if (d) card.append(el("p", "mx-kpi-delta is-" + d.dir, d.text));
+  if (spark && spark.some((v) => v)) card.append(mxSpark(spark, "mx-kpi-spark"));
   lines.forEach((line, index) => card.append(el("p", index ? "mx-kpi-note" : "mx-kpi-weight", line)));
   return card;
+}
+function mxDaily(series, key, per) {
+  return series.map((day) => per ? (day.posts ? day[key] / day.posts : 0) : day[key]);
 }
 function paintMxKpis(data) {
   const t = data.totals;
   const p = data.previous || {};
   const accounts = data.accounts.length || 1;
-  const repliesPerDay = t.replies / Math.max(1, data.series.length);
+  const series = data.series.slice(-30);
+  const pace = t.posts_per_day;
+  const paceNote = pace === null || pace === undefined ? "" : pace < 3 ? "Abaixo do ritmo que cresce: suba aos poucos para 3 a 5 por dia." : pace > 6 ? "Acima de 6 por dia o 4º post seguido vale só 25%: espalhe." : "Dentro do ritmo que cresce.";
   document.getElementById("mx-kpis").replaceChildren(
-    mxKpi({ label: "Salvamentos por post", value: dec(t.bookmarks_per_post, 1), cur: t.bookmarks_per_post, prev: p.bookmarks_per_post,
+    mxKpi({ label: "Salvamentos por post", value: dec(t.bookmarks_per_post, 1), cur: t.bookmarks_per_post, prev: p.bookmarks_per_post, spark: mxDaily(series, "bookmarks", true),
       lines: ["+10 cada · vale 20 curtidas", "KPI número 1 da fase de 1 mil a 10 mil. " + dec(t.bookmarks_per_k, 2) + " a cada mil views."], tone: "cyan" }),
-    mxKpi({ label: "Replies por post", value: dec(t.replies_per_post, 1), cur: t.replies_per_post, prev: p.replies_per_post,
-      lines: ["+13,5 cada · respondida vira +75 (150 curtidas)", "Meta: responder pelo menos 1 por conta por dia. " + dec(repliesPerDay / accounts, 1) + " replies por conta por dia no período."], tone: "pink" }),
-    mxKpi({ label: "Citações recebidas", value: num(t.quotes), cur: t.quotes, prev: p.quotes,
+    mxKpi({ label: "Replies por post", value: dec(t.replies_per_post, 1), cur: t.replies_per_post, prev: p.replies_per_post, spark: mxDaily(series, "replies", true),
+      lines: ["+13,5 cada · respondida vira +75 (150 curtidas)", dec(t.replies_per_k, 1) + " a cada mil views. Responda todas na primeira hora."], tone: "pink" }),
+    mxKpi({ label: "Citações recebidas", value: num(t.quotes), cur: t.quotes, prev: p.quotes, spark: mxDaily(series, "quotes"),
       lines: ["Entra em 3 sistemas · vale 3 reposts", "KPI da fase de 10 mil a 50 mil. " + dec(t.quotes_per_post, 2) + " por post."], tone: "violet" }),
-    mxKpi({ label: "Reposts por post", value: dec(t.retweets_per_post, 1), cur: t.retweets_per_post, prev: p.retweets_per_post,
-      lines: ["+1 cada · vale 2 curtidas", "Citar com comentário rende 3 vezes mais: peça citação, não só repost."], tone: "amber" }),
-    mxKpi({ label: "Tempo de leitura", value: t.save_rate === null ? "—" : dec(t.save_rate, 1), unit: t.save_rate === null ? "" : "% salvam", off: true,
-      lines: ["O X não mostra tempo de leitura para ninguém de fora", "A pista mais próxima: de cada 100 curtidas, quantas também salvaram. Threads e textos que prendem sobem esse número."] }),
-    mxKpi({ label: "Replies que você mandou", value: data.available.own_replies ? num(t.own_replies) : "—", cur: data.available.own_replies ? t.own_replies : undefined, prev: p.own_replies, off: !data.available.own_replies,
-      lines: [data.available.own_replies ? "Respostas das suas contas lidas pelo robô" : "O robô lê os posts, não as respostas das suas contas",
-        "Quais replies você respondeu o X não entrega. Responda todas na primeira hora: é o sinal mais forte que existe."] })
+    mxKpi({ label: "Reposts por post", value: dec(t.retweets_per_post, 1), cur: t.retweets_per_post, prev: p.retweets_per_post, spark: mxDaily(series, "retweets", true),
+      lines: ["+1 cada · vale 2 curtidas", "Citação rende 3 vezes mais: na sua rede, cite em vez de só repostar."], tone: "amber" }),
+    mxKpi({ label: "Taxa de salvamento", value: t.save_rate === null ? "—" : dec(t.save_rate, 1), unit: t.save_rate === null ? "" : "%", cur: t.save_rate, prev: p.save_rate,
+      spark: series.map((day) => day.likes ? day.bookmarks * 100 / day.likes : 0),
+      lines: ["Salvaram a cada 100 que curtiram", "Quanto mais alta, mais o texto prendeu: é a melhor pista de leitura de verdade."], tone: "green" }),
+    mxKpi({ label: "Ritmo de posts", value: dec(pace, 1), unit: "por conta/dia", cur: pace, prev: p.posts_per_day, spark: mxDaily(series, "posts").map((v) => v / accounts),
+      lines: ["Meta: 3 a 5 por conta por dia, 2 h entre eles", paceNote], tone: "violet" })
   );
 }
 function mxDayLabels(series) {
@@ -5049,11 +5092,23 @@ function paintMxCharts(data) {
   else mxSignalsChart = markChart(new Chart(document.getElementById("mx-signals"), { type: "line", data: signals, options }));
   const quality = { labels, datasets: [{
     label: "Nota por mil views", data: data.series.map((day) => day.points_per_k), borderColor: "#ff2ec8", legendColor: "#ff2ec8",
-    backgroundColor: "rgba(255,46,200,.14)", borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4, tension: .35, fill: true, spanGaps: true,
+    backgroundColor: mxFill("#ff2ec8"), borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4, tension: .35, fill: true, spanGaps: true,
   }] };
   const qualityOptions = { ...options, plugins: { legend: { display: false } }, scales: { ...options.scales, y: { beginAtZero: true } } };
   if (mxQualityChart) updateChart(mxQualityChart, quality, qualityOptions);
   else mxQualityChart = markChart(new Chart(document.getElementById("mx-quality"), { type: "line", data: quality, options: qualityOptions }));
+  const follow = data.followers || { series: [], gained: null };
+  const gainNode = document.getElementById("mx-followers-gained");
+  gainNode.className = "mx-gain" + (follow.gained > 0 ? " is-up" : follow.gained < 0 ? " is-down" : "");
+  gainNode.textContent = follow.gained === null || follow.gained === undefined ? "sem leitura de seguidores"
+    : (follow.gained > 0 ? "+" : "") + num(follow.gained) + " no período";
+  const followers = { labels: mxDayLabels(follow.series), datasets: [{
+    label: "Seguidores", data: follow.series.map((day) => day.total), borderColor: "#4fe3ff", legendColor: "#4fe3ff",
+    backgroundColor: mxFill("#4fe3ff"), borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4, tension: .3, fill: true, spanGaps: true,
+  }] };
+  const followerOptions = { ...options, plugins: { legend: { display: false } }, scales: { ...options.scales, y: { beginAtZero: false, ticks: { precision: 0 } } } };
+  if (mxFollowersChart) updateChart(mxFollowersChart, followers, followerOptions);
+  else mxFollowersChart = markChart(new Chart(document.getElementById("mx-followers"), { type: "line", data: followers, options: followerOptions }));
   const best = data.hours.filter((slot) => slot.avg !== null).sort((a, b) => b.avg - a.avg)[0];
   document.getElementById("mx-hours-best").textContent = best
     ? "Pontos por post, pela hora em que ele saiu. A melhor foi " + best.hour + "h, com " + dec(best.avg, 1) + " pontos por post (" + best.posts + (best.posts === 1 ? " post)." : " posts).")
@@ -5067,11 +5122,12 @@ function paintMxCharts(data) {
   if (mxHoursChart) updateChart(mxHoursChart, hours, hourOptions);
   else mxHoursChart = markChart(new Chart(document.getElementById("mx-hours"), { type: "bar", data: hours, options: hourOptions }));
 }
-function mxSpark(values) {
+function mxSpark(values, className) {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("viewBox", "0 0 84 24");
-  svg.setAttribute("class", "mx-spark");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("class", className || "mx-spark");
   svg.setAttribute("aria-hidden", "true");
   const max = Math.max(...values, 1);
   const points = values.map((v, i) => (i * 84 / Math.max(1, values.length - 1)).toFixed(1) + "," + (22 - v / max * 20).toFixed(1)).join(" ");
@@ -5129,7 +5185,8 @@ function paintMxTable() {
     spark.setAttribute("role", "cell");
     spark.append(mxSpark(row.spark));
     line.append(who, phase, cell(num(row.posts), "posts"), cell(dec(row.bookmarks_per_post, 1), "bookmarks_per_post", kpi === "bookmarks"),
-      cell(dec(row.replies_per_post, 1), "replies_per_post", kpi === "replies"), cell(num(row.quotes), "quotes", kpi === "quotes"), note, spark);
+      cell(dec(row.replies_per_post, 1), "replies_per_post", kpi === "replies"), cell(num(row.quotes), "quotes", kpi === "quotes"), note,
+      cell(row.followers_gained === null || row.followers_gained === undefined ? "—" : (row.followers_gained > 0 ? "+" : "") + num(row.followers_gained), "followers_gained"), spark);
     return line;
   }));
 }

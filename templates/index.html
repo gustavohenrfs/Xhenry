@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=37">
+  <link rel="stylesheet" href="/static/css/styles.css?v=38">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=53"></script>
+  <script defer src="/static/js/app.js?v=54"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -237,6 +237,7 @@
                 <p class="mx-score-line"><span id="mx-score" class="font-display mx-score-num">—</span><span class="mx-score-unit">pontos por mil views</span></p>
                 <p id="mx-score-delta" class="mx-score-delta"></p>
                 <p id="mx-scope" class="text-[11px] text-mute">Lendo as métricas…</p>
+                <dl id="mx-hero-stats" class="mx-hero-stats"></dl>
               </div>
               <div class="mx-stack-wrap">
                 <p class="text-xs text-mute">De onde vêm os pontos</p>
@@ -253,6 +254,16 @@
               <article class="glow mx-card">
                 <div class="mx-card-head"><h3 class="font-display">Nota por mil views, dia a dia</h3><p>Qualidade, não tamanho: sobe quando o post faz conversar e salvar.</p></div>
                 <div class="mx-chart"><canvas id="mx-quality" aria-label="Nota por mil views por dia"></canvas></div>
+              </article>
+            </div>
+            <div class="mx-grid2">
+              <article class="glow mx-card">
+                <div class="mx-card-head mx-top-head"><div><h3 class="font-display">Crescimento de seguidores</h3><p>Soma das contas, dia a dia.</p></div><p id="mx-followers-gained" class="mx-gain"></p></div>
+                <div class="mx-chart"><canvas id="mx-followers" aria-label="Seguidores por dia"></canvas></div>
+              </article>
+              <article class="glow mx-card">
+                <div class="mx-card-head"><h3 class="font-display">Métricas de vaidade</h3><p>Parecem boas, mas o algoritmo quase não liga. Olhe, mas não se guie por elas.</p></div>
+                <ul id="mx-vanity" class="mx-vanity"></ul>
               </article>
             </div>
             <article class="glow mx-card">
@@ -278,7 +289,7 @@
             <details class="mx-how glow">
               <summary class="font-display">Como a nota é calculada</summary>
               <p>Cada post soma os pontos que o código aberto do X dá para cada ação: curtida 0,5 · repost 1 · citação 3 (entra em 3 sistemas) · salvamento 10 · reply 13,5. A nota divide esse total pelas views e multiplica por mil, para comparar contas grandes e pequenas. Replies que a própria conta mandou não contam como post.</p>
-              <p>Tempo de leitura e quais replies você respondeu não aparecem aqui: o X não entrega esses números para quem está de fora, nem pela API nem pelo Apify. O guia em Algoritmo do X explica o peso de cada um.</p>
+              <p>Taxa de salvamento é quantas pessoas salvaram a cada 100 que curtiram: quanto mais alta, mais o texto prendeu. Ritmo de posts conta só posts próprios, por conta e por dia; o guia recomenda de 3 a 5.</p>
             </details>
           </div>
         </section>

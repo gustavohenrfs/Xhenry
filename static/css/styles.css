@@ -1957,3 +1957,49 @@ button.mx-row:hover, button.mx-row:focus-visible { border-color: rgb(var(--c-neo
 .mx-how { padding: 1rem 1.2rem; border-radius: 1.4rem; }
 .mx-how summary { cursor: pointer; font-size: 1rem; color: var(--fg); }
 .mx-how p { margin-top: .6rem; max-width: 72ch; font-size: .86rem; line-height: 1.6; color: var(--muted); }
+
+/* ---------- Métricas, segunda passada ---------- */
+/* Topo com luz de laser vinda do canto da nota e a faixa de números do período. */
+.mx-hero { position: relative; }
+.mx-hero > * { position: relative; z-index: 1; }
+.mx-hero .mx-score::before {
+  content: ""; position: absolute; left: -3rem; top: -3rem; width: 20rem; height: 14rem; z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, rgb(var(--c-neon) / .22), transparent); filter: blur(6px);
+}
+.mx-hero-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-top: .6rem; }
+.mx-hero-stats > div { padding: .55rem .7rem; border-radius: .9rem; border: 1px solid var(--line); background: var(--field); min-width: 0; }
+.mx-hero-stats dt { font-size: .68rem; color: var(--muted); }
+.mx-hero-stats dd { font-size: .98rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 520px) { .mx-hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Cartões: rótulo e variação na mesma linha, o número, a linha dos dias e as notas. */
+.mx-kpi-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.mx-kpi-delta { padding: .1rem .5rem; border-radius: 999px; background: rgb(var(--c-neon) / .06); white-space: nowrap; }
+.mx-kpi-delta.is-up { background: var(--ok-bg); } .mx-kpi-delta.is-down { background: var(--bad-bg); }
+.mx-kpi.is-green { --tone: var(--ok); }
+.mx-kpi-spark { width: 100%; height: 2.4rem; margin: .1rem 0 .2rem; overflow: visible; }
+.mx-kpi-spark polyline { fill: none; stroke: var(--tone); stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.mx-spark polyline { vector-effect: non-scaling-stroke; }
+@media (prefers-reduced-motion: no-preference) {
+  .mx-kpi-spark polyline { stroke-dasharray: 400; stroke-dashoffset: 400; animation: mx-draw 1.2s cubic-bezier(.2, .8, .2, 1) .15s forwards; }
+}
+@keyframes mx-draw { to { stroke-dashoffset: 0; } }
+
+/* Seguidores ganhos no período, ao lado do título do gráfico. */
+.mx-gain { padding: .3rem .75rem; border-radius: 999px; font-size: .8rem; font-weight: 600; color: var(--muted); border: 1px solid var(--line); }
+.mx-gain.is-up { color: var(--ok); border-color: var(--ok-line); background: var(--ok-bg); }
+.mx-gain.is-down { color: var(--bad); border-color: var(--bad-line); background: var(--bad-bg); }
+
+/* Métricas de vaidade: o número de verdade, o porquê e o que fazer no lugar. */
+.mx-vanity { display: grid; gap: .55rem; }
+.mx-vanity-item { display: grid; gap: .25rem; padding: .75rem .9rem; border-radius: 1rem; border: 1px dashed var(--line-strong); background: var(--field); }
+.mx-vanity-head { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; }
+.mx-vanity-head b { font-size: .9rem; color: var(--fg); font-weight: 600; text-decoration: line-through; text-decoration-color: rgb(var(--c-neon) / .55); text-decoration-thickness: 1.5px; }
+.mx-vanity-head span { font-size: .95rem; color: var(--muted); }
+.mx-vanity-item p { font-size: .8rem; line-height: 1.5; color: var(--muted); }
+.mx-vanity-item .mx-vanity-fix { color: var(--accent); }
+.mx-vanity-item .mx-vanity-fix::before { content: "Faça: "; font-weight: 600; }
+
+/* Tabela com a coluna de seguidores ganhos. */
+.mx-row { grid-template-columns: minmax(10rem, 1.5fr) minmax(10rem, 1.5fr) repeat(6, minmax(4.4rem, .7fr)) 6rem; min-width: 58rem; }
+@media (max-width: 767px) { .mx-row { min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); } }

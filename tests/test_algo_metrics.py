@@ -64,6 +64,7 @@ def seed(owner_id: int) -> dict[str, int]:
                 like_count=likes, retweet_count=rts, reply_count=replies, quote_count=quotes, bookmark_count=bookmarks,
             ))
         db.add(DailyMetric(account_id=strong.id, metric_date=today.date(), followers_count=4_500))
+        db.add(DailyMetric(account_id=strong.id, metric_date=today.date() - timedelta(days=20), followers_count=4_000))
         db.commit()
         return {"strong": strong.id, "weak": weak.id, "folder": folder.id}
 
@@ -119,3 +120,19 @@ def test_phase_limits():
     assert algo_metrics.phase_of(None) is None
     assert algo_metrics.phase_of(999)["kpi"] == "replies" and algo_metrics.phase_of(25_000)["kpi"] == "quotes"
     assert algo_metrics.phase_of(2_000_000)["kpi"] == "points"
+
+
+def test_followers_growth_vanity_and_pace(client):
+    owner_id, h = owner()
+    ids = seed(owner_id)
+    body = client.get("/api/metrics", params={"period": "7d"}, headers=h).json()
+    f = body["followers"]
+    assert f["gained"] == 500, "última leitura do período menos a última antes dele"
+    assert f["series"][-1]["total"] == 4_500 and f["series"][0]["total"] == 4_000, "dia sem leitura repete a última"
+    strong = next(r for r in body["accounts"] if r["id"] == ids["strong"])
+    assert strong["followers_gained"] == 500
+    vanity = {v["key"]: v for v in body["vanity"]}
+    assert set(vanity) == {"likes", "silent", "followers", "retweets"}
+    assert vanity["silent"]["value"] == 0 and vanity["followers"]["value"] == 4_500 and "+500" in vanity["followers"]["fact"]
+    assert "%" in vanity["likes"]["fact"] and "reposts puros" in vanity["retweets"]["fact"]
+    assert body["totals"]["posts_per_day"] == round(3 / 7 / 2, 2) and body["previous"]["posts_per_day"] == round(1 / 7 / 2, 2)
