@@ -1,5 +1,6 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", radar: "Radar de trend", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários" };
+const titles = { dashboard: "Dashboard", radar: "Radar de trend", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários",
+  algo: "Algoritmo do X", rede: "Rede de RT", ia: "Suporte I.A", suporte: "Suporte" };
 const TOKEN_KEY = "access_token";
 const state = {
   tab: "dashboard", period: "today", folderId: null, opsFolderId: null, data: null, openId: null, authMode: "login",
@@ -350,6 +351,10 @@ function setTab(tab) {
   if (tab === "archived") loadArchived();
   if (tab === "radar") loadRadar();
   if (tab === "users") loadUsers();
+  if (tab === "algo") paintWeights();
+  if (tab === "rede") paintRede();
+  if (tab === "ia") startIa();
+  if (tab === "suporte") paintSupport();
 }
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -1705,7 +1710,7 @@ document.getElementById("nav").addEventListener("click", (event) => {
   if (button) setTab(button.dataset.tab);
 });
 // Celular: abas embaixo; "Mais" abre as que não cabem (MORE_TABS).
-const MORE_TABS = ["archived", "tools", "settings"];
+const MORE_TABS = ["archived", "tools", "settings", "algo", "rede", "ia", "suporte"];
 function setMoreOpen(open) {
   document.getElementById("more-sheet").classList.toggle("open", open);
   document.getElementById("more-btn").setAttribute("aria-expanded", String(open));
@@ -3232,6 +3237,10 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) auto
 // ---------- ícones e telas vazias ----------
 // Mesmo traço dos ícones das abas (index.html); usados nas telas vazias e na busca rápida.
 const ICONS = {
+  algo: '<path d="M5 5.5a2 2 0 0 1 2-2h11.5v14H7a2 2 0 0 0-2 2Z"/><path d="M5 19.5a2 2 0 0 0 2 2h11.5v-4"/><path d="M9 8h6M9 11h4"/>',
+  rede: '<circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="m8.2 10.9 7.6-3.8M8.2 13.1l7.6 3.8"/>',
+  ia: '<path d="M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H11l-4.5 3.5V16a2 2 0 0 1-2-2Z"/><path d="m12 7.2.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9Z"/>',
+  suporte: '<path d="M4.5 13.5V12a7.5 7.5 0 0 1 15 0v1.5"/><rect x="3.5" y="13" width="4" height="6" rx="1.5"/><rect x="16.5" y="13" width="4" height="6" rx="1.5"/><path d="M18.5 19a3 3 0 0 1-3 2.5H13"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/>',
   radar: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 18.2 5.8"/><circle cx="12" cy="12" r="1.3"/>',
   dashboard: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
@@ -4358,7 +4367,8 @@ document.querySelectorAll("[data-tool]").forEach((button) => button.addEventList
 try { setTool(localStorage.getItem("tool_tab") || "post"); } catch { setTool("post"); }
 
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"]];
+const TAB_LIST = [["dashboard", "Dashboard"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"],
+  ["algo", "Algoritmo do X"], ["rede", "Rede de RT"], ["ia", "Suporte I.A"], ["suporte", "Suporte (WhatsApp)"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
 let paletteIndex = 0;
@@ -4506,3 +4516,322 @@ if (isStandalone() && "ontouchstart" in window) {
 }
 
 boot();
+
+// ---------- Info: Algoritmo do X, Rede de RT, Suporte I.A e Suporte (WhatsApp) ----------
+// Tudo roda no navegador, sem chamar API nenhuma: o guia é texto do index.html, a régua e a rede são
+// desenhadas aqui e o Suporte I.A procura a resposta numa base local (IA_KB).
+
+// Quanto vale cada ação, em curtidas (código aberto do X, 2023). A barra usa raiz quadrada para caber
+// do 0,5 ao 369 sem sumir com os pequenos.
+const WEIGHTS = [
+  { label: "Reply que você responde", value: 75, note: "150 curtidas" },
+  { label: "Reply que você manda", value: 13.5, note: "27 curtidas" },
+  { label: "Clicou no perfil e engajou", value: 12, note: "24 curtidas" },
+  { label: "Leu por 2 minutos ou mais", value: 10, note: "20 curtidas" },
+  { label: "Salvou o post", value: 10, note: "20 curtidas" },
+  { label: "Repost", value: 1, note: "2 curtidas" },
+  { label: "Curtida", value: 0.5, note: "a base" },
+  { label: "\"Ver menos disso\"", value: -13.5, note: "−27 curtidas" },
+  { label: "Bloqueio", value: -74, note: "−148 curtidas" },
+  { label: "Denúncia", value: -369, note: "−738 curtidas" },
+];
+let weightsPainted = false;
+function paintWeights() {
+  if (weightsPainted) return;
+  weightsPainted = true;
+  const top = Math.sqrt(369);
+  document.getElementById("weights-scale").replaceChildren(...WEIGHTS.map((item) => {
+    const li = el("li", "weight-row" + (item.value < 0 ? " is-neg" : ""));
+    const bar = el("span", "weight-bar");
+    bar.style.setProperty("--w", (Math.max(2.5, Math.sqrt(Math.abs(item.value)) / top * 100)).toFixed(1) + "%");
+    const value = (item.value > 0 ? "+" : "−") + String(Math.abs(item.value)).replace(".", ",");
+    li.append(el("span", "weight-label", item.label), bar, el("span", "weight-value font-mono", value), el("span", "weight-note", item.note));
+    return li;
+  }));
+}
+// Índice do guia: rola suave até a parte e marca a que está na tela.
+document.querySelectorAll(".info-toc a").forEach((link) => link.addEventListener("click", (event) => {
+  const target = document.querySelector(link.getAttribute("href"));
+  if (!target) return;
+  event.preventDefault();
+  target.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}));
+if ("IntersectionObserver" in window) {
+  const tocLinks = new Map([...document.querySelectorAll(".info-toc a")].map((link) => [link.getAttribute("href").slice(1), link]));
+  const watcher = new IntersectionObserver((entries) => entries.forEach((entry) => {
+    if (!entry.isIntersecting) return;
+    tocLinks.forEach((link, id) => link.classList.toggle("on", id === entry.target.id));
+  }), { rootMargin: "-30% 0px -60% 0px" });
+  document.querySelectorAll(".info-sec[id]").forEach((section) => watcher.observe(section));
+}
+
+// Rede de RT: as contas do dashboard em volta da principal (mais views), coloridas pela saúde.
+const REDE_OUT = new Set(["ghost_ban", "search_ban", "suspended", "not_found", "protected"]);
+function paintRede() {
+  const host = document.getElementById("rede-map");
+  const caption = document.getElementById("rede-caption");
+  const accounts = ((state.data && state.data.accounts) || []).filter((account) => !account.is_archived);
+  if (!accounts.length) {
+    host.replaceChildren(emptyState("rede", state.data ? "Nenhuma conta ainda" : "Abrindo as suas contas…", state.data ? "Adicione contas em Operações para ver a sua rede aqui." : "Um instante."));
+    caption.textContent = state.data ? "Sem contas no painel." : "Lendo as suas contas…";
+    if (!state.data) load({ silent: true }).then(() => { if (state.tab === "rede") paintRede(); });
+    return;
+  }
+  const sorted = accounts.slice().sort((a, b) => (REDE_OUT.has(a.status) - REDE_OUT.has(b.status)) || (b.views || 0) - (a.views || 0));
+  const hub = sorted[0];
+  const others = sorted.slice(1, 16);
+  const out = accounts.filter((account) => REDE_OUT.has(account.status)).length;
+  caption.textContent = (accounts.length - out) + " de " + accounts.length + " contas podem entrar na rede" + (out ? "; " + out + " fora por restrição" : "") + ".";
+  const ns = "http://www.w3.org/2000/svg";
+  const svgEl = document.createElementNS(ns, "svg");
+  svgEl.setAttribute("viewBox", "0 0 100 100");
+  svgEl.setAttribute("class", "rede-lines");
+  svgEl.setAttribute("preserveAspectRatio", "none");
+  const nodes = [{ account: hub, x: 50, y: 50, hub: true }];
+  others.forEach((account, index) => {
+    const angle = (index / others.length) * Math.PI * 2 - Math.PI / 2;
+    const radius = others.length > 8 ? 38 : 34;
+    nodes.push({ account, x: 50 + Math.cos(angle) * radius, y: 50 + Math.sin(angle) * radius * 0.86 });
+  });
+  nodes.slice(1).forEach((node) => {
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", "50"); line.setAttribute("y1", "50");
+    line.setAttribute("x2", node.x.toFixed(2)); line.setAttribute("y2", node.y.toFixed(2));
+    line.setAttribute("class", REDE_OUT.has(node.account.status) ? "is-out" : "is-ok");
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    svgEl.append(line);
+  });
+  const dots = nodes.map((node) => {
+    const account = node.account;
+    const stateClass = node.hub ? " is-hub" : REDE_OUT.has(account.status) ? " is-out" : " is-ok";
+    const button = el("button", "rede-node" + stateClass);
+    button.type = "button";
+    button.style.left = node.x.toFixed(2) + "%";
+    button.style.top = node.y.toFixed(2) + "%";
+    button.title = "@" + account.username + " · " + (account.status_label || "sem verificação") + " · " + num(account.views) + " views";
+    button.setAttribute("aria-label", button.title);
+    const name = (account.display_name || account.username || "?").replace(/^@/, "");
+    button.append(el("span", "rede-dot", name.slice(0, 2).toUpperCase()), el("span", "rede-name", "@" + account.username));
+    button.addEventListener("click", () => openDrawer(account.id, button));
+    return button;
+  });
+  host.replaceChildren(svgEl, ...dots);
+}
+
+// Suporte I.A: base local sobre o X. Cada item: pergunta pronta, palavras que puxam ele e a resposta.
+// Nada sai do navegador; fora do assunto X, ele diz que só fala de X.
+const IA_KB = [
+  { q: "Como viralizar no X?", see: "algo-janelas", keys: ["viraliz", "viral", "bombar", "explodir", "alcance", "views", "visualiza", "milhoes", "crescer post", "engajar", "engajamento"],
+    a: ["Viralizar no X é ganhar os primeiros 30 minutos. É ali que o algoritmo decide se o post vai para quem não te segue nas próximas 24 h.",
+      ["Poste no seu pico (para +18: 22h–1h; geral: terça e quarta, 9h–10h).", "Abra com uma pergunta que faça homem responder: enquete de dois lados, desafio ao ego, \"vocês homens…\".", "Responda cada comentário na primeira hora: cada reply respondida vale 150 curtidas.", "Sem link no corpo do post e no máximo 2 hashtags.", "Use as suas outras contas para citar com comentário logo no começo (veja Rede de RT)."],
+      "No Radar, a parte Textos quentes tem perguntas prontas nesse formato."] },
+  { q: "Como aquecer uma conta nova?", see: "algo-aquecer", keys: ["aquec", "conta nova", "criar conta", "comecar conta", "conta zerada", "primeira semana", "warm"],
+    a: ["Quatro semanas, sem pressa:",
+      ["Dia 0: e-mail e telefone confirmados, foto e capa comportadas, bio, post fixado, Premium e \"conteúdo sensível\" ligado se for +18.", "Semana 1: nenhum post. Siga 5 a 10 contas do nicho e curta 10 a 20 posts por dia.", "Semana 2: 1 ou 2 replies por dia, até 15 seguidas por dia e 1 post forte.", "Semanas 3 e 4: 3 a 5 posts e 10 a 20 replies por dia, ainda sem link."],
+      "Nada +18 nas duas primeiras semanas: a conta ainda está em teste (sandbox)."] },
+  { q: "Como evitar que a conta caia?", see: "algo-mata", keys: ["cair", "caiu", "ban", "banid", "suspens", "suspend", "derrub", "bloquead", "perder conta", "conta nao cair", "proteger conta", "seguranca"],
+    a: ["O que mais derruba conta, em ordem:",
+      ["Conteúdo +18 sem \"conteúdo sensível\" ligado: o X marca por você e isso é punição.", "Seguir mais de 30 a 50 por dia, ou passar de 2.500 seguindo.", "Pedir curtida ou repost em troca de algo (engagement farming).", "Link e divulgação em reply: é marcado como spam.", "Postar sempre no mesmo minuto, todo dia, e várias contas fazendo a mesma coisa juntas.", "Qualquer coisa com menor de idade: banimento direto."],
+      "Use Operações → Verificar para checar ghost ban e search ban de cada conta."] },
+  { q: "O que é shadowban (ghost ban e search ban)?", see: "algo-mata", keys: ["shadow", "ghost", "search ban", "fantasma", "nao aparece", "sumiu da busca", "ninguem ve", "invisivel", "restric"],
+    a: ["São restrições silenciosas: a conta continua no ar, mas some para os outros.",
+      ["Search ban: a conta ou os posts não aparecem na busca.", "Ghost ban: as suas replies ficam escondidas para os outros.", "Rebaixamento de reply: as replies vão para \"mostrar mais respostas\"."],
+      "O painel testa isso: Operações → botão Verificar em cada conta. Achou? Pare de seguir em massa, tire links, ligue o sensível se for +18 e reduza o volume por 1 a 2 semanas."] },
+  { q: "Minha conta está com restrição. Como recupero?", see: "algo-camadas", keys: ["recuper", "voltar na busca", "sair do shadow", "tirar restric", "limitad", "voltar ao normal", "desbloque"],
+    a: ["Não existe botão: a conta volta quando o comportamento muda e o tempo passa.",
+      ["Pare tudo que pode ter causado: follow em massa, links, hashtags demais, posts repetidos.", "Ligue \"conteúdo sensível\" se posta +18 e deixe foto e capa comportadas.", "Fique 7 a 14 dias só com posts bons e replies de verdade, em volume baixo.", "Confirme e-mail e telefone e considere o Premium (+10 na reputação).", "Verifique de novo no painel (Operações → Verificar) depois de uma semana."],
+      "\"Ver menos disso\" deixa marca por até 140 dias: evite o tipo de post que estava gerando isso."] },
+  { q: "Qual o melhor horário para postar?", see: "algo-janelas", keys: ["horario", "hora", "que horas", "quando postar", "melhor dia", "pico"],
+    a: ["No Brasil, o geral é terça e quarta das 9h às 10h. Para conta +18, o pico do público é das 22h à 1h.",
+      "Melhor que regra geral é o seu dado: no Dashboard, o mapa de calor mostra a média de views por dia da semana e hora das suas contas."] },
+  { q: "Quantos posts por dia devo fazer?", see: "algo-rotina", keys: ["quantos post", "quantas vezes", "frequencia", "por dia", "volume", "postar muito"],
+    a: ["As contas que crescem fazem uns 95 posts por semana somando originais e replies.",
+      ["3 a 5 posts originais por dia, com pelo menos 2 horas entre eles.", "20 a 50 replies por dia em contas do nicho.", "O 4º post seguido seu vale só 25%: espalhe ao longo do dia."]] },
+  { q: "Por que responder os comentários é tão importante?", see: "algo-reply", keys: ["responder", "comentario", "reply", "replies", "respostas", "+75", "150"],
+    a: ["Porque é o sinal mais forte que existe: reply que você responde vale +75, o mesmo que 150 curtidas.",
+      ["Responda todo mundo, principalmente na primeira hora.", "Faça pergunta de volta: cada volta da conversa soma de novo.", "Em contas de outros: reply nos primeiros 5 a 15 minutos, com pergunta ou opinião, nunca \"amei\" nem link."]] },
+  { q: "Link na bio ou no post?", see: "algo-adulto", keys: ["link", "linktree", "bio", "onlyfans", "privacy", "divulg", "vender"],
+    a: ["Na bio. Link na bio não pesa em nada.",
+      ["Link no corpo do post tira 30% a 50% do alcance.", "Conta sem Premium com link perde até 94%.", "Divulgação dentro de reply é marcada como spam."],
+      "Os textos de engajamento do painel nunca pedem clique em link: o post vive só das respostas."] },
+  { q: "Hashtag ajuda ou atrapalha?", see: "algo-mata", keys: ["hashtag", "#", "tag"],
+    a: ["Ajuda pouco e atrapalha fácil: 1 ou 2 no máximo. Com 3 ou mais, o post perde uns 40% do alcance. Pegar carona num assunto em alta escrevendo sobre ele funciona melhor que a hashtag."] },
+  { q: "Vale a pena assinar o Premium?", see: "algo-camadas", keys: ["premium", "azul", "verificad", "selo", "assinatura", "blue"],
+    a: ["Para quem vive de alcance, vale.",
+      ["+10 na reputação da conta (TweepCred).", "Posts com link perdem bem menos alcance.", "Ajuda a passar do 65 de reputação, que é quando a conta escapa do filtro de spam da busca."]] },
+  { q: "Como configurar uma conta +18 do jeito certo?", see: "algo-adulto", keys: ["18", "adulto", "adult", "nsfw", "sensivel", "putaria", "conteudo adulto", "hot", "nude", "modelo"],
+    a: ["A regra de ouro: você marca, antes do X marcar.",
+      ["Ligue \"conteúdo sensível\" nas configurações antes de qualquer post +18.", "Foto de perfil e capa sempre comportadas.", "\"18+\" na bio e conta verificada.", "Conteúdo feito com IA tem que ser declarado.", "Nada +18 nas duas primeiras semanas de conta."],
+      "Quem é marcada pelo detector do X perde a busca de forma permanente."] },
+  { q: "Quantas pessoas posso seguir por dia?", see: "algo-aquecer", keys: ["seguir", "follow", "seguindo", "unfollow", "seguidores por dia"],
+    a: [["Até 30 a 50 por dia. Acima disso é marcado como spam.", "Até 300 seguindo antes de ter 300 seguidores.", "Nunca passe de 2.500 seguindo: a reputação cai 50 vezes.", "Deixar de seguir em massa também pesa."]] },
+  { q: "Comprar seguidores funciona?", see: "algo-erros", keys: ["comprar", "comprad", "fake", "bot", "seguidor falso", "painel smm"],
+    a: ["Não. Seguidor comprado não interage, então o X passa a mostrar os seus posts para gente que não engaja e o alcance cai. Ainda bagunça o seu \"condomínio\" (SimCluster): a conta passa a ser lida como de outro público."] },
+  { q: "Como funciona o algoritmo do X?", see: "algo-fabrica", keys: ["algoritmo", "como funciona", "feed", "para voce", "for you", "ranker", "ranking"],
+    a: ["De 1 bilhão de posts por dia, uns 1.500 viram candidatos para cada pessoa, um filtro rápido corta os piores, um modelo pesado calcula 17 chances para cada post e os 50 melhores chegam no feed.",
+      "O que mais pesa é conversa: reply respondida (+75), reply (+13,5), clique no perfil com engajamento (+12), leitura longa e salvar (+10). Curtida vale só 0,5.",
+      "A régua completa está no topo de Algoritmo do X."] },
+  { q: "O que mais derruba o alcance de um post?", see: "algo-mata", keys: ["derruba alcance", "penaliz", "punic", "perde alcance", "alcance caiu", "flopou", "flop", "nao engaja", "morreu"],
+    a: [["Denúncia (−369, o mesmo que 738 curtidas) e bloqueio (−74).", "\"Ver menos disso\" (−13,5 e marca de até 140 dias).", "Link no corpo, 3 hashtags ou mais, tom agressivo.", "Postar muitas vezes seguidas: o 4º vale 25%.", "Sem interação nos primeiros 30 minutos."]] },
+  { q: "Repost ou citação: qual vale mais?", see: "algo-ama", keys: ["repost", "retweet", "rt", "citar", "citacao", "quote"],
+    a: ["Citação com comentário. Ela entra em 3 sistemas do X e vale umas 3 vezes mais que o repost puro (que vale 2 curtidas). Na Rede de RT, prefira citar."] },
+  { q: "Como montar uma rede de RT entre minhas contas?", see: "algo-janelas", keys: ["rede", "rede de rt", "minhas contas", "entre contas", "grupo de rt", "corrente"],
+    a: ["A ideia é as suas contas darem o primeiro empurrão nos 30 minutos que decidem o alcance.",
+      ["Só conta saudável entra: conta com restrição puxa todas para baixo.", "Cite com comentário em vez de só repostar.", "Espalhe ao longo do dia, nunca todas no mesmo minuto.", "Poucos reposts por conta por dia, só no que combina com o público dela."],
+      "A aba Rede de RT mostra as suas contas e quais podem entrar agora."] },
+  { q: "O que é TweepCred (reputação da conta)?", see: "algo-camadas", keys: ["tweepcred", "reputacao", "nota da conta", "score", "credibilidade"],
+    a: ["É a nota de 0 a 100 que o X dá para a conta.",
+      ["Sobe com: celular verificado, e-mail e telefone, idade da conta (máximo em 30 dias), Premium (+10).", "Acima de 65: a conta escapa do filtro de spam da busca.", "Abaixo de 40: tratada como baixa qualidade.", "Seguir mais de 2.500 divide a nota por 50."]] },
+  { q: "Como escolher e mudar de público (nicho)?", see: "algo-camadas", keys: ["nicho", "publico", "cluster", "simcluster", "audiencia", "mudar de nicho", "publico masculino", "homens"],
+    a: ["O X te coloca num \"condomínio\" de público pelo perfil de quem te segue, e leva uns 7 dias para mudar.",
+      ["Fique num nicho só no começo.", "Para pegar outro público, interaja e seja seguida por gente dele (ex.: futebol, games, academia).", "Seguidor comprado ou fora do nicho bagunça essa leitura."]] },
+  { q: "Vídeo, foto ou só texto?", see: "algo-ama", keys: ["video", "foto", "imagem", "midia", "texto puro", "so texto"],
+    a: ["Vídeo nativo rende umas 3 vezes mais e imagem umas 2 vezes. Texto puro vive de resposta: precisa de pergunta, enquete ou desafio que faça a pessoa comentar. Leitura de 2 minutos ou mais também conta (+10), por isso threads funcionam."] },
+  { q: "Thread vale a pena?", see: "algo-playbook", keys: ["thread", "fio", "sequencia de posts"],
+    a: ["Vale: segura a leitura por mais tempo (+10 com 2 minutos ou mais) e aumenta quantas vezes salvam. Na fase de 1 mil a 10 mil seguidores, é uma das ferramentas principais."] },
+  { q: "Como crescer de 0 a 100 mil seguidores?", see: "algo-playbook", keys: ["seguidores", "crescer", "100 mil", "100k", "mil seguidores", "ganhar seguidor"],
+    a: [["0 a 1 mil: 70% replies, 30% posts. Mire contas 2 a 10 vezes maiores, 20 a 50 replies por dia.", "1 mil a 10 mil: um nicho, uns 95 posts por semana, threads, e a meta é quantas vezes salvam.", "10 mil a 50 mil: citações em contas grandes, parcerias, Spaces, post fixado por 2 semanas.", "50 mil a 100 mil: volume e divulgação cruzada entre as suas contas."]] },
+  { q: "O que é a janela de 30 minutos?", see: "algo-janelas", keys: ["30 minutos", "meia hora", "janela", "primeiros minutos", "velocidade"],
+    a: ["É o período que decide se o post vai para quem não te segue nas próximas 24 h. Conta pessoas diferentes, e velocidade ganha de volume: 100 curtidas em 6 h valem mais que 100 em 48 h. Por isso o melhor post do dia vai no seu pico, com você online respondendo."] },
+  { q: "Denúncia e bloqueio pesam muito?", see: "algo-mata", keys: ["denuncia", "report", "bloqueio", "block", "ver menos"],
+    a: ["Pesam muito: uma denúncia é −369 (738 curtidas para compensar) e um bloqueio −74. \"Ver menos disso\" esconde você daquela pessoa por 14 dias e deixa marca por até 140. Provocar é bom; ofender, expor gente ou pegar pesado demais vira denúncia."] },
+  { q: "Como funciona a punição por strikes?", see: "algo-adulto", keys: ["strike", "advertencia", "aviso", "punicao", "monetiza"],
+    a: [["1º: aviso.", "2º: 7 dias de restrição.", "3º: 30 dias e perda de monetização.", "4º: banimento."], "Na conta +18, o que mais gera strike é postar sem a marcação de sensível."] },
+  { q: "Posso usar foto feita com IA?", see: "algo-adulto", keys: ["ia", "inteligencia artificial", "gerada", "deepfake", "ai"],
+    a: ["Pode, declarando que é feito com IA (além da marcação de sensível no +18). Deepfake de pessoa real sem consentimento é banimento e caso de polícia."] },
+  { q: "O que medir para saber se está dando certo?", see: "algo-kpis", keys: ["medir", "metrica", "kpi", "resultado", "analisar", "dados"],
+    a: [["Replies que você respondeu.", "Quantas vezes salvaram.", "Cliques no perfil.", "Velocidade nos primeiros 30 minutos.", "Quem segue de volta."], "Curtida sozinha e número de seguidores enganam. No Dashboard, olhe as views por post e as interações."] },
+  { q: "O que é engagement farming?", see: "algo-erros", keys: ["farming", "pedir curtida", "pedir rt", "curte e", "sorteio", "troca"],
+    a: ["É pedir curtida, repost ou comentário em troca de algo (\"curte e comenta que eu mando\"). O X pune como manipulação. Pergunta e enquete que geram resposta de verdade não contam: o problema é a troca."] },
+  { q: "Spaces e Comunidades ajudam?", see: "algo-playbook", keys: ["spaces", "comunidade", "community", "live", "ao vivo"],
+    a: ["Ajudam a criar público fiel: quem interage muito com você vê os seus posts mesmo com penalidades. Comunidades são uma das 9 fontes do feed (cota de 100 posts), e Spaces aproximam o público na fase de 10 mil a 50 mil."] },
+  { q: "Como achar contas para responder?", see: "algo-reply", keys: ["contas alvo", "alvo", "target", "quem responder", "onde comentar"],
+    a: [["Contas do seu nicho 2 a 10 vezes maiores que a sua.", "Que sabidamente respondem quem comenta: observe por uma semana.", "Ative as notificações delas e responda nos primeiros 5 a 15 minutos."], "No Radar → Textos que bombaram → Contas do nicho, você lista essas contas e vê os textos que mais engajaram nelas."] },
+  { q: "O que o painel faz por mim?", see: null, keys: ["painel", "xhenry", "saas", "o que voce faz", "funcionalidade", "ajuda do painel"],
+    a: [["Dashboard: views, interações, melhor horário e crescimento das suas contas.", "Operações: pastas, contas e a verificação de ghost ban e search ban.", "Radar: o que está em alta no Brasil, ideias de post e textos quentes.", "Ferramentas: Verificar post (Grok) e Metadados (cópias com hash diferente).", "Alertas de post viralizando no celular."]] },
+];
+const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
+// Palavras que mostram que a pergunta é sobre o X (sem nenhuma delas e sem casar com a base, é fora do assunto).
+const IA_TOPIC = ["x", "twitter", "tweet", "post", "conta", "perfil", "seguidor", "algoritmo", "alcance", "feed", "rt", "reply", "bio", "story", "engaj", "viral", "ban", "nicho", "publico"];
+function iaTokens(text) { return plain(text).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean); }
+function iaFind(question) {
+  const text = " " + iaTokens(question).join(" ") + " ";
+  let best = null;
+  let bestScore = 0;
+  IA_KB.forEach((item) => {
+    let score = 0;
+    item.keys.forEach((key) => {
+      const k = iaTokens(key).join(" ");
+      if (!k) return;
+      if (k.length <= 3 ? text.includes(" " + k + " ") : text.includes(k)) score += k.split(" ").length > 1 ? 3 : 2;
+    });
+    iaTokens(item.q).forEach((word) => { if (word.length > 4 && text.includes(" " + word)) score += 0.5; });
+    if (score > bestScore) { bestScore = score; best = item; }
+  });
+  return bestScore >= 2 ? best : null;
+}
+function iaRelated(item) {
+  return IA_KB.filter((other) => other !== item && item && other.see && other.see === item.see).slice(0, 2)
+    .concat(IA_KB.filter((other) => IA_FIRST.includes(other.q) && other !== item)).slice(0, 3);
+}
+function iaBubble(role, parts) {
+  const li = el("li", "ia-msg is-" + role);
+  parts.forEach((part) => {
+    if (Array.isArray(part)) {
+      const list = el("ul", "ia-list");
+      part.forEach((line) => list.append(el("li", "", line)));
+      li.append(list);
+    } else if (part instanceof Node) li.append(part);
+    else li.append(el("p", "", part));
+  });
+  return li;
+}
+function iaAsk(question) {
+  const log = document.getElementById("ia-log");
+  const asked = question.trim();
+  if (!asked) return;
+  log.append(iaBubble("me", [asked]));
+  const item = IA_KB.find((entry) => entry.q === asked) || iaFind(asked);
+  let reply;
+  if (item) {
+    const parts = item.a.slice();
+    if (item.see) {
+      const link = el("button", "ia-see", "Ver no guia do algoritmo");
+      link.type = "button";
+      link.addEventListener("click", () => {
+        setTab("algo");
+        const target = document.getElementById(item.see);
+        if (target) setTimeout(() => target.scrollIntoView({ block: "start" }), 60);
+      });
+      parts.push(link);
+    }
+    reply = iaBubble("bot", parts);
+  } else {
+    const onTopic = IA_TOPIC.some((word) => (" " + iaTokens(asked).join(" ") + " ").includes(" " + word));
+    reply = iaBubble("bot", [onTopic
+      ? "Essa eu não tenho no guia ainda. Tente com outras palavras ou escolha uma das perguntas abaixo. Se for sobre o painel, fale com o Suporte no WhatsApp."
+      : "Eu só respondo sobre o X: alcance, algoritmo, contas, banimento, conta +18 e o painel. Escolha uma pergunta abaixo ou reformule."]);
+  }
+  log.append(reply);
+  paintIaSuggest(item);
+  reply.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" });
+}
+function paintIaSuggest(after) {
+  const host = document.getElementById("ia-suggest");
+  const list = after ? iaRelated(after) : IA_KB.filter((item) => IA_FIRST.includes(item.q));
+  host.replaceChildren(...list.map((item) => {
+    const chip = el("button", "chip", item.q);
+    chip.type = "button";
+    chip.addEventListener("click", () => iaAsk(item.q));
+    return chip;
+  }));
+  if (after) {
+    const all = el("button", "chip", "Ver todas as perguntas");
+    all.type = "button";
+    all.addEventListener("click", () => {
+      host.replaceChildren(...IA_KB.map((item) => {
+        const chip = el("button", "chip", item.q);
+        chip.type = "button";
+        chip.addEventListener("click", () => iaAsk(item.q));
+        return chip;
+      }));
+    });
+    host.append(all);
+  }
+}
+let iaStarted = false;
+function startIa() {
+  if (iaStarted) return;
+  iaStarted = true;
+  document.getElementById("ia-log").append(iaBubble("bot", ["Oi! Eu sei tudo do X: algoritmo, como viralizar, aquecer conta, não cair, conta +18. Pergunte do seu jeito ou toque numa pergunta abaixo."]));
+  paintIaSuggest(null);
+}
+document.getElementById("ia-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = document.getElementById("ia-input");
+  iaAsk(input.value);
+  input.value = "";
+});
+
+// Suporte: WhatsApp com a mensagem já escrita pelo assunto escolhido.
+const SUPPORT_NUMBER = "5564996013028";
+const SUPPORT_TOPICS = [
+  ["Dúvida sobre o painel", "Oi! Tenho uma dúvida sobre o painel XHenry: "],
+  ["A leitura das contas parou", "Oi! A leitura das minhas contas no XHenry parou. Meu e-mail no painel é: "],
+  ["Conta com restrição no X", "Oi! Uma conta minha está com restrição no X e queria ajuda: @"],
+  ["Quero acesso para alguém", "Oi! Quero liberar acesso ao XHenry para uma pessoa: "],
+  ["Outro assunto", "Oi! Vim pelo painel XHenry. "],
+];
+let supportTopic = 0;
+function paintSupport() {
+  const host = document.getElementById("support-topics");
+  host.replaceChildren(...SUPPORT_TOPICS.map(([label], index) => {
+    const chip = el("button", "chip" + (index === supportTopic ? " on" : ""), label);
+    chip.type = "button";
+    chip.setAttribute("aria-pressed", String(index === supportTopic));
+    chip.addEventListener("click", () => { supportTopic = index; paintSupport(); });
+    return chip;
+  }));
+  const email = supportTopic === 1 && state.user && state.user.email ? state.user.email : "";
+  document.getElementById("support-open").href = "https://wa.me/" + SUPPORT_NUMBER + "?text=" + encodeURIComponent(SUPPORT_TOPICS[supportTopic][1] + email);
+}

@@ -19,10 +19,10 @@
   <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
-  <link rel="stylesheet" href="/static/css/tailwind.css?v=9">
-  <link rel="stylesheet" href="/static/css/styles.css?v=33">
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=10">
+  <link rel="stylesheet" href="/static/css/styles.css?v=35">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=50"></script>
+  <script defer src="/static/js/app.js?v=51"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -42,6 +42,11 @@
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
         <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
         <button type="button" data-tab="tools" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/></svg><span>Ferramentas</span></button>
+        <p class="nav-divider"><span>Info</span></p>
+        <button type="button" data-tab="algo" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5a2 2 0 0 1 2-2h11.5v14H7a2 2 0 0 0-2 2Z"/><path d="M5 19.5a2 2 0 0 0 2 2h11.5v-4"/><path d="M9 8h6M9 11h4"/></svg><span>Algoritmo do X</span></button>
+        <button type="button" data-tab="rede" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="m8.2 10.9 7.6-3.8M8.2 13.1l7.6 3.8"/></svg><span>Rede de RT</span></button>
+        <button type="button" data-tab="ia" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H11l-4.5 3.5V16a2 2 0 0 1-2-2Z"/><path d="m12 7.2.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9Z"/></svg><span>Suporte I.A</span></button>
+        <button type="button" data-tab="suporte" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 13.5V12a7.5 7.5 0 0 1 15 0v1.5"/><rect x="3.5" y="13" width="4" height="6" rx="1.5"/><rect x="16.5" y="13" width="4" height="6" rx="1.5"/><path d="M18.5 19a3 3 0 0 1-3 2.5H13"/></svg><span>Suporte</span></button>
         <button type="button" data-tab="users" data-admin-only class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5a5.5 5.5 0 0 1 11 0"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.5 14.6a4.6 4.6 0 0 1 5 4.9"/></svg><b class="tab-badge hidden" data-badge="users" aria-label="pedidos de acesso esperando"></b><span>Usuários</span></button>
         <button type="button" data-tab="settings" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
       </nav>
@@ -454,6 +459,214 @@
           </div>
           </div>
         </section>
+        <section id="pane-algo" class="pane">
+          <div class="info-page">
+            <header class="info-hero">
+              <h2 class="font-display info-title">Algoritmo do X</h2>
+              <p class="info-lede">O feed do X é uma fila de 1 bilhão de posts por dia que vira 50 na sua tela. Quem passa é quem faz as pessoas conversarem, não só curtirem. Aqui está cada peso, janela e regra que decide isso, organizado para conta de texto +18 no Brasil.</p>
+            </header>
+            <section class="weights glow" aria-labelledby="weights-title">
+              <div class="weights-head">
+                <h3 id="weights-title" class="font-display">Quanto vale cada ação</h3>
+                <p class="text-xs text-mute">Em curtidas. Uma reply que você responde vale 150 curtidas; uma denúncia apaga 738.</p>
+              </div>
+              <ol id="weights-scale" class="weights-scale"></ol>
+            </section>
+            <nav class="info-toc" aria-label="Partes do guia">
+              <a href="#algo-fabrica">Como funciona</a><a href="#algo-ama">O que ele ama</a><a href="#algo-mata">O que ele mata</a><a href="#algo-camadas">Camadas invisíveis</a><a href="#algo-janelas">Janelas</a><a href="#algo-reply">Reply 150x</a><a href="#algo-adulto">Conta +18</a><a href="#algo-aquecer">Aquecer conta</a><a href="#algo-rotina">Rotina</a><a href="#algo-playbook">0 a 100 mil</a><a href="#algo-erros">Erros</a><a href="#algo-kpis">O que medir</a>
+            </nav>
+            <div class="info-doc">
+              <section id="algo-fabrica" class="info-sec">
+                <h3 class="font-display">Como o feed é montado</h3>
+                <p>O X funciona como uma fábrica em etapas. Nove esteiras paralelas juntam uns 1.500 candidatos para você, um porteiro rápido (Light Ranker) descarta os piores, um juiz pesado (Heavy Ranker) calcula 17 probabilidades para cada post, ajustes finos entram por cima e os 50 melhores chegam no feed.</p>
+                <ul>
+                  <li><b>Coleta.</b> Cada fonte tem cota: quem você segue 600, mistura de posts parecidos 400, o que a sua rede curtiu nas últimas 24 h (UTEG) 300, reforço 200, listas 100, comunidades 100.</li>
+                  <li><b>Juiz.</b> A nota que mais pesa é se as pessoas conversam com você. Aplauso sozinho (curtida) vale quase nada.</li>
+                  <li><b>Ajustes.</b> Mais de 16 multiplicadores: link para fora do X derruba, assinatura Premium ajuda.</li>
+                  <li><b>Mistura.</b> No máximo 2 posts seguidos de quem a pessoa não segue.</li>
+                </ul>
+              </section>
+              <section id="algo-ama" class="info-sec">
+                <h3 class="font-display">O que ele ama</h3>
+                <div class="tiers">
+                  <div class="tier-row is-s"><span class="tier-mark">S</span><div><b>Explode o alcance</b><p>Reply que você responde (150 curtidas) · velocidade nos primeiros 30 minutos · seguir de volta quem engaja e prender a leitura.</p></div></div>
+                  <div class="tier-row is-a"><span class="tier-mark">A</span><div><b>Alto impacto</b><p>Salvar o post (20 curtidas) · leitura de 2 minutos ou mais · citação com comentário (entra em 3 sistemas) · Premium.</p></div></div>
+                  <div class="tier-row is-b"><span class="tier-mark">B</span><div><b>Bom</b><p>Repost (2 curtidas) · reply em conta grande · vídeo nativo (3x) · imagem (2x).</p></div></div>
+                  <div class="tier-row is-c"><span class="tier-mark">C</span><div><b>Base</b><p>Curtida · clique no perfil · 1 ou 2 hashtags.</p></div></div>
+                  <div class="tier-row is-f"><span class="tier-mark">F</span><div><b>Jogado fora</b><p>Não responder quem comentou (perde o +75) · postar e sumir, sem interagir com ninguém.</p></div></div>
+                </div>
+              </section>
+              <section id="algo-mata" class="info-sec">
+                <h3 class="font-display">O que ele mata</h3>
+                <div class="tiers is-bad">
+                  <div class="tier-row"><span class="tier-mark">1</span><div><b>Banimento</b><p>Qualquer coisa com menor de idade · listas negras de recomendação e de busca.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">2</span><div><b>Crítico</b><p>Conteúdo +18 sem a marcação de sensível (o robô do X detecta e marca por você, e isso é punição) · conta marcada como "não amplificar".</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">3</span><div><b>Severo</b><p>Conta em período de teste (sandbox) · seguir mais de 2.500 perfis (a reputação cai 50 vezes) · post muito denunciado · reply com cara de spam.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">4</span><div><b>Alto</b><p>Conta sem Premium com link para fora (até 94% menos alcance) · o 4º post seguido do mesmo autor vale 25% · tom agressivo.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">5</span><div><b>Moderado</b><p>3 hashtags ou mais (40% menos) · ser reply (×0,75) · aparecer para quem não te segue (×0,75).</p></div></div>
+                </div>
+              </section>
+              <section id="algo-camadas" class="info-sec">
+                <h3 class="font-display">As 3 camadas invisíveis</h3>
+                <ul>
+                  <li><b>SimClusters.</b> O X divide o público em 145 mil "condomínios" e te coloca em um pelo perfil de <em>quem te segue</em>. Leva uns 7 dias para mudar. Quer outro público? Interaja e seja seguida por gente dele.</li>
+                  <li><b>Real Graph.</b> Prevê se A vai interagir com B, com meia-vida de 7 dias. Uma pessoa que curte, clica e reposta vale mais que 10 curtidas de gente diferente. Seguir de volta fica para sempre; deixar de seguir ou bloquear destrói.</li>
+                  <li><b>TweepCred.</b> Nota de 0 a 100 da conta. Celular verificado +0,5, e-mail e telefone +0,2, 30 dias de conta é o máximo de idade, Premium +10. Acima de 65 a conta escapa do filtro de spam da busca; abaixo de 40 vira "baixa qualidade". Seguir mais de 2.500 divide a nota por 50.</li>
+                </ul>
+              </section>
+              <section id="algo-janelas" class="info-sec">
+                <h3 class="font-display">As janelas que salvam ou matam um post</h3>
+                <p class="info-callout"><b>Os primeiros 30 minutos decidem.</b> É ali que o X escolhe se o post vai aparecer para quem não te segue nas próximas 24 horas. 100 curtidas em 6 horas valem mais que 100 em 48: velocidade ganha de volume. Conta cada pessoa uma vez só.</p>
+                <ul>
+                  <li>O "Para você" olha as últimas 48 h; posts parecidos ficam no radar por 30 dias; a busca guarda uns 7 dias.</li>
+                  <li><b>"Ver menos disso".</b> Bloqueia o seu conteúdo para aquela pessoa por 14 dias e deixa uma penalidade que some aos poucos em 140 dias, sem aviso nenhum.</li>
+                  <li>Melhores horários no Brasil: terça e quarta, 9h–10h. Para conteúdo +18 o pico é 22h–1h.</li>
+                </ul>
+              </section>
+              <section id="algo-reply" class="info-sec">
+                <h3 class="font-display">Reply: o sinal que quase ninguém usa</h3>
+                <ul>
+                  <li><b>Onde.</b> Em contas que sabidamente respondem: observe uma semana antes de mirar.</li>
+                  <li><b>Quando.</b> Entre 5 e 15 minutos depois do post. Depois de 30 minutos a chance cai muito.</li>
+                  <li><b>Como.</b> Pergunta que prova que você leu, contraponto, dado novo ou experiência sua. "Amei!" não vale nada.</li>
+                  <li><b>Nunca.</b> Divulgação ou link na reply: o X marca como spam.</li>
+                  <li><b>Responderam você?</b> Responda de volta. Cada volta da conversa soma sinal.</li>
+                  <li><b>Na sua conta.</b> Responda todo mundo que comentar. Ignorar é jogar fora 150 curtidas por comentário.</li>
+                </ul>
+              </section>
+              <section id="algo-adulto" class="info-sec">
+                <h3 class="font-display">Conta +18: o campo minado</h3>
+                <p class="info-callout is-warn"><b>Marcar você mesma como sensível protege. Ser marcada pelo X pune.</b> Ligue "conteúdo sensível" nas configurações da conta antes de postar qualquer coisa +18. Quem não liga é pego pelo detector automático, e essa marcação tira a conta da busca sem volta.</p>
+                <ul>
+                  <li><b>Foto de perfil e capa sempre comportadas.</b> Qualquer coisa +18 nelas tira a conta da busca.</li>
+                  <li><b>Configuração.</b> Sensível ligado, conta verificada, "18+" na bio e o cadastro de criadora adulta do X quando estiver disponível para você.</li>
+                  <li><b>Punições.</b> 1º aviso, 2º 7 dias, 3º 30 dias e perda de monetização, 4º banimento.</li>
+                  <li><b>IA.</b> Conteúdo feito com IA precisa ser declarado. Deepfake de pessoa real sem consentimento é banimento e caso de polícia.</li>
+                  <li><b>Links.</b> Link na bio não pesa. No corpo do post, 30% a 50% menos alcance; em conta sem Premium, até 94%.</li>
+                  <li><b>Público fiel blinda.</b> Quem interage muito com você vê os seus posts mesmo com as penalidades. 500 a 1.000 fãs de verdade já sustentam a conta.</li>
+                  <li><b>O que funciona.</b> Entrar em assuntos de público grande (futebol, games, academia, reality), personalidade nos textos, pergunta que faz homem responder, rodízio do post fixado e o pico das 22h–1h.</li>
+                </ul>
+              </section>
+              <section id="algo-aquecer" class="info-sec">
+                <h3 class="font-display">Aquecer conta nova (4 semanas)</h3>
+                <ol class="steps">
+                  <li><b>Dia 0: preparar.</b> E-mail e telefone confirmados, foto e capa comportadas, bio, post fixado, Premium e "conteúdo sensível" ligado se for +18.</li>
+                  <li><b>Semana 1: só observar.</b> Nenhum post. Siga 5 a 10 contas do nicho e curta 10 a 20 posts por dia, lendo de verdade.</li>
+                  <li><b>Semana 2: aparecer de leve.</b> 1 ou 2 replies por dia, no máximo 10 a 15 seguidas por dia e 1 post forte na semana.</li>
+                  <li><b>Semanas 3 e 4: ligar.</b> 3 a 5 posts por dia e 10 a 20 replies. Ainda sem link e sem nada pesado.</li>
+                </ol>
+                <p class="info-callout is-warn"><b>Limites que não se quebram.</b> Até 30 a 50 seguidas por dia · até 300 seguindo antes de ter 300 seguidores · nunca passar de 2.500 seguindo · nada +18 nas 2 primeiras semanas · nada de postar sempre no mesmo minuto, todo dia.</p>
+              </section>
+              <section id="algo-rotina" class="info-sec">
+                <h3 class="font-display">Rotina de cada dia (conta aquecida)</h3>
+                <ol class="steps is-time">
+                  <li><time>7h40</time><b>Ler o feed</b> por 15 a 20 minutos, de verdade.</li>
+                  <li><time>8h</time><b>O melhor post do dia primeiro.</b> É ele que puxa a conta nas próximas horas.</li>
+                  <li><time>8h às 9h</time><b>Replies nas contas-alvo</b>, 20 a 50 por dia, nos primeiros 15 minutos do post delas.</li>
+                  <li><time>+2 h</time><b>Segundo post.</b> Pelo menos 2 horas entre um post original e outro.</li>
+                  <li><time>O dia todo</time><b>Responder todos os comentários.</b></li>
+                  <li><time>22h a 1h</time><b>Janela +18</b>, quando o público do nicho mais engaja.</li>
+                </ol>
+                <p class="text-sm text-mute">Volume que cresce: uns 95 posts por semana somando originais e replies. Mistura para conta +18: 40% personalidade (opinião, enquete), 30% provocação sem link, 20% divulgação (link só na reply do próprio post), 10% comunidade.</p>
+              </section>
+              <section id="algo-playbook" class="info-sec">
+                <h3 class="font-display">De 0 a 100 mil seguidores</h3>
+                <ol class="steps">
+                  <li><b>0 a 1 mil.</b> 70% replies e 30% posts próprios. Mire contas 2 a 10 vezes maiores que a sua, 20 a 50 replies por dia, nos primeiros 15 minutos.</li>
+                  <li><b>1 mil a 10 mil.</b> Um nicho só, uns 95 posts por semana, threads, comunidades. A métrica número 1 é quantas vezes salvam o seu post. Responda todo mundo.</li>
+                  <li><b>10 mil a 50 mil.</b> Citações em contas grandes, parcerias, Spaces, post fixado por 2 semanas, terça e quarta das 9h às 10h.</li>
+                  <li><b>50 mil a 100 mil.</b> Volume, divulgação cruzada entre as suas contas e público fiel que segue de volta.</li>
+                </ol>
+              </section>
+              <section id="algo-erros" class="info-sec">
+                <h3 class="font-display">Os erros que derrubam conta</h3>
+                <ul>
+                  <li><b class="is-bad">Graves.</b> Pedir curtida ou RT em troca de algo (engagement farming) · +18 sem marcação de sensível · seguir mais de 50 por dia · postar sempre no mesmo horário exato · link com conta sem Premium · 3 hashtags ou mais.</li>
+                  <li><b>Silenciosos.</b> Ignorar comentários · postar sem interagir · trocar de nicho · link no corpo do post · olhar só curtida · ficar sem Premium · comprar seguidores · começar com nicho amplo demais.</li>
+                  <li><b class="is-bad">No +18.</b> Só interagir com outras criadoras (o público fica fechado) · página de links só com conteúdo adulto · não ter a marcação de sensível.</li>
+                </ul>
+              </section>
+              <section id="algo-kpis" class="info-sec">
+                <h3 class="font-display">O que medir (e o que ignorar)</h3>
+                <p class="info-callout"><b>Importa.</b> Replies que você respondeu · quantas vezes salvaram · leitura de 2 min · cliques no perfil · citações · velocidade nos 30 minutos · quem segue de volta · o público fiel.</p>
+                <p><b>Engana.</b> Curtida sozinha (vale 0,5) · impressão sem interação (piora os próximos posts) · número de seguidores (mil fiéis valem mais que 100 mil parados) · repost sem comentário (a citação vale 3 vezes mais).</p>
+              </section>
+              <section id="algo-fontes" class="info-sec">
+                <h3 class="font-display">De onde vem isso</h3>
+                <p class="text-sm text-mute">Código aberto do algoritmo do X publicado em 2023 (home-mixer, visibilitylib, simclusters_v2, interaction_graph, earlybird e outros) e estudos com milhões de posts (Buffer, Metricool, Teract). O X muda regras sem avisar: trate os números como direção, não como lei.</p>
+              </section>
+            </div>
+          </div>
+        </section>
+        <section id="pane-rede" class="pane">
+          <div class="info-page">
+            <header class="info-hero">
+              <h2 class="font-display info-title">Rede de RT</h2>
+              <p class="info-lede">Suas contas se ajudando: a principal posta, as outras repostam ou citam nos primeiros 30 minutos e o post entra na janela que decide o alcance. Montada do jeito certo, ajuda; feita no automático, derruba todas juntas.</p>
+            </header>
+            <div class="rede-grid">
+              <section class="glow rede-map-card" aria-labelledby="rede-map-title">
+                <div class="rede-map-head">
+                  <h3 id="rede-map-title" class="font-display text-lg text-white">Suas contas agora</h3>
+                  <p id="rede-caption" class="text-xs text-mute">Lendo as suas contas…</p>
+                </div>
+                <div id="rede-map" class="rede-map" role="img" aria-label="Mapa das suas contas"></div>
+                <ul class="rede-legend">
+                  <li><i class="is-hub"></i>Principal: a que mais teve views no período do Dashboard</li>
+                  <li><i class="is-ok"></i>Pode entrar na rede</li>
+                  <li><i class="is-out"></i>Fora: ban, suspensa ou não encontrada</li>
+                </ul>
+              </section>
+              <section class="glow rede-rules" aria-labelledby="rede-rules-title">
+                <h3 id="rede-rules-title" class="font-display text-lg text-white">Regras para não derrubar todas</h3>
+                <ol class="steps">
+                  <li><b>Só conta saudável entra.</b> Conta com ghost ban, search ban ou suspensa sai da rede na hora: tudo que ela toca é puxado para baixo junto.</li>
+                  <li><b>Citação vale mais que repost.</b> Citar com um comentário seu entra em 3 sistemas e vale 3 vezes mais que o repost puro.</li>
+                  <li><b>Espalhe ao longo do dia.</b> Nada de todas as contas repostarem no mesmo minuto: o X lê isso como rede coordenada.</li>
+                  <li><b>Limite por dia.</b> Poucos reposts por conta por dia e só no que combina com o público dela.</li>
+                  <li><b>Horário de gente.</b> Das 7h às 23h, quando o seu público está acordado.</li>
+                  <li><b>Interação real.</b> Rede entre as suas contas ajuda a largar. Quem segura o post são as replies de gente de verdade.</li>
+                </ol>
+                <p class="info-callout is-warn"><b>Este painel não reposta por você.</b> Nenhuma conta sua é logada aqui, de propósito: é o que mantém elas longe de bloqueio. A rede é feita à mão, com o mapa e as regras acima.</p>
+              </section>
+            </div>
+          </div>
+        </section>
+        <section id="pane-ia" class="pane">
+          <div class="info-page">
+            <header class="info-hero">
+              <h2 class="font-display info-title">Suporte I.A</h2>
+              <p class="info-lede">Pergunte qualquer coisa sobre o X: viralizar, aquecer conta, evitar banimento, conta +18. Responde na hora com o guia do algoritmo e não gasta nenhuma chave.</p>
+            </header>
+            <section class="ia-chat glow" aria-label="Conversa com o Suporte I.A">
+              <ol id="ia-log" class="ia-log" aria-live="polite"></ol>
+              <div id="ia-suggest" class="ia-suggest" aria-label="Perguntas prontas"></div>
+              <form id="ia-form" class="ia-form">
+                <input id="ia-input" maxlength="300" placeholder="Ex.: como faço minha conta voltar na busca?" aria-label="Sua pergunta sobre o X" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-4 py-3 text-sm outline-none focus:border-neon">
+                <button type="submit" class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink">Perguntar</button>
+              </form>
+            </section>
+          </div>
+        </section>
+        <section id="pane-suporte" class="pane">
+          <div class="info-page">
+            <header class="info-hero">
+              <h2 class="font-display info-title">Suporte</h2>
+              <p class="info-lede">Fala direto comigo no WhatsApp. Escolha o assunto e a mensagem já vai escrita, é só enviar.</p>
+            </header>
+            <section class="support-card glow" aria-labelledby="support-title">
+              <div class="support-who">
+                <span class="support-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-7.4 12.7L3.5 20.5l4.4-1.1A8.5 8.5 0 1 0 12 3.5Z"/><path d="M9.2 8.6c.2-.5.5-.5.8-.5h.5c.2 0 .4 0 .5.4l.7 1.7c.1.2 0 .4-.1.6l-.5.6c-.1.1-.2.3 0 .5.5.9 1.3 1.7 2.3 2.2.2.1.4.1.5-.1l.6-.7c.2-.2.4-.2.6-.1l1.6.8c.2.1.3.2.3.4 0 .5-.2 1.2-.7 1.5-.6.4-1.5.5-2.7 0-1.9-.8-3.5-2.4-4.3-4.3-.5-1.1-.4-2.1.1-2.6Z"/></svg></span>
+                <div>
+                  <h3 id="support-title" class="font-display text-xl text-white">WhatsApp do suporte</h3>
+                  <p class="font-mono text-lg text-white">(64) 99601-3028</p>
+                </div>
+              </div>
+              <div id="support-topics" class="support-topics"></div>
+              <a id="support-open" class="support-cta" href="https://wa.me/5564996013028" target="_blank" rel="noopener noreferrer">Abrir o WhatsApp</a>
+            </section>
+          </div>
+        </section>
         <section id="pane-settings" class="pane">
           <div class="grid gap-4 lg:grid-cols-2">
           <form id="profile-form" class="glow space-y-3 rounded-3xl border border-neon/25 bg-card p-6">
@@ -643,6 +856,11 @@
     <button type="button" data-tab="archived" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
     <button type="button" data-tab="tools" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/></svg><span>Ferramentas</span></button>
     <button type="button" data-tab="settings" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
+    <p class="more-divider"><span>Info</span></p>
+    <button type="button" data-tab="algo" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5a2 2 0 0 1 2-2h11.5v14H7a2 2 0 0 0-2 2Z"/><path d="M5 19.5a2 2 0 0 0 2 2h11.5v-4"/><path d="M9 8h6M9 11h4"/></svg><span>Algoritmo do X</span></button>
+    <button type="button" data-tab="rede" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="m8.2 10.9 7.6-3.8M8.2 13.1l7.6 3.8"/></svg><span>Rede de RT</span></button>
+    <button type="button" data-tab="ia" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H11l-4.5 3.5V16a2 2 0 0 1-2-2Z"/><path d="m12 7.2.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9Z"/></svg><span>Suporte I.A</span></button>
+    <button type="button" data-tab="suporte" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 13.5V12a7.5 7.5 0 0 1 15 0v1.5"/><rect x="3.5" y="13" width="4" height="6" rx="1.5"/><rect x="16.5" y="13" width="4" height="6" rx="1.5"/><path d="M18.5 19a3 3 0 0 1-3 2.5H13"/></svg><span>Suporte</span></button>
   </div>
   <!-- Gaveta da conta: gráfico, melhores posts e histórico de status de uma conta. -->
   <div id="drawer" class="drawer" aria-hidden="true">
