@@ -50,6 +50,29 @@ def test_algorithm_guide_is_complete(html):
     assert 'id="weights-scale"' in html and "const WEIGHTS = [" in APP_JS
 
 
+def test_guide_keeps_everything_from_the_owner_reference(html):
+    """Tudo o que estava no ajudaabas.html do dono entrou no guia (reescrito)."""
+    for fact in ("Light Ranker", "reply 9", "1 curtida de alguém que não seja você", "pune também quem curtiu",
+                 "de 500 para 12 mil", "newsletter", "o próprio post já respondeu", "ACC Program", "3 links comportados",
+                 "União Europeia e Reino Unido", "mensagem direta só manual", "corrente de seguir", "Spaces",
+                 "Salvar é a nova curtida", "pelo menos 1 por conta", "Reputation.scala:36", "DoNotAmplify",
+                 "NotGraduated", "DownrankSpamReply", "40% personalidade"):
+        assert fact in html, fact
+    week = html[html.index('class="week-table"'):html.index("<p>Mistura")]
+    assert week.count('role="row"') == 8 and "Terça" in week
+
+
+def test_warm_up_follows_the_house_method(html):
+    section = html[html.index('id="algo-aquecer"'):html.index("</section>", html.index('id="algo-aquecer"'))]
+    assert "conta nova aquece de 5 a 7 dias, conta antiga de 3 a 7" in section
+    assert 'id="warm-nova"' in section and 'id="warm-antiga"' in section and "4 semanas" not in html
+    assert "Como aquecer uma conta antiga ou comprada?" in APP_JS and "Conta nova aquece de 5 a 7 dias" in APP_JS
+
+
+def test_rt_page_has_the_real_map_and_a_minimal_example(html):
+    assert 'id="rede-map"' in html and 'class="rede-demo"' in html and html.count("<animateMotion") == 3
+
+
 def test_support_goes_to_the_owner_whatsapp(html):
     assert 'href="https://wa.me/5564996013028"' in html and "(64) 99601-3028" in html
     assert 'const SUPPORT_NUMBER = "5564996013028";' in APP_JS

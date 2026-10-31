@@ -14,6 +14,7 @@ const PENDING = "Seu acesso está aguardando aprovação do administrador.";
 const ROLE_KEY = "user_role";
 const USER_KEY = "user_id";
 const ADMIN_TABS = ["users"];
+const INFO_TABS = ["algo", "rede", "ia", "suporte"];  // grupo "Info" da barra lateral
 try { const role = localStorage.getItem(ROLE_KEY); if (role) document.body.dataset.role = role; } catch { /* sem storage */ }
 // O navegador só oferece login salvo na tela de entrada: o resto dos campos não preenche sozinho.
 document.querySelectorAll("input:not([autocomplete]), textarea:not([autocomplete])").forEach((field) => {
@@ -351,6 +352,7 @@ function setTab(tab) {
   if (tab === "archived") loadArchived();
   if (tab === "radar") loadRadar();
   if (tab === "users") loadUsers();
+  document.querySelectorAll(".nav-divider, .more-divider").forEach((node) => node.classList.toggle("on", INFO_TABS.includes(tab)));
   if (tab === "algo") paintWeights();
   if (tab === "rede") paintRede();
   if (tab === "ia") startIa();
@@ -4535,21 +4537,47 @@ const WEIGHTS = [
   { label: "Bloqueio", value: -74, note: "−148 curtidas" },
   { label: "Denúncia", value: -369, note: "−738 curtidas" },
 ];
-let weightsPainted = false;
+function weightText(value) { return (value > 0 ? "+" : value < 0 ? "−" : "") + String(Math.abs(value)).replace(".", ","); }
 function paintWeights() {
-  if (weightsPainted) return;
-  weightsPainted = true;
   const top = Math.sqrt(369);
+  const values = [];
   document.getElementById("weights-scale").replaceChildren(...WEIGHTS.map((item) => {
     const li = el("li", "weight-row" + (item.value < 0 ? " is-neg" : ""));
     const bar = el("span", "weight-bar");
     bar.style.setProperty("--w", (Math.max(2.5, Math.sqrt(Math.abs(item.value)) / top * 100)).toFixed(1) + "%");
-    const value = (item.value > 0 ? "+" : "−") + String(Math.abs(item.value)).replace(".", ",");
-    li.append(el("span", "weight-label", item.label), bar, el("span", "weight-value font-mono", value), el("span", "weight-note", item.note));
+    const value = el("span", "weight-value font-mono", weightText(item.value));
+    values.push([value, item.value]);
+    li.append(el("span", "weight-label", item.label), bar, value, el("span", "weight-note", item.note));
     return li;
   }));
+  if (reduceMotion.matches) return;
+  const begin = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - begin) / 900);
+    const eased = 1 - Math.pow(1 - t, 3);
+    values.forEach(([node, target]) => {
+      const current = Math.abs(target) < 20 ? Math.round(target * eased * 10) / 10 : Math.round(target * eased);
+      node.textContent = t === 1 ? weightText(target) : weightText(current);
+    });
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
-// Índice do guia: rola suave até a parte e marca a que está na tela.
+// Índice do guia: rola suave até a parte e marca a que está na tela com um marcador que desliza.
+function moveTocInk(link) {
+  const toc = document.querySelector(".info-toc");
+  const ink = toc && toc.querySelector(".toc-ink");
+  if (!ink || !link) return;
+  ink.style.width = link.offsetWidth + "px";
+  ink.style.transform = "translateX(" + link.offsetLeft + "px)";
+  ink.classList.add("on");
+  const left = link.offsetLeft - (toc.clientWidth - link.offsetWidth) / 2;
+  toc.scrollTo({ left: Math.max(0, left), behavior: reduceMotion.matches ? "auto" : "smooth" });
+}
+(function addTocInk() {
+  const toc = document.querySelector(".info-toc");
+  if (toc) toc.prepend(el("span", "toc-ink"));
+})();
 document.querySelectorAll(".info-toc a").forEach((link) => link.addEventListener("click", (event) => {
   const target = document.querySelector(link.getAttribute("href"));
   if (!target) return;
@@ -4561,9 +4589,17 @@ if ("IntersectionObserver" in window) {
   const watcher = new IntersectionObserver((entries) => entries.forEach((entry) => {
     if (!entry.isIntersecting) return;
     tocLinks.forEach((link, id) => link.classList.toggle("on", id === entry.target.id));
+    moveTocInk(tocLinks.get(entry.target.id));
   }), { rootMargin: "-30% 0px -60% 0px" });
   document.querySelectorAll(".info-sec[id]").forEach((section) => watcher.observe(section));
 }
+
+// Aquecer conta: abas Conta nova (5 a 7 dias) e Conta antiga (3 a 7 dias).
+document.querySelectorAll("[data-warm]").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll("[data-warm]").forEach((other) => other.setAttribute("aria-selected", String(other === button)));
+  document.getElementById("warm-nova").hidden = button.dataset.warm !== "nova";
+  document.getElementById("warm-antiga").hidden = button.dataset.warm !== "antiga";
+}));
 
 // Rede de RT: as contas do dashboard em volta da principal (mais views), coloridas pela saúde.
 const REDE_OUT = new Set(["ghost_ban", "search_ban", "suspended", "not_found", "protected"]);
@@ -4626,9 +4662,12 @@ const IA_KB = [
       ["Poste no seu pico (para +18: 22h–1h; geral: terça e quarta, 9h–10h).", "Abra com uma pergunta que faça homem responder: enquete de dois lados, desafio ao ego, \"vocês homens…\".", "Responda cada comentário na primeira hora: cada reply respondida vale 150 curtidas.", "Sem link no corpo do post e no máximo 2 hashtags.", "Use as suas outras contas para citar com comentário logo no começo (veja Rede de RT)."],
       "No Radar, a parte Textos quentes tem perguntas prontas nesse formato."] },
   { q: "Como aquecer uma conta nova?", see: "algo-aquecer", keys: ["aquec", "conta nova", "criar conta", "comecar conta", "conta zerada", "primeira semana", "warm"],
-    a: ["Quatro semanas, sem pressa:",
-      ["Dia 0: e-mail e telefone confirmados, foto e capa comportadas, bio, post fixado, Premium e \"conteúdo sensível\" ligado se for +18.", "Semana 1: nenhum post. Siga 5 a 10 contas do nicho e curta 10 a 20 posts por dia.", "Semana 2: 1 ou 2 replies por dia, até 15 seguidas por dia e 1 post forte.", "Semanas 3 e 4: 3 a 5 posts e 10 a 20 replies por dia, ainda sem link."],
-      "Nada +18 nas duas primeiras semanas: a conta ainda está em teste (sandbox)."] },
+    a: ["Conta nova aquece de 5 a 7 dias:",
+      ["Dia 0: e-mail e telefone confirmados, foto e capa comportadas, bio, post fixado e \"conteúdo sensível\" ligado se for +18.", "Dias 1 e 2: só usar. Ler o feed, 10 a 20 curtidas e seguir 5 a 10 contas do nicho por dia. Nenhum post.", "Dias 3 e 4: 1 a 3 replies por dia, até 15 seguidas e 1 post simples, sem link.", "Dias 5 a 7: 2 a 3 posts por dia, 5 a 10 replies e o primeiro texto +18 no fim, com o sensível ligado."],
+      "Antes de soltar a conta, verifique em Operações → Verificar se não tem ghost ban nem search ban."] },
+  { q: "Como aquecer uma conta antiga ou comprada?", see: "algo-aquecer", keys: ["conta antiga", "conta comprada", "conta parada", "reativar", "trocar de nicho", "mudar nicho", "conta velha"],
+    a: ["Conta antiga aquece de 3 a 7 dias: perto de 3 se ficou pouco tempo parada e é do mesmo nicho, perto de 7 se ficou meses parada ou está trocando de nicho.",
+      ["Dia 0: confirmar e-mail e telefone, trocar foto, capa e bio para o nicho novo e ligar o sensível. Não apague posts em massa no mesmo dia.", "Dias 1 e 2: ler, curtir 10 a 20 e seguir 5 a 10 contas do nicho novo por dia.", "Dia 3: 3 a 5 replies e 1 ou 2 posts sem link.", "Dias 4 a 7, se precisar: 3 a 5 posts, 10 a 20 replies e conteúdo +18 com o sensível ligado."]] },
   { q: "Como evitar que a conta caia?", see: "algo-mata", keys: ["cair", "caiu", "ban", "banid", "suspens", "suspend", "derrub", "bloquead", "perder conta", "conta nao cair", "proteger conta", "seguranca"],
     a: ["O que mais derruba conta, em ordem:",
       ["Conteúdo +18 sem \"conteúdo sensível\" ligado: o X marca por você e isso é punição.", "Seguir mais de 30 a 50 por dia, ou passar de 2.500 seguindo.", "Pedir curtida ou repost em troca de algo (engagement farming).", "Link e divulgação em reply: é marcado como spam.", "Postar sempre no mesmo minuto, todo dia, e várias contas fazendo a mesma coisa juntas.", "Qualquer coisa com menor de idade: banimento direto."],
@@ -4710,7 +4749,7 @@ const IA_KB = [
   { q: "O que o painel faz por mim?", see: null, keys: ["painel", "xhenry", "saas", "o que voce faz", "funcionalidade", "ajuda do painel"],
     a: [["Dashboard: views, interações, melhor horário e crescimento das suas contas.", "Operações: pastas, contas e a verificação de ghost ban e search ban.", "Radar: o que está em alta no Brasil, ideias de post e textos quentes.", "Ferramentas: Verificar post (Grok) e Metadados (cópias com hash diferente).", "Alertas de post viralizando no celular."]] },
 ];
-const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
+const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como aquecer uma conta antiga ou comprada?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
 // Palavras que mostram que a pergunta é sobre o X (sem nenhuma delas e sem casar com a base, é fora do assunto).
 const IA_TOPIC = ["x", "twitter", "tweet", "post", "conta", "perfil", "seguidor", "algoritmo", "alcance", "feed", "rt", "reply", "bio", "story", "engaj", "viral", "ban", "nicho", "publico"];
 function iaTokens(text) { return plain(text).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean); }
@@ -4751,6 +4790,7 @@ function iaAsk(question) {
   const asked = question.trim();
   if (!asked) return;
   log.append(iaBubble("me", [asked]));
+  log.querySelectorAll(".is-typing").forEach((node) => node.remove());
   const item = IA_KB.find((entry) => entry.q === asked) || iaFind(asked);
   let reply;
   if (item) {
@@ -4772,9 +4812,16 @@ function iaAsk(question) {
       ? "Essa eu não tenho no guia ainda. Tente com outras palavras ou escolha uma das perguntas abaixo. Se for sobre o painel, fale com o Suporte no WhatsApp."
       : "Eu só respondo sobre o X: alcance, algoritmo, contas, banimento, conta +18 e o painel. Escolha uma pergunta abaixo ou reformule."]);
   }
-  log.append(reply);
-  paintIaSuggest(item);
-  reply.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" });
+  const typing = el("li", "ia-msg is-bot is-typing");
+  typing.setAttribute("aria-label", "Suporte I.A digitando");
+  typing.append(el("i"), el("i"), el("i"));
+  log.append(typing);
+  typing.scrollIntoView({ block: "nearest" });
+  setTimeout(() => {
+    typing.replaceWith(reply);
+    paintIaSuggest(item);
+    reply.scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth", block: "nearest" });
+  }, reduceMotion.matches ? 0 : 380 + Math.min(500, asked.length * 8));
 }
 function paintIaSuggest(after) {
   const host = document.getElementById("ia-suggest");

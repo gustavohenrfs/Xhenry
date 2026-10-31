@@ -19,10 +19,10 @@
   <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
-  <link rel="stylesheet" href="/static/css/tailwind.css?v=10">
-  <link rel="stylesheet" href="/static/css/styles.css?v=35">
+  <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
+  <link rel="stylesheet" href="/static/css/styles.css?v=36">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=51"></script>
+  <script defer src="/static/js/app.js?v=52"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -476,7 +476,7 @@
               <a href="#algo-fabrica">Como funciona</a><a href="#algo-ama">O que ele ama</a><a href="#algo-mata">O que ele mata</a><a href="#algo-camadas">Camadas invisíveis</a><a href="#algo-janelas">Janelas</a><a href="#algo-reply">Reply 150x</a><a href="#algo-adulto">Conta +18</a><a href="#algo-aquecer">Aquecer conta</a><a href="#algo-rotina">Rotina</a><a href="#algo-playbook">0 a 100 mil</a><a href="#algo-erros">Erros</a><a href="#algo-kpis">O que medir</a>
             </nav>
             <div class="info-doc">
-              <section id="algo-fabrica" class="info-sec">
+              <section class="info-sec glow" id="algo-fabrica">
                 <h3 class="font-display">Como o feed é montado</h3>
                 <p>O X funciona como uma fábrica em etapas. Nove esteiras paralelas juntam uns 1.500 candidatos para você, um porteiro rápido (Light Ranker) descarta os piores, um juiz pesado (Heavy Ranker) calcula 17 probabilidades para cada post, ajustes finos entram por cima e os 50 melhores chegam no feed.</p>
                 <ul>
@@ -485,8 +485,9 @@
                   <li><b>Ajustes.</b> Mais de 16 multiplicadores: link para fora do X derruba, assinatura Premium ajuda.</li>
                   <li><b>Mistura.</b> No máximo 2 posts seguidos de quem a pessoa não segue.</li>
                 </ul>
+                <p class="text-sm text-mute">Pesos do porteiro (Light Ranker), que decide quem nem chega no juiz: reply 9 · repost 1 · curtida 1 · clique no perfil 1 · clique no post 0,3 · link 0,1 · foto 0,03 · metade de um vídeo 0,01.</p>
               </section>
-              <section id="algo-ama" class="info-sec">
+              <section class="info-sec glow" id="algo-ama">
                 <h3 class="font-display">O que ele ama</h3>
                 <div class="tiers">
                   <div class="tier-row is-s"><span class="tier-mark">S</span><div><b>Explode o alcance</b><p>Reply que você responde (150 curtidas) · velocidade nos primeiros 30 minutos · seguir de volta quem engaja e prender a leitura.</p></div></div>
@@ -496,17 +497,17 @@
                   <div class="tier-row is-f"><span class="tier-mark">F</span><div><b>Jogado fora</b><p>Não responder quem comentou (perde o +75) · postar e sumir, sem interagir com ninguém.</p></div></div>
                 </div>
               </section>
-              <section id="algo-mata" class="info-sec">
+              <section class="info-sec glow" id="algo-mata">
                 <h3 class="font-display">O que ele mata</h3>
                 <div class="tiers is-bad">
-                  <div class="tier-row"><span class="tier-mark">1</span><div><b>Banimento</b><p>Qualquer coisa com menor de idade · listas negras de recomendação e de busca.</p></div></div>
-                  <div class="tier-row"><span class="tier-mark">2</span><div><b>Crítico</b><p>Conteúdo +18 sem a marcação de sensível (o robô do X detecta e marca por você, e isso é punição) · conta marcada como "não amplificar".</p></div></div>
-                  <div class="tier-row"><span class="tier-mark">3</span><div><b>Severo</b><p>Conta em período de teste (sandbox) · seguir mais de 2.500 perfis (a reputação cai 50 vezes) · post muito denunciado · reply com cara de spam.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">1</span><div><b>Banimento</b><p>Qualquer coisa com menor de idade · listas negras de recomendação e de busca (RecommendationsBlacklist, SearchBlacklist).</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">2</span><div><b>Crítico</b><p>Conteúdo +18 sem a marcação de sensível (o detector NsfwHighPrecision marca por você, e isso é punição: nsfwAdmin) · conta marcada como "não amplificar" (DoNotAmplify) · suspeita de conteúdo ilegal (LikelyIvs).</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">3</span><div><b>Severo</b><p>Conta em período de teste (NotGraduated) · seguir mais de 2.500 perfis (a reputação cai 50 vezes) · post muito denunciado (HighlyReportedTweet) · reply com cara de spam (DownrankSpamReply).</p></div></div>
                   <div class="tier-row"><span class="tier-mark">4</span><div><b>Alto</b><p>Conta sem Premium com link para fora (até 94% menos alcance) · o 4º post seguido do mesmo autor vale 25% · tom agressivo.</p></div></div>
                   <div class="tier-row"><span class="tier-mark">5</span><div><b>Moderado</b><p>3 hashtags ou mais (40% menos) · ser reply (×0,75) · aparecer para quem não te segue (×0,75).</p></div></div>
                 </div>
               </section>
-              <section id="algo-camadas" class="info-sec">
+              <section class="info-sec glow" id="algo-camadas">
                 <h3 class="font-display">As 3 camadas invisíveis</h3>
                 <ul>
                   <li><b>SimClusters.</b> O X divide o público em 145 mil "condomínios" e te coloca em um pelo perfil de <em>quem te segue</em>. Leva uns 7 dias para mudar. Quer outro público? Interaja e seja seguida por gente dele.</li>
@@ -514,50 +515,64 @@
                   <li><b>TweepCred.</b> Nota de 0 a 100 da conta. Celular verificado +0,5, e-mail e telefone +0,2, 30 dias de conta é o máximo de idade, Premium +10. Acima de 65 a conta escapa do filtro de spam da busca; abaixo de 40 vira "baixa qualidade". Seguir mais de 2.500 divide a nota por 50.</li>
                 </ul>
               </section>
-              <section id="algo-janelas" class="info-sec">
+              <section class="info-sec glow" id="algo-janelas">
                 <h3 class="font-display">As janelas que salvam ou matam um post</h3>
-                <p class="info-callout"><b>Os primeiros 30 minutos decidem.</b> É ali que o X escolhe se o post vai aparecer para quem não te segue nas próximas 24 horas. 100 curtidas em 6 horas valem mais que 100 em 48: velocidade ganha de volume. Conta cada pessoa uma vez só.</p>
+                <p class="info-callout"><b>Os primeiros 30 minutos decidem.</b> É ali que o X escolhe se o post vai aparecer para quem não te segue nas próximas 24 horas. 100 curtidas em 6 horas valem mais que 100 em 48: velocidade ganha de volume. Conta cada pessoa uma vez só, e o mínimo para entrar é 1 curtida de alguém que não seja você.</p>
                 <ul>
                   <li>O "Para você" olha as últimas 48 h; posts parecidos ficam no radar por 30 dias; a busca guarda uns 7 dias.</li>
-                  <li><b>"Ver menos disso".</b> Bloqueia o seu conteúdo para aquela pessoa por 14 dias e deixa uma penalidade que some aos poucos em 140 dias, sem aviso nenhum.</li>
+                  <li><b>"Ver menos disso".</b> Bloqueia o seu conteúdo para aquela pessoa por 14 dias e deixa uma penalidade que some aos poucos em 140 dias, sem aviso nenhum. E pune também quem curtiu aquele post.</li>
                   <li>Melhores horários no Brasil: terça e quarta, 9h–10h. Para conteúdo +18 o pico é 22h–1h.</li>
                 </ul>
               </section>
-              <section id="algo-reply" class="info-sec">
+              <section class="info-sec glow" id="algo-reply">
                 <h3 class="font-display">Reply: o sinal que quase ninguém usa</h3>
                 <ul>
                   <li><b>Onde.</b> Em contas que sabidamente respondem: observe uma semana antes de mirar.</li>
                   <li><b>Quando.</b> Entre 5 e 15 minutos depois do post. Depois de 30 minutos a chance cai muito.</li>
-                  <li><b>Como.</b> Pergunta que prova que você leu, contraponto, dado novo ou experiência sua. "Amei!" não vale nada.</li>
+                  <li><b>Como.</b> Pergunta que prova que você leu, contraponto, dado novo ou experiência sua. "Amei!", reply genérica ou pergunta que o próprio post já respondeu não valem nada.</li>
                   <li><b>Nunca.</b> Divulgação ou link na reply: o X marca como spam.</li>
                   <li><b>Responderam você?</b> Responda de volta. Cada volta da conversa soma sinal.</li>
                   <li><b>Na sua conta.</b> Responda todo mundo que comentar. Ignorar é jogar fora 150 curtidas por comentário.</li>
                 </ul>
               </section>
-              <section id="algo-adulto" class="info-sec">
+              <section class="info-sec glow" id="algo-adulto">
                 <h3 class="font-display">Conta +18: o campo minado</h3>
                 <p class="info-callout is-warn"><b>Marcar você mesma como sensível protege. Ser marcada pelo X pune.</b> Ligue "conteúdo sensível" nas configurações da conta antes de postar qualquer coisa +18. Quem não liga é pego pelo detector automático, e essa marcação tira a conta da busca sem volta.</p>
                 <ul>
                   <li><b>Foto de perfil e capa sempre comportadas.</b> Qualquer coisa +18 nelas tira a conta da busca.</li>
-                  <li><b>Configuração.</b> Sensível ligado, conta verificada, "18+" na bio e o cadastro de criadora adulta do X quando estiver disponível para você.</li>
+                  <li><b>Configuração.</b> Sensível ligado, conta verificada, "18+" na bio e o cadastro de criadora adulta do X (ACC Program; segundo o guia, obrigatório desde janeiro de 2026: sem ele a fiscalização é mais dura).</li>
                   <li><b>Punições.</b> 1º aviso, 2º 7 dias, 3º 30 dias e perda de monetização, 4º banimento.</li>
                   <li><b>IA.</b> Conteúdo feito com IA precisa ser declarado. Deepfake de pessoa real sem consentimento é banimento e caso de polícia.</li>
-                  <li><b>Links.</b> Link na bio não pesa. No corpo do post, 30% a 50% menos alcance; em conta sem Premium, até 94%.</li>
+                  <li><b>Links.</b> Link na bio não pesa. No corpo do post, 30% a 50% menos alcance; em conta sem Premium, até 94%. Na página de links (Linktree e parecidos), 3 links comportados para cada link adulto.</li>
+                  <li><b>Onde está o público.</b> União Europeia e Reino Unido cortam conteúdo adulto por verificação de idade. O foco é Brasil e América Latina, EUA e Canadá.</li>
                   <li><b>Público fiel blinda.</b> Quem interage muito com você vê os seus posts mesmo com as penalidades. 500 a 1.000 fãs de verdade já sustentam a conta.</li>
-                  <li><b>O que funciona.</b> Entrar em assuntos de público grande (futebol, games, academia, reality), personalidade nos textos, pergunta que faz homem responder, rodízio do post fixado e o pico das 22h–1h.</li>
+                  <li><b>O que funciona.</b> Entrar em assuntos de público grande (futebol, games, academia, anime, reality), personalidade nos textos, pergunta que faz homem responder, Spaces, mensagem direta só manual (nunca automática), corrente de seguir com outras criadoras 2 a 3 vezes por semana, rodízio do post fixado, threads contando a sua história e o pico das 22h–1h.</li>
                 </ul>
               </section>
-              <section id="algo-aquecer" class="info-sec">
-                <h3 class="font-display">Aquecer conta nova (4 semanas)</h3>
-                <ol class="steps">
-                  <li><b>Dia 0: preparar.</b> E-mail e telefone confirmados, foto e capa comportadas, bio, post fixado, Premium e "conteúdo sensível" ligado se for +18.</li>
-                  <li><b>Semana 1: só observar.</b> Nenhum post. Siga 5 a 10 contas do nicho e curta 10 a 20 posts por dia, lendo de verdade.</li>
-                  <li><b>Semana 2: aparecer de leve.</b> 1 ou 2 replies por dia, no máximo 10 a 15 seguidas por dia e 1 post forte na semana.</li>
-                  <li><b>Semanas 3 e 4: ligar.</b> 3 a 5 posts por dia e 10 a 20 replies. Ainda sem link e sem nada pesado.</li>
+              <section class="info-sec glow" id="algo-aquecer">
+                <h3 class="font-display">Aquecer conta</h3>
+                <p>O método da casa: <b>conta nova aquece de 5 a 7 dias, conta antiga de 3 a 7.</b> Conta antiga é a que já existe e estava parada, foi comprada ou está trocando de nicho. Quanto mais tempo ela ficou parada ou mais longe do nicho novo, mais perto dos 7 dias.</p>
+                <div class="warm-switch radar-seg" role="tablist" aria-label="Tipo de conta">
+                  <button type="button" role="tab" id="warm-tab-nova" aria-controls="warm-nova" aria-selected="true" data-warm="nova">Conta nova · 5 a 7 dias</button>
+                  <button type="button" role="tab" id="warm-tab-antiga" aria-controls="warm-antiga" aria-selected="false" data-warm="antiga">Conta antiga · 3 a 7 dias</button>
+                </div>
+                <ol id="warm-nova" class="steps warm-plan" role="tabpanel" aria-labelledby="warm-tab-nova">
+                  <li><b>Dia 0 · preparar.</b> E-mail e telefone confirmados, foto e capa comportadas, bio, post fixado, Premium se der e "conteúdo sensível" ligado antes de qualquer coisa +18.</li>
+                  <li><b>Dias 1 e 2 · só usar.</b> 15 a 20 minutos lendo o feed de verdade, 10 a 20 curtidas e 5 a 10 contas do nicho seguidas por dia. Nenhum post.</li>
+                  <li><b>Dias 3 e 4 · aparecer.</b> 1 a 3 replies por dia em contas do nicho (pergunta ou opinião, nunca link), até 10 a 15 seguidas por dia e 1 post simples, sem link.</li>
+                  <li><b>Dias 5 a 7 · ligar.</b> 2 a 3 posts por dia com 2 horas entre eles, 5 a 10 replies e responder todo mundo. O primeiro texto +18 entra no fim, com o sensível ligado e sem link no corpo.</li>
+                  <li><b>Pronta?</b> Verifique em Operações → Verificar: sem ghost ban nem search ban, pode subir para a rotina normal aos poucos.</li>
                 </ol>
-                <p class="info-callout is-warn"><b>Limites que não se quebram.</b> Até 30 a 50 seguidas por dia · até 300 seguindo antes de ter 300 seguidores · nunca passar de 2.500 seguindo · nada +18 nas 2 primeiras semanas · nada de postar sempre no mesmo minuto, todo dia.</p>
+                <ol id="warm-antiga" class="steps warm-plan" role="tabpanel" aria-labelledby="warm-tab-antiga" hidden>
+                  <li><b>Dia 0 · revisar.</b> Confirme e-mail e telefone, troque foto, capa e bio para o nicho novo (sempre comportadas), fixe um post novo e ligue o "conteúdo sensível" se for +18. Nada de apagar posts em massa no mesmo dia.</li>
+                  <li><b>Dias 1 e 2 · voltar a usar.</b> Ler o feed, curtir 10 a 20 posts e seguir 5 a 10 contas do nicho novo por dia, para o X entender o público que você quer.</li>
+                  <li><b>Dia 3 · aparecer.</b> 3 a 5 replies em contas do nicho e 1 ou 2 posts sem link. Conta que ficou pouco tempo parada e não mudou de nicho já pode seguir para a rotina.</li>
+                  <li><b>Dias 4 a 7 · ligar (parada há meses ou trocando de nicho).</b> 3 a 5 posts por dia, 10 a 20 replies, conteúdo +18 com o sensível ligado e responder todo mundo.</li>
+                  <li><b>Pronta?</b> Verifique em Operações → Verificar antes de pôr a conta na Rede de RT.</li>
+                </ol>
+                <p class="info-callout is-warn"><b>Limites que não se quebram.</b> Até 30 a 50 seguidas por dia · até 300 seguindo antes de ter 300 seguidores · nunca passar de 2.500 seguindo · nada +18 antes de terminar o aquecimento · nada de postar sempre no mesmo minuto, todo dia.</p>
               </section>
-              <section id="algo-rotina" class="info-sec">
+              <section class="info-sec glow" id="algo-rotina">
                 <h3 class="font-display">Rotina de cada dia (conta aquecida)</h3>
                 <ol class="steps is-time">
                   <li><time>7h40</time><b>Ler o feed</b> por 15 a 20 minutos, de verdade.</li>
@@ -567,33 +582,44 @@
                   <li><time>O dia todo</time><b>Responder todos os comentários.</b></li>
                   <li><time>22h a 1h</time><b>Janela +18</b>, quando o público do nicho mais engaja.</li>
                 </ol>
-                <p class="text-sm text-mute">Volume que cresce: uns 95 posts por semana somando originais e replies. Mistura para conta +18: 40% personalidade (opinião, enquete), 30% provocação sem link, 20% divulgação (link só na reply do próprio post), 10% comunidade.</p>
+                <p>Volume que cresce: uns 95 posts por semana somando originais e replies, mais o empurrão da sua rede. Terça e quarta são os melhores dias.</p>
+                <div class="week-table" role="table" aria-label="Ritmo da semana por conta">
+                  <div role="row" class="is-head"><span role="columnheader">Dia</span><span role="columnheader">Posts</span><span role="columnheader">Replies</span><span role="columnheader">RT da rede</span></div>
+                  <div role="row"><span role="cell">Segunda</span><span role="cell">4</span><span role="cell">50</span><span role="cell">12</span></div>
+                  <div role="row" class="is-best"><span role="cell">Terça</span><span role="cell">5</span><span role="cell">60</span><span role="cell">14</span></div>
+                  <div role="row" class="is-best"><span role="cell">Quarta</span><span role="cell">5</span><span role="cell">60</span><span role="cell">14</span></div>
+                  <div role="row"><span role="cell">Quinta</span><span role="cell">4</span><span role="cell">50</span><span role="cell">12</span></div>
+                  <div role="row"><span role="cell">Sexta</span><span role="cell">4</span><span role="cell">45</span><span role="cell">12</span></div>
+                  <div role="row"><span role="cell">Sábado</span><span role="cell">3</span><span role="cell">35</span><span role="cell">8</span></div>
+                  <div role="row"><span role="cell">Domingo</span><span role="cell">3</span><span role="cell">30</span><span role="cell">8</span></div>
+                </div>
+                <p>Mistura para conta +18: 40% personalidade (opinião, enquete, provocação), 30% prévia sugestiva sem link, 20% divulgação (link só na reply do próprio post), 10% comunidade (reposts, marcos).</p>
               </section>
-              <section id="algo-playbook" class="info-sec">
+              <section class="info-sec glow" id="algo-playbook">
                 <h3 class="font-display">De 0 a 100 mil seguidores</h3>
                 <ol class="steps">
-                  <li><b>0 a 1 mil.</b> 70% replies e 30% posts próprios. Mire contas 2 a 10 vezes maiores que a sua, 20 a 50 replies por dia, nos primeiros 15 minutos.</li>
+                  <li><b>0 a 1 mil.</b> 70% replies e 30% posts próprios. Mire contas 2 a 10 vezes maiores que a sua, 20 a 50 replies por dia, nos primeiros 15 minutos. Caso real: de 500 para 12 mil seguidores em 6 meses só com isso.</li>
                   <li><b>1 mil a 10 mil.</b> Um nicho só, uns 95 posts por semana, threads, comunidades. A métrica número 1 é quantas vezes salvam o seu post. Responda todo mundo.</li>
                   <li><b>10 mil a 50 mil.</b> Citações em contas grandes, parcerias, Spaces, post fixado por 2 semanas, terça e quarta das 9h às 10h.</li>
-                  <li><b>50 mil a 100 mil.</b> Volume, divulgação cruzada entre as suas contas e público fiel que segue de volta.</li>
+                  <li><b>50 mil a 100 mil.</b> Volume, divulgação cruzada entre as suas contas, newsletter e público fiel que segue de volta.</li>
                 </ol>
               </section>
-              <section id="algo-erros" class="info-sec">
+              <section class="info-sec glow" id="algo-erros">
                 <h3 class="font-display">Os erros que derrubam conta</h3>
                 <ul>
                   <li><b class="is-bad">Graves.</b> Pedir curtida ou RT em troca de algo (engagement farming) · +18 sem marcação de sensível · seguir mais de 50 por dia · postar sempre no mesmo horário exato · link com conta sem Premium · 3 hashtags ou mais.</li>
                   <li><b>Silenciosos.</b> Ignorar comentários · postar sem interagir · trocar de nicho · link no corpo do post · olhar só curtida · ficar sem Premium · comprar seguidores · começar com nicho amplo demais.</li>
-                  <li><b class="is-bad">No +18.</b> Só interagir com outras criadoras (o público fica fechado) · página de links só com conteúdo adulto · não ter a marcação de sensível.</li>
+                  <li><b class="is-bad">No +18.</b> Só interagir com outras criadoras (o público fica fechado) · página de links só com conteúdo adulto · não ter a marcação de sensível · mirar União Europeia e Reino Unido · ficar fora do ACC Program.</li>
                 </ul>
               </section>
-              <section id="algo-kpis" class="info-sec">
+              <section class="info-sec glow" id="algo-kpis">
                 <h3 class="font-display">O que medir (e o que ignorar)</h3>
-                <p class="info-callout"><b>Importa.</b> Replies que você respondeu · quantas vezes salvaram · leitura de 2 min · cliques no perfil · citações · velocidade nos 30 minutos · quem segue de volta · o público fiel.</p>
+                <p class="info-callout"><b>Salvar é a nova curtida.</b> Importa: replies que você respondeu (meta: pelo menos 1 por conta por dia) · quantas vezes salvaram · leitura de 2 min · cliques no perfil · citações · velocidade nos 30 minutos · quem segue de volta · o público fiel.</p>
                 <p><b>Engana.</b> Curtida sozinha (vale 0,5) · impressão sem interação (piora os próximos posts) · número de seguidores (mil fiéis valem mais que 100 mil parados) · repost sem comentário (a citação vale 3 vezes mais).</p>
               </section>
-              <section id="algo-fontes" class="info-sec">
+              <section class="info-sec glow" id="algo-fontes">
                 <h3 class="font-display">De onde vem isso</h3>
-                <p class="text-sm text-mute">Código aberto do algoritmo do X publicado em 2023 (home-mixer, visibilitylib, simclusters_v2, interaction_graph, earlybird e outros) e estudos com milhões de posts (Buffer, Metricool, Teract). O X muda regras sem avisar: trate os números como direção, não como lei.</p>
+                <p class="text-sm text-mute">Código aberto do algoritmo do X publicado em 2023 (home-mixer, visibilitylib, simclusters_v2, interaction_graph, earlybird e outros) e estudos com milhões de posts (Buffer, Metricool, Teract). Onde está cada número no código: janela de 24 h (RecosConfig.scala:33) · fora da rede ×0,75 (ScoredTweetsParam.scala:466) · +75 da reply respondida (PredictedScoreFeature.scala:40-45) · nsfwUser e nsfwAdmin (Rules.scala:52, 64, 70, 76) · TweepCred 65 (earlybird.thrift:410) · ÷50 com 2.500 seguindo (Reputation.scala:36). O X muda regras sem avisar: trate os números como direção, não como lei.</p>
               </section>
             </div>
           </div>
@@ -616,6 +642,21 @@
                   <li><i class="is-ok"></i>Pode entrar na rede</li>
                   <li><i class="is-out"></i>Fora: ban, suspensa ou não encontrada</li>
                 </ul>
+              </section>
+              <section class="glow rede-example" aria-labelledby="rede-example-title">
+                <h3 id="rede-example-title" class="font-display text-lg text-white">Como funciona, em 1 minuto</h3>
+                <p class="text-xs text-mute">Exemplo com 4 contas. A principal posta e as outras entram em horários diferentes dentro dos 30 minutos que decidem o alcance.</p>
+                <svg class="rede-demo" viewBox="0 0 320 170" role="img" aria-label="Exemplo: a principal posta, a conta B cita em 5 minutos, a C reposta em 12 e a D cita em 25">
+                  <path class="demo-line" d="M160 85 L52 40"/><path class="demo-line" d="M160 85 L268 40"/><path class="demo-line" d="M160 85 L160 152"/>
+                  <circle class="demo-pulse p1" r="3.5"><animateMotion dur="6s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;.08;.28;1" calcMode="linear" path="M160 85 L52 40"/></circle>
+                  <circle class="demo-pulse p2" r="3.5"><animateMotion dur="6s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;.32;.52;1" calcMode="linear" path="M160 85 L268 40"/></circle>
+                  <circle class="demo-pulse p3" r="3.5"><animateMotion dur="6s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;.56;.76;1" calcMode="linear" path="M160 85 L160 152"/></circle>
+                  <g class="demo-node is-hub"><circle cx="160" cy="85" r="19"/><text x="160" y="89">A</text></g>
+                  <g class="demo-node n1"><circle cx="52" cy="40" r="13"/><text x="52" y="44">B</text></g>
+                  <g class="demo-node n2"><circle cx="268" cy="40" r="13"/><text x="268" y="44">C</text></g>
+                  <g class="demo-node n3"><circle cx="160" cy="152" r="13"/><text x="160" y="156">D</text></g>
+                  <text class="demo-tag" x="52" y="16">cita · 5 min</text><text class="demo-tag" x="268" y="16">reposta · 12 min</text><text class="demo-tag" x="226" y="160">cita · 25 min</text><text class="demo-tag is-hub" x="104" y="120">posta · 0 min</text>
+                </svg>
               </section>
               <section class="glow rede-rules" aria-labelledby="rede-rules-title">
                 <h3 id="rede-rules-title" class="font-display text-lg text-white">Regras para não derrubar todas</h3>
