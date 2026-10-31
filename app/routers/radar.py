@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app import radar, radar_hot, radar_ideas, seasonal
 from app.database import SessionLocal, get_db
-from app.models import HotText, RadarTerm, User
+from app.models import HotSource, HotText, RadarTerm, User
 from app.radar_sources import norm as norm_of
 from app.routers.auth import approved_user
 from app.services import as_utc, now_utc, user_settings, xai_key
@@ -49,7 +49,6 @@ def _refresh_in_background() -> bool:
     return True
 
 
-REGION = Query("br", pattern="^(br|world)$")
 HEAT = Query("leve", pattern="^(leve|quente)$")
 SEED = Query(0, ge=0, le=10_000)
 
@@ -60,7 +59,6 @@ class TermIn(BaseModel):
 
 class IdeasIn(BaseModel):
     norm: str = Field(min_length=1, max_length=400)
-    region: str = Field(default="br", pattern="^(br|world)$")
     heat: str = Field(default="leve", pattern="^(leve|quente)$")
 
 
@@ -79,9 +77,9 @@ def with_my_terms(db: Session, user: User, payload: dict[str, Any]) -> dict[str,
 
 
 @router.get("/api/radar")
-def read_radar(region: str = REGION, heat: str = HEAT, user: User = Depends(approved_user),
+def read_radar(heat: str = HEAT, user: User = Depends(approved_user),
                db: Session = Depends(get_db)) -> dict[str, Any]:
-    payload = with_my_terms(db, user, radar.board(db, region=region, heat=heat))
+    payload = with_my_terms(db, user, radar.board(db, heat=heat))
     updated = payload["updated_at"]
     stale = updated is None or now_utc() - as_utc(radar.parse_iso(updated)) > STALE
     payload["refreshing"] = bool(stale and radar.radar_enabled() and _refresh_in_background())
@@ -89,19 +87,19 @@ def read_radar(region: str = REGION, heat: str = HEAT, user: User = Depends(appr
 
 
 @router.post("/api/radar/refresh")
-def refresh_radar(region: str = REGION, heat: str = HEAT, user: User = Depends(approved_user),
+def refresh_radar(heat: str = HEAT, user: User = Depends(approved_user),
                   db: Session = Depends(get_db)) -> dict[str, Any]:
     if not radar.refresh_manual(db):
         raise HTTPException(429, "O radar acabou de ser atualizado. Tente de novo em 2 minutos.")
-    payload = with_my_terms(db, user, radar.board(db, region=region, heat=heat))
+    payload = with_my_terms(db, user, radar.board(db, heat=heat))
     payload["refreshing"] = False
     return payload
 
 
 @router.get("/api/radar/topic")
-def read_topic(norm: str = Query(..., min_length=1, max_length=400), region: str = REGION, heat: str = HEAT,
+def read_topic(norm: str = Query(..., min_length=1, max_length=400), heat: str = HEAT,
                db: Session = Depends(get_db)) -> dict[str, Any]:
-    detail = radar.topic_detail(db, norm, region, heat)
+    detail = radar.topic_detail(db, norm, heat=heat)
     if detail is None:
         raise HTTPException(404, "Esse assunto saiu do radar.")
     return detail
@@ -152,9 +150,9 @@ def engaging_posts(payload: TermIn, user: User = Depends(approved_user), db: Ses
         raise HTTPException(502, "A busca no Apify falhou: " + str(exc)) from exc
 
 
-def idea_subject(db: Session, norm: str, region: str) -> tuple[dict[str, Any], str | None]:
+def idea_subject(db: Session, norm: str) -> tuple[dict[str, Any], str | None]:
     """O assunto (ou a data sazonal) para as ideias de post; 404 se saiu do radar."""
-    topic = radar.topic_detail(db, norm, region)
+    topic = radar.topic_detail(db, norm)
     if topic is not None:
         return topic, None
     key = norm_of(norm)
@@ -165,10 +163,10 @@ def idea_subject(db: Session, norm: str, region: str) -> tuple[dict[str, Any], s
 
 
 @router.get("/api/radar/ideas")
-def read_ideas(norm: str = Query(..., min_length=1, max_length=400), region: str = REGION, heat: str = HEAT,
+def read_ideas(norm: str = Query(..., min_length=1, max_length=400), heat: str = HEAT,
                seed: int = SEED, db: Session = Depends(get_db)) -> dict[str, Any]:
     """Ideias de post grátis (modelos por tipo de assunto). seed>0 sorteia outra combinação. Sensível = sem ideias."""
-    topic, kind = idea_subject(db, norm, region)
+    topic, kind = idea_subject(db, norm)
     return {"norm": topic["norm"], "title": topic["title"], "blocked": bool(topic.get("blocked")),
             "ideas": radar_ideas.ideas(topic, kind, heat=heat, seed=seed)}
 
@@ -176,14 +174,14 @@ def read_ideas(norm: str = Query(..., min_length=1, max_length=400), region: str
 @router.post("/api/radar/ideas/grok")
 def grok_ideas(payload: IdeasIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Mais ideias com o Grok, pela chave xAI do usuário."""
-    topic, _ = idea_subject(db, payload.norm, payload.region)
+    topic, _ = idea_subject(db, payload.norm)
     if topic.get("blocked"):
         raise HTTPException(400, "Assunto sensível (morte, tragédia, crime, doença ou criança): sem ideias de post.")
     key = xai_key(db, user)
     if not key:
         raise HTTPException(400, "Cole a sua chave da xAI em Configurações para pedir ideias ao Grok.")
     try:
-        prompt = radar_ideas.grok_prompt(topic, payload.heat, radar_hot.examples(db))
+        prompt = radar_ideas.grok_prompt(topic, payload.heat, radar_hot.examples(db, owner_id=user.id))
         lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, prompt), limit=8)
     except ValueError as exc:
         raise HTTPException(502, str(exc)) from exc
@@ -194,20 +192,52 @@ def grok_ideas(payload: IdeasIn, user: User = Depends(approved_user), db: Sessio
 
 # ---- Radar hot: textos quentes do nicho (+18, público masculino) ----
 
+class SourceIn(BaseModel):
+    handle: str = Field(min_length=1, max_length=200)
+
+
 @router.get("/api/radar/hot")
-def hot_library(fmt: str | None = Query(None, pattern="^[a-z]{3,16}$"), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """A biblioteca de textos quentes (grátis: só lê o banco)."""
-    return radar_hot.library(db, fmt)
+def hot_library(fmt: str | None = Query(None, pattern="^[a-z]{3,16}$"), user: User = Depends(approved_user),
+                db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Textos das contas do nicho, os seus que mais bombaram e a última caçada (grátis: só lê o banco)."""
+    return radar_hot.library(db, user.id, fmt)
 
 
 @router.post("/api/radar/hot/hunt")
 def hot_hunt(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Começa a caçada no Apify de quem clicou (em segundo plano: a tela acompanha por GET /api/radar/hot).
-    Dentro de 2 h de uma caçada que trouxe textos, devolve a biblioteca sem gastar."""
+    """Começa a caçada das contas do nicho no Apify de quem clicou (em segundo plano: a tela acompanha por
+    GET /api/radar/hot). Logo depois de uma caçada boa com as mesmas contas, devolve a biblioteca sem gastar."""
     try:
         return radar_hot.start_hunt(user.id, user_settings(db, user.id).apify_token, db)
-    except PermissionError as exc:
+    except (PermissionError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/api/radar/hot/sources", status_code=201)
+def add_source(payload: SourceIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Conta do nicho para caçar ("@fulana" ou o link do perfil)."""
+    handle = radar_hot.clean_handle(payload.handle)
+    if handle is None:
+        raise HTTPException(400, "Escreva a @ da conta (só letras, números e _, até 15) ou cole o link do perfil.")
+    current = radar_hot.sources_of(db, user.id)
+    if handle.lower() in {h.lower() for h in current}:
+        raise HTTPException(409, "Essa conta já está na lista.")
+    if len(current) >= radar_hot.MAX_SOURCES:
+        raise HTTPException(400, f"Limite de {radar_hot.MAX_SOURCES} contas. Remova uma para adicionar outra.")
+    db.add(HotSource(owner_id=user.id, handle=handle))
+    db.commit()
+    return {"handle": handle, "sources": radar_hot.sources_of(db, user.id)}
+
+
+@router.delete("/api/radar/hot/sources/{handle}")
+def delete_source(handle: str, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    row = db.scalars(select(HotSource).where(HotSource.owner_id == user.id,
+                                             func.lower(HotSource.handle) == handle.lstrip("@").lower())).first()
+    if row is None:
+        raise HTTPException(404, "Conta não encontrada na sua lista.")
+    db.delete(row)
+    db.commit()
+    return {"sources": radar_hot.sources_of(db, user.id)}
 
 
 @router.get("/api/radar/hot/questions")
@@ -239,7 +269,7 @@ def hot_grok(payload: HotGrokIn, user: User = Depends(approved_user), db: Sessio
         topics, _, _ = radar.build_topics(db)
         hooks = [t["title"] for t in topics if not t["blocked"] and t["engage"] >= 55][:5]
     fmt = payload.fmt if payload.fmt in radar_hot.LABELS else None
-    prompt = radar_ideas.hot_prompt(payload.heat, radar_hot.examples(db), source, hooks, fmt, uuid4().hex[:6])
+    prompt = radar_ideas.hot_prompt(payload.heat, radar_hot.examples(db, owner_id=user.id), source, hooks, fmt, uuid4().hex[:6])
     try:
         lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, prompt), limit=radar_ideas.HOT_COUNT)
     except ValueError as exc:

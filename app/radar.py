@@ -35,13 +35,12 @@ from app.models import DEFAULT_TZ, RadarItem, RadarPostCache, RadarSnapshot, Rad
 
 log = logging.getLogger("xhenry")
 
-SOURCES = ("x", "google", "news", "x_world", "google_world")
-INTERVALS = {"x": 15, "google": 15, "news": 30, "x_world": 15, "google_world": 15}  # minutos
+SOURCES = ("x", "google", "news")  # só Brasil (o Internacional saiu a pedido do dono)
+INTERVALS = {"x": 15, "google": 15, "news": 30}  # minutos
 WEIGHTS = {"x": 45, "google": 35, "news": 20}
 # Cada região usa as suas leituras com os nomes genéricos da tela (x, google, news).
 REGIONS = {
     "br": {"x": "x", "google": "google", "news": "news"},
-    "world": {"x": "x_world", "google": "google_world"},
 }
 # Nunca bom pra engajar (e nunca ganha ideia de post): morte, tragédia, crime, doença e qualquer coisa com criança.
 BLOCK_RE = re.compile(

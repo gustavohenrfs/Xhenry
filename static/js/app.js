@@ -3525,23 +3525,20 @@ let radarFilter = "";
 let radarRetry = 0;
 let radarAll = false;  // lista inteira ou só os 20 primeiros
 // Região (Brasil ou Internacional) e o filtro "Bom pra engajar" ficam lembrados neste navegador.
-let radarRegion = "br";
 let radarEngage = true;
 let radarHookAt = 0;  // qual ideia do gancho está na tela ("Outra ideia" gira)
 // Nível das ideias de post: "quente" (tom direto do nicho +18) ou "leve" (sugestivo). Padrão: quente.
 let radarHeat = "quente";
 try {
   radarHeat = localStorage.getItem("radar_heat") === "leve" ? "leve" : "quente";
-  radarRegion = localStorage.getItem("radar_region") === "world" ? "world" : "br";
   radarEngage = localStorage.getItem("radar_engage") !== "off";
-  if (radarEngage) radarRegion = "br";
 } catch { /* sem storage */ }
 const ENGAGE_MIN = 55;
 function radarRemember(key, value) { try { localStorage.setItem(key, value); } catch { /* sem storage */ } }
 const RADAR_FIRST = 20;
 async function loadRadar({ silent = false } = {}) {
   try {
-    const data = await api("/api/radar?region=" + radarRegion + "&heat=" + radarHeat);
+    const data = await api("/api/radar?heat=" + radarHeat);
     paintRadar(data);
     if (!hotData || hotData.hunting) loadHot();
     // O servidor começou uma leitura (dados velhos ou nenhum): olha de novo em 20 s, até 3 vezes.
@@ -3691,14 +3688,8 @@ function paintRadarTopics() {
 }
 function paintRadarControls() {
   // "Bom pra engajar" é o nicho (público masculino) e só do Brasil: Internacional fica travado com ele ligado.
-  const world = document.querySelector('[data-radar-region="world"]');
-  world.disabled = radarEngage;
-  world.title = radarEngage ? "Desligue \"Bom pra engajar\" para ver o Internacional" : "";
-  document.getElementById("radar-heading").textContent = radarRegion === "world" ? "Agora no mundo" : "Agora no Brasil";
-  document.querySelectorAll("[data-radar-region]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.radarRegion === radarRegion)));
   document.getElementById("radar-engage").checked = radarEngage;
   document.querySelectorAll("[data-radar-heat]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.radarHeat === radarHeat)));
-  document.getElementById("radar-terms-card").hidden = radarRegion === "world";
 }
 function paintRadar(data) {
   radarData = data;
@@ -3725,21 +3716,11 @@ function paintRadar(data) {
 }
 async function refreshRadar() {
   try {
-    paintRadar(await api("/api/radar/refresh?region=" + radarRegion + "&heat=" + radarHeat, { method: "POST" }));
+    paintRadar(await api("/api/radar/refresh?heat=" + radarHeat, { method: "POST" }));
     toast("Radar atualizado.");
   } catch (error) { toast(error.message || "Não atualizou o radar."); }
 }
 document.getElementById("radar-refresh").addEventListener("click", refreshRadar);
-document.querySelectorAll("[data-radar-region]").forEach((button) => button.addEventListener("click", () => {
-  if (radarRegion === button.dataset.radarRegion) return;
-  radarRegion = button.dataset.radarRegion;
-  radarRemember("radar_region", radarRegion);
-  radarFilter = "";
-  radarAll = false;
-  radarHookAt = 0;
-  paintRadarControls();
-  loadRadar();
-}));
 document.querySelectorAll("[data-radar-heat]").forEach((button) => button.addEventListener("click", () => {
   if (radarHeat === button.dataset.radarHeat) return;
   radarHeat = button.dataset.radarHeat;
@@ -3754,13 +3735,6 @@ document.getElementById("radar-engage").addEventListener("change", (event) => {
   radarEngage = event.target.checked;
   radarRemember("radar_engage", radarEngage ? "on" : "off");
   radarAll = false;
-  if (radarEngage && radarRegion !== "br") {
-    radarRegion = "br";
-    radarRemember("radar_region", "br");
-    paintRadarControls();
-    loadRadar();
-    return;
-  }
   paintRadarControls();
   if (radarData) paintRadarTopics();
 });
@@ -3834,7 +3808,7 @@ function setCostLabel(button, text) {
 }
 // ---------- Textos quentes ----------
 // Três blocos: Perguntas quentes (banco grátis, sem assunto, com as usadas marcadas neste navegador),
-// Textos novos com Grok (chave xAI) e Caçados no X (Apify de quem clicou; a caçada roda em segundo plano
+// Textos novos com Grok (chave xAI) e Textos que bombaram (seus posts e contas do nicho; a caçada roda em segundo plano
 // e a tela acompanha). Textos de terceiros entram só por textContent.
 const HOT_REASONS = { vazio: "sem resultado", repetido: "repetidos", repost: "reposts", resposta: "respostas", curto: "curtos",
   proibido: "conteúdo proibido", link_ou_venda: "com link ou venda", poucas_curtidas: "com poucas curtidas" };
@@ -3995,36 +3969,69 @@ async function askHotGrok(button, out, options) {
   setCostLabel(button, label);
   button.disabled = false;
 }
-// Caçados no X.
+// Textos que bombaram: "Seus posts" (grátis, do que o robô leu) e "Contas do nicho" (Apify, por perfil).
+let hotTab = "mine";
+try { hotTab = localStorage.getItem("hot_tab") === "niche" ? "niche" : "mine"; } catch { /* sem storage */ }
 async function loadHot() {
   try {
     paintHot(await api("/api/radar/hot" + (hotFormat ? "?fmt=" + hotFormat : "")));
   } catch (error) {
-    document.getElementById("hot-status").textContent = error.message || "Não leu a biblioteca de textos quentes.";
+    document.getElementById("hot-status").textContent = error.message || "Não leu os textos quentes.";
   }
   if (!hotBank) loadHotBank();
 }
 function hotStatus(data) {
-  if (data.hunting) return "Caçando no X agora… pode levar até 5 minutos. Pode continuar usando o painel.";
-  const parts = [data.total ? data.total + " textos na biblioteca" : "Biblioteca vazia"];
+  if (data.hunting) return "Caçando agora… pode levar alguns minutos. Pode continuar usando o painel.";
+  const parts = [data.total ? data.total + " textos guardados das contas do nicho" : "Nenhum texto caçado ainda"];
   const last = data.last || {};
   if (data.hunted_at) {
     if (last.error) parts.push("a última caçada falhou " + agoText(data.hunted_at) + ": " + last.error);
     else {
-      parts.push("última caçada " + agoText(data.hunted_at) + ": o X devolveu " + (last.read || 0) + " posts, " + (last.kept || 0) + " serviram, " + (last.new || 0) + " novos");
+      parts.push("última caçada " + agoText(data.hunted_at) + ": " + (last.read || 0) + " posts lidos, " + (last.kept || 0) + " serviram, " + (last.new || 0) + " novos");
+      const empty = Object.entries(last.per_handle || {}).filter(([, n]) => !n).map(([handle]) => "@" + handle);
+      if (empty.length) parts.push("sem post nenhum (confira a @): " + empty.join(", "));
       const out = Object.entries(last.reasons || {}).filter(([, n]) => n).map(([key, n]) => n + " " + (HOT_REASONS[key] || key));
       if (out.length) parts.push("fora: " + out.join(", "));
     }
   }
-  if (data.next_hunt_at) parts.push("até " + new Date(data.next_hunt_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + " caçar mostra a biblioteca sem gastar crédito");
+  if (data.next_hunt_at) parts.push("até " + new Date(data.next_hunt_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + " caçar de novo só mostra o que já tem (sem gastar)");
   return parts.join(" · ");
+}
+function paintHotTab() {
+  document.querySelectorAll("[data-hot-tab]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.hotTab === hotTab)));
+  document.getElementById("hot-niche").hidden = hotTab !== "niche";
+  document.getElementById("hot-mine-note").hidden = hotTab !== "mine";
+}
+function paintHotSources(sources, max) {
+  const host = document.getElementById("hot-sources");
+  host.replaceChildren(...sources.map((handle) => {
+    const li = el("li", "hot-source");
+    const link = el("a", "", "@" + handle);
+    link.href = "https://x.com/" + encodeURIComponent(handle);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    const remove = el("button", "radar-term-x", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Tirar @" + handle + " da lista");
+    remove.addEventListener("click", async () => {
+      try {
+        await api("/api/radar/hot/sources/" + encodeURIComponent(handle), { method: "DELETE" });
+        loadHot();
+      } catch (error) { toast(error.message || "Não tirou a conta."); }
+    });
+    li.append(link, remove);
+    return li;
+  }));
+  if (!sources.length) host.replaceChildren(el("li", "text-[11px] text-mute", "Nenhuma conta ainda. Comece com 5 a 10 contas do nicho que você vê bombando (até " + max + ")."));
 }
 function paintHot(data) {
   const wasHunting = hotData && hotData.hunting;
   hotData = data;
+  paintHotTab();
+  paintHotSources(data.sources || [], data.max_sources || 25);
   const button = document.getElementById("hot-hunt");
-  button.disabled = !!data.hunting;
-  setCostLabel(button, data.hunting ? "Caçando no X…" : "Caçar textos quentes");
+  button.disabled = !!data.hunting || !(data.sources || []).length;
+  setCostLabel(button, data.hunting ? "Caçando…" : "Caçar textos quentes");
   document.getElementById("hot-status").textContent = hotStatus(data);
   clearTimeout(hotPoll);
   if (data.hunting) hotPoll = setTimeout(() => { if (state.tab === "radar") loadHot(); }, 5000);
@@ -4033,24 +4040,31 @@ function paintHot(data) {
     if (last.error) toast("A caçada falhou: " + last.error, "error");
     else toast("Caçada pronta: " + (last.new || 0) + " textos novos.", (last.kept || 0) ? "ok" : "info");
   }
+  const items = hotTab === "mine" ? (data.mine || []) : data.items;
+  const counts = hotTab === "niche" ? data.formats.filter((f) => f.count) : null;
   const chips = document.getElementById("hot-formats");
-  const all = [{ key: "", label: "Todos", count: data.total, why: "" }].concat(data.formats.filter((f) => f.count));
-  chips.replaceChildren(...(data.total ? all : []).map((item) => {
-    const chip = el("button", "chip" + (hotFormat === item.key ? " on" : ""), item.label + " " + item.count);
+  const options = [["", "Todos"]].concat(Object.entries(HOT_FORMAT_LABELS));
+  chips.replaceChildren(...options.map(([key, label]) => {
+    const count = counts ? (key ? (counts.find((f) => f.key === key) || {}).count : data.total) : null;
+    if (counts && key && !count) return null;
+    const chip = el("button", "chip" + (hotFormat === key ? " on" : ""), label + (count ? " " + count : ""));
     chip.type = "button";
-    if (item.why) chip.title = item.why;
-    chip.addEventListener("click", () => { hotFormat = item.key; loadHot(); });
+    chip.setAttribute("aria-pressed", String(hotFormat === key));
+    chip.addEventListener("click", () => { hotFormat = key; loadHot(); });
     return chip;
-  }));
+  }).filter(Boolean));
   const host = document.getElementById("hot-list");
-  if (!data.items.length) {
+  if (!items.length) {
     const li = el("li");
-    li.append(emptyState("radar", data.hunting ? "Caçando…" : "Nenhum texto caçado ainda", "Caçar textos quentes busca no X os posts de texto do nicho que mais engajaram (usa crédito do seu Apify) e guarda aqui para todo mundo.", data.hunting ? null : "Caçar agora", huntHot));
+    if (hotTab === "mine") li.append(emptyState("radar", "Nada por aqui ainda", hotFormat ? "Nenhum post seu nesse formato. Tire o filtro." : "Quando o robô ler os posts das suas contas, os que mais bombaram aparecem aqui."));
+    else li.append(emptyState("radar", data.hunting ? "Caçando…" : "Nenhum texto caçado ainda", (data.sources || []).length ? "Clique em Caçar textos quentes: lê os posts das contas da lista pelo seu Apify." : "Adicione as @ das contas do nicho acima e clique em Caçar."));
     host.replaceChildren(li);
     return;
   }
-  host.replaceChildren(...data.items.map(hotRow));
+  host.replaceChildren(...items.map(hotRow));
 }
+const HOT_FORMAT_LABELS = { promessa: "Promessa", enquete: "Enquete", pergunta: "Pergunta polêmica", desafio: "Desafio",
+  lista: "Lista", confissao: "Confissão", provocacao: "Provocação" };
 function hotRow(item) {
   const li = el("li", "hot-item");
   const top = el("div", "hot-item-top");
@@ -4064,7 +4078,7 @@ function hotRow(item) {
   const remix = costButton("Recriar com Grok", "grok", "idea-btn");
   const out = el("div", "hot-remix");
   out.hidden = true;
-  remix.addEventListener("click", () => askHotGrok(remix, out, { id: item.id }));
+  remix.addEventListener("click", () => askHotGrok(remix, out, item.id ? { id: item.id } : { text: item.text }));
   actions.append(remix);
   if (item.url) {
     const open = el("a", "idea-btn", "Abrir no X");
@@ -4076,6 +4090,24 @@ function hotRow(item) {
   li.append(top, el("p", "hot-text", item.text), meta, el("p", "hot-why", item.why), actions, out);
   return li;
 }
+document.querySelectorAll("[data-hot-tab]").forEach((button) => button.addEventListener("click", () => {
+  if (hotTab === button.dataset.hotTab) return;
+  hotTab = button.dataset.hotTab;
+  try { localStorage.setItem("hot_tab", hotTab); } catch { /* sem storage */ }
+  if (hotData) paintHot(hotData);
+}));
+document.getElementById("hot-source-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("hot-source-input");
+  const handle = input.value.trim();
+  if (!handle) return;
+  try {
+    const data = await api("/api/radar/hot/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ handle }) });
+    input.value = "";
+    toast("@" + data.handle + " entrou na lista.", "ok");
+    loadHot();
+  } catch (error) { toast(error.message || "Não adicionou a conta."); }
+});
 async function huntHot() {
   const button = document.getElementById("hot-hunt");
   button.disabled = true;
@@ -4156,7 +4188,7 @@ function ideasBox(topic) {
     more.disabled = true;
     seed += 1;
     try {
-      const data = await api("/api/radar/ideas?region=" + radarRegion + "&heat=" + radarHeat + "&seed=" + seed + "&norm=" + encodeURIComponent(topic.norm));
+      const data = await api("/api/radar/ideas?heat=" + radarHeat + "&seed=" + seed + "&norm=" + encodeURIComponent(topic.norm));
       const known = new Set([...list.querySelectorAll(".idea-text")].map((node) => node.textContent));
       const fresh = data.ideas.filter((line) => !known.has(line));
       if (fresh.length) list.prepend(...ideaList(fresh).children);
@@ -4169,7 +4201,7 @@ function ideasBox(topic) {
     grok.disabled = true;
     setCostLabel(grok, "Pedindo ao Grok…");
     try {
-      const data = await api("/api/radar/ideas/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ norm: topic.norm, region: radarRegion, heat: radarHeat }) });
+      const data = await api("/api/radar/ideas/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ norm: topic.norm, heat: radarHeat }) });
       list.prepend(...ideaList(data.ideas).children);
       setCostLabel(grok, "Mais ideias com Grok");
     } catch (error) {
@@ -4223,7 +4255,7 @@ async function openTopic(norm, origin) {
   document.getElementById("drawer-body").replaceChildren(loading);
   document.getElementById("drawer-close").focus();
   try {
-    const topic = await api("/api/radar/topic?region=" + radarRegion + "&heat=" + radarHeat + "&norm=" + encodeURIComponent(norm));
+    const topic = await api("/api/radar/topic?heat=" + radarHeat + "&norm=" + encodeURIComponent(norm));
     if (drawerFor === key) renderTopic(topic);
   } catch (error) {
     if (drawerFor === key) document.getElementById("drawer-body").replaceChildren(el("p", "text-sm text-mute", error.message || "Não deu para abrir o assunto."));

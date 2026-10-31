@@ -511,3 +511,15 @@ class HotText(IntPK, Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class HotSource(IntPK, Base):
+    """Conta do nicho que o usuário quer caçar no Radar hot ("Contas do nicho"): a caçada lê os posts dela pelo
+    Apify, do mesmo jeito que o robô lê as contas do painel (por perfil, não por busca)."""
+
+    __tablename__ = "hot_sources"
+    __table_args__ = (UniqueConstraint("owner_id", "handle", name="uq_hot_sources_owner_handle"),)
+
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    handle: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

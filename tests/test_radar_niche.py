@@ -16,11 +16,6 @@ from app.services import user_settings
 from main import app
 from test_radar import GOOGLE_XML, fake_fetch
 
-WORLD_X = """<html><body>
-<div class=list-container><h3 class=title data-timestamp=1793390644.004>x</h3><ol>
-<li><a href="#" class=trend-link>Halloween</a></li><li><a href="#" class=trend-link>#ภาษาไทยเท่านั้น</a></li>
-</ol></div></body></html>"""
-WORLD_GOOGLE = GOOGLE_XML.replace("flamengo", "houston weather").replace("anitta", "jack antonoff")
 BR_X = """<html><body>
 <div class=list-container><h3 class=title data-timestamp=1793390644.004>x</h3><ol>
 <li><a href="#" class=trend-link>#Flamengo</a></li><li><a href="#" class=trend-link>#PlsLoveรักได้ไหม</a></li>
@@ -29,10 +24,6 @@ BR_X = """<html><body>
 
 
 def fetch_all(url):
-    if url == src.URLS["x_world"]:
-        return WORLD_X
-    if url == src.URLS["google_world"]:
-        return WORLD_GOOGLE
     if "trends24" in url:
         return BR_X
     return fake_fetch(url)
@@ -67,21 +58,16 @@ def headers():
         return row, {"Authorization": f"Bearer {auth.issue_token(row.id, 0)}"}
 
 
-def test_world_sources_exist():
-    assert src.URLS["x_world"] == "https://trends24.in/"
-    assert src.URLS["google_world"].endswith("geo=US")
-    assert set(radar.REGIONS) == {"br", "world"}
+def test_only_brazil():
+    """O Internacional saiu a pedido do dono: só fontes do Brasil são lidas."""
+    assert set(radar.REGIONS) == {"br"} and radar.SOURCES == ("x", "google", "news")
+    assert set(src.URLS) == {"x", "google", "news"}
 
 
-def test_brasil_drops_foreign_scripts_and_world_is_separate(db):
-    br = {t["norm"] for t in radar.board(db, region="br")["topics"]}
+def test_brasil_drops_foreign_scripts(db):
+    br = {t["norm"] for t in radar.board(db)["topics"]}
     assert "flamengo" in br and "bbb 27" in br
     assert not any("pls" in n for n in br), "hashtag tailandesa some do Brasil"
-    world = radar.board(db, region="world")
-    names = {t["norm"] for t in world["topics"]}
-    assert {"halloween", "houston weather"} <= names and "flamengo" not in names
-    assert set(world["sources"]) == {"x", "google"}
-    assert world["upcoming"] == [] or all(i["kind"] == "previsao" for i in world["upcoming"]), "datas brasileiras só no Brasil"
 
 
 def test_engage_score_and_blocks(db):
@@ -108,9 +94,8 @@ def test_ideas_follow_the_tone_and_rules():
 
 def test_routes_region_and_ideas(client, db):
     _, h = headers()
-    world = client.get("/api/radar?region=world", headers=h).json()
-    assert world["region"] == "world" and any(t["norm"] == "halloween" for t in world["topics"])
-    assert client.get("/api/radar?region=marte", headers=h).status_code == 422
+    old = client.get("/api/radar?region=world", headers=h).json()
+    assert old["region"] == "br", "aba antiga em cache pedindo o Internacional recebe o Brasil"
     ideas = client.get("/api/radar/ideas", params={"norm": "flamengo"}, headers=h).json()
     assert ideas["blocked"] is False and any("flamenguistas" in line for line in ideas["ideas"])
     assert client.get("/api/radar/ideas", params={"norm": "morre ator famoso"}, headers=h).json()["ideas"] == []

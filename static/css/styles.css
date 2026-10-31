@@ -1545,6 +1545,12 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 .hot-q-item { display: flex; flex-direction: column; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--field); min-width: 0; }
 .hot-q-item.is-used .hot-text { color: var(--muted); }
 #hot-grok-out .idea-item .hot-fmt { align-self: flex-start; }
+/* Contas do nicho: chips com a @ (abre o perfil) e o × para tirar. */
+.hot-sources { display: flex; flex-wrap: wrap; gap: .4rem; }
+.hot-source { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .3rem .2rem .7rem; border: 1px solid var(--line-strong); border-radius: 999px; font-size: .78rem; background: var(--field); }
+.hot-source a { color: var(--fg); text-decoration: none; }
+.hot-source a:hover, .hot-source a:focus-visible { color: var(--accent); }
+#hot-niche[hidden], #hot-mine-note[hidden] { display: none; }
 .hot-remix[hidden] { display: none; }
 @media (max-width: 767px) {
   .radar-controls { width: 100%; }

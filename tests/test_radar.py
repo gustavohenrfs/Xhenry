@@ -129,9 +129,8 @@ def db():
 
 
 def test_refresh_saves_one_read_per_source(db):
-    assert radar.refresh(db, fetch=fake_fetch) == {"x": True, "google": True, "news": True,
-                                                   "x_world": True, "google_world": True}
-    assert db.query(RadarSnapshot).count() == 5
+    assert radar.refresh(db, fetch=fake_fetch) == {"x": True, "google": True, "news": True}
+    assert db.query(RadarSnapshot).count() == 3
     x_items = db.query(RadarItem).filter(RadarItem.source == "x").all()
     assert sorted((i.extra["hour"], i.rank, i.title) for i in x_items) == [(0, 1, "#Flamengo"), (0, 2, "Lula"), (1, 1, "Lula")]
 
@@ -176,8 +175,8 @@ def test_refresh_due_and_pruning(db):
     radar.refresh(db, fetch=fake_fetch, now=now - timedelta(days=3))
     assert radar.refresh_due(db, now) == list(radar.SOURCES)
     radar.refresh(db, list(radar.SOURCES), fake_fetch, now - timedelta(minutes=20))
-    assert db.query(RadarSnapshot).count() == 5, "leituras de mais de 2 dias somem"
-    assert radar.refresh_due(db, now) == ["x", "google", "x_world", "google_world"], "notícias (30 min) ainda valem"
+    assert db.query(RadarSnapshot).count() == 3, "leituras de mais de 2 dias somem"
+    assert radar.refresh_due(db, now) == ["x", "google"], "notícias (30 min) ainda valem"
 
 
 def test_topic_detail_has_24h_history(db):

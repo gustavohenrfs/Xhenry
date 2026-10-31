@@ -20,9 +20,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=9">
-  <link rel="stylesheet" href="/static/css/styles.css?v=32">
+  <link rel="stylesheet" href="/static/css/styles.css?v=33">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=49"></script>
+  <script defer src="/static/js/app.js?v=50"></script>
 </head>
 <body class="bg-ink text-blush">
   <div id="bg-orbs">
@@ -254,10 +254,6 @@
               <p id="radar-updated" class="text-xs text-mute">Lendo o radar…</p>
             </div>
             <div class="radar-controls">
-              <div class="radar-seg" role="radiogroup" aria-label="Região">
-                <button type="button" role="radio" data-radar-region="br" aria-checked="true">Brasil</button>
-                <button type="button" role="radio" data-radar-region="world" aria-checked="false">Internacional</button>
-              </div>
               <div class="radar-seg" role="radiogroup" aria-label="Nível das ideias de post" title="Leve: sugestivo. Quente: direto, no tom do nicho +18.">
                 <button type="button" role="radio" data-radar-heat="leve" aria-checked="false">Leve</button>
                 <button type="button" role="radio" data-radar-heat="quente" aria-checked="true">Quente</button>
@@ -310,11 +306,25 @@
             </section>
             <section class="hot-block" aria-labelledby="hot-x-title">
               <div class="hot-block-head">
-                <h4 id="hot-x-title" class="text-sm text-white">Caçados no X</h4>
-                <button id="hot-hunt" type="button" class="hot-btn"><span class="cost-label">Caçar textos quentes</span></button>
+                <h4 id="hot-x-title" class="text-sm text-white">Textos que bombaram</h4>
+                <div class="radar-seg" role="radiogroup" aria-label="De onde vêm os textos">
+                  <button type="button" role="radio" data-hot-tab="mine" aria-checked="true">Seus posts</button>
+                  <button type="button" role="radio" data-hot-tab="niche" aria-checked="false">Contas do nicho</button>
+                </div>
               </div>
-              <p class="text-[11px] text-mute">Posts de texto do nicho que mais engajaram. Use o formato como referência, não copie o texto.</p>
-              <p id="hot-status" class="mt-2 text-[11px] text-mute" aria-live="polite"></p>
+              <div id="hot-niche" hidden>
+                <p class="text-[11px] text-mute">Coloque as @ das contas do nicho que você vê bombando. A caçada lê os posts delas pelo perfil (o mesmo jeito que o robô lê as suas contas) e guarda os textos que mais engajaram.</p>
+                <form id="hot-source-form" class="mt-2 flex flex-wrap gap-2">
+                  <input id="hot-source-input" maxlength="200" placeholder="@conta ou link do perfil" aria-label="Conta do nicho" class="min-w-0 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-2.5 text-sm outline-none focus:border-neon">
+                  <button type="submit" class="rounded-2xl bg-neon px-4 py-2.5 text-sm font-medium text-ink">Adicionar</button>
+                </form>
+                <ul id="hot-sources" class="hot-sources mt-2"></ul>
+                <div class="mt-3 flex flex-wrap items-center gap-3">
+                  <button id="hot-hunt" type="button" class="hot-btn"><span class="cost-label">Caçar textos quentes</span></button>
+                </div>
+                <p id="hot-status" class="mt-2 text-[11px] text-mute" aria-live="polite"></p>
+              </div>
+              <p id="hot-mine-note" class="text-[11px] text-mute">Os seus posts que mais bombaram nos últimos 90 dias, do que o robô já leu. Grátis.</p>
               <div id="hot-formats" class="mt-2 flex flex-wrap gap-1.5"></div>
               <ol id="hot-list" class="hot-list"></ol>
             </section>

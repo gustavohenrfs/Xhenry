@@ -15,9 +15,7 @@ from typing import Any
 
 URLS = {
     "x": "https://trends24.in/brazil/",
-    "x_world": "https://trends24.in/",
     "google": "https://trends.google.com/trending/rss?geo=BR",
-    "google_world": "https://trends.google.com/trending/rss?geo=US",
     "news": "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419",
 }
 HT = "{https://trends.google.com/trending/rss}"

@@ -97,12 +97,36 @@ def sync_hunt(monkeypatch):
     monkeypatch.setattr(radar_hot, "run_in_background", lambda work: work())
 
 
-def test_hunt_needs_a_token_then_caches_for_everyone(client, monkeypatch, sync_hunt):
-    _, nobody = user()
-    resp = client.post("/api/radar/hot/hunt", headers=nobody)
-    assert resp.status_code == 400 and "Apify" in resp.json()["detail"]
-    a_id, a = user(apify="tok-a")
+def add(client, headers, *handles):
+    for handle in handles:
+        assert client.post("/api/radar/hot/sources", json={"handle": handle}, headers=headers).status_code == 201
+
+
+def test_sources_crud_and_handle_cleanup(client):
+    _, a = user()
     _, b = user()
+    assert radar_hot.clean_handle("@Fulana_1") == "Fulana_1"
+    assert radar_hot.clean_handle("https://x.com/fulana/status/123") == "fulana"
+    assert radar_hot.clean_handle("twitter.com/@beltrana") == "beltrana"
+    assert radar_hot.clean_handle("nome com espaço") is None and radar_hot.clean_handle("x.com/home") is None
+    add(client, a, "@modelo", "https://x.com/outra")
+    assert client.post("/api/radar/hot/sources", json={"handle": "MODELO"}, headers=a).status_code == 409
+    assert client.post("/api/radar/hot/sources", json={"handle": "não vale"}, headers=a).status_code == 400
+    assert client.get("/api/radar/hot", headers=a).json()["sources"] == ["modelo", "outra"]
+    assert client.get("/api/radar/hot", headers=b).json()["sources"] == [], "a lista é de cada um"
+    assert client.delete("/api/radar/hot/sources/modelo", headers=b).status_code == 404
+    assert client.delete("/api/radar/hot/sources/@Modelo", headers=a).json()["sources"] == ["outra"]
+
+
+def test_hunt_reads_niche_profiles_like_the_robot(client, monkeypatch, sync_hunt):
+    _, nobody = user(apify="tok")
+    resp = client.post("/api/radar/hot/hunt", headers=nobody)
+    assert resp.status_code == 400 and "conta do nicho" in resp.json()["detail"]
+    _, notoken = user()
+    add(client, notoken, "modelo")
+    assert "Apify" in client.post("/api/radar/hot/hunt", headers=notoken).json()["detail"]
+    a_id, a = user(apify="tok-a")
+    add(client, a, "modelo", "sumida")
     calls = []
 
     def run(token, body, timeout=None):
@@ -114,30 +138,30 @@ def test_hunt_needs_a_token_then_caches_for_everyone(client, monkeypatch, sync_h
     assert started["cached"] is False and started["hunting"] is True
     token, body, timeout = calls[0]
     assert token == "tok-a" and timeout == radar_hot.HUNT_TIMEOUT
-    assert body["searchTerms"] == radar_hot.QUERY_POOL[:5], "no máximo 5 buscas por execução (limite do ator)"
-    assert body["maxItems"] == 250 and body["minimumFavorites"] == radar_hot.MIN_FAVORITES and body["sort"] == "Top"
-    assert body["tweetLanguage"] == "pt" and all("min_faves" not in q for q in body["searchTerms"])
+    assert body == {"twitterHandles": ["modelo", "sumida"], "maxItems": 40, "sort": "Latest"}, "leitura por perfil, como o robô"
     first = client.get("/api/radar/hot", headers=a).json()
     assert first["total"] == 4 and first["hunting"] is False
-    assert first["last"]["read"] == len(ITEMS) and first["last"]["kept"] == 4 and first["last"]["new"] == 4
-    assert first["last"]["reasons"] == {"repost": 1, "link_ou_venda": 2, "proibido": 1, "curto": 1,
-                                        "poucas_curtidas": 1, "resposta": 1}, "diagnóstico do que ficou de fora"
-    assert first["items"][0]["fmt_label"] == "Promessa", "maior nota primeiro"
-    assert first["next_hunt_at"], "diz até quando a caçada não gasta"
-    again = client.post("/api/radar/hot/hunt", headers=b).json()
-    assert again["cached"] is True and len(calls) == 1, "2 h de cache para todos, sem token de quem clicou"
-    lib = client.get("/api/radar/hot", params={"fmt": "lista"}, headers=b).json()
-    assert [i["fmt"] for i in lib["items"]] == ["lista"] and {f["key"]: f["count"] for f in lib["formats"]}["promessa"] == 1
+    last = first["last"]
+    assert last["read"] == len(ITEMS) and last["kept"] == 4 and last["new"] == 4
+    assert last["per_handle"] == {"modelo": len(ITEMS), "sumida": 0}, "conta que não trouxe nada aparece (@ errada?)"
+    assert last["reasons"] == {"repost": 1, "link_ou_venda": 2, "proibido": 1, "curto": 1, "poucas_curtidas": 1, "resposta": 1}
+    assert first["items"][0]["fmt_label"] == "Promessa" and first["next_hunt_at"]
+    again = client.post("/api/radar/hot/hunt", headers=a).json()
+    assert again["cached"] is True and len(calls) == 1, "logo depois de uma caçada boa, não gasta de novo"
+    add(client, a, "nova")
+    client.post("/api/radar/hot/hunt", headers=a)
+    assert len(calls) == 2 and calls[1][1]["twitterHandles"] == ["modelo", "sumida", "nova"], "lista mudou: caça na hora"
     with SessionLocal() as db:
         assert db.query(HotText).filter(HotText.owner_id == a_id).count() == 4
 
 
-def test_empty_or_failed_hunt_never_locks_and_queries_rotate(client, monkeypatch, sync_hunt):
+def test_empty_or_failed_hunt_never_locks(client, monkeypatch, sync_hunt):
     _, a = user(apify="tok")
-    bodies = []
+    add(client, a, "modelo")
+    calls = []
 
     def empty(token, body, timeout=None):
-        bodies.append(body["searchTerms"])
+        calls.append(1)
         return [{"noResults": True}]
 
     monkeypatch.setattr(radar, "apify_run", empty)
@@ -145,24 +169,20 @@ def test_empty_or_failed_hunt_never_locks_and_queries_rotate(client, monkeypatch
     data = client.get("/api/radar/hot", headers=a).json()
     assert data["last"]["kept"] == 0 and data["last"]["reasons"] == {"vazio": 1} and data["next_hunt_at"] is None
     client.post("/api/radar/hot/hunt", headers=a)
-    assert len(bodies) == 2, "caçada vazia não trava as 2 h"
-    assert bodies[1] == radar_hot.QUERY_POOL[5:10], "rodízio: a próxima usa as 5 buscas seguintes"
+    assert len(calls) == 2, "caçada vazia não trava"
 
     def broken(token, body, timeout=None):
-        bodies.append(body["searchTerms"])
         raise radar.RadarError("a conta do Apify está sem crédito (402).")
 
     monkeypatch.setattr(radar, "apify_run", broken)
     client.post("/api/radar/hot/hunt", headers=a)
     failed = client.get("/api/radar/hot", headers=a).json()
     assert "402" in failed["last"]["error"] and failed["next_hunt_at"] is None and failed["hunting"] is False
-    monkeypatch.setattr(radar, "apify_run", empty)
-    client.post("/api/radar/hot/hunt", headers=a)
-    assert bodies[3] == bodies[2] == radar_hot.QUERY_POOL[10:15], "erro não pula as buscas: repete as mesmas"
 
 
 def test_hunt_lock_stops_double_spending(client, monkeypatch):
     _, a = user(apify="tok")
+    add(client, a, "modelo")
     pending = []
     monkeypatch.setattr(radar_hot, "run_in_background", pending.append)
     first = client.post("/api/radar/hot/hunt", headers=a).json()
@@ -174,12 +194,13 @@ def test_hunt_lock_stops_double_spending(client, monkeypatch):
 
 
 def test_new_hunt_updates_numbers_and_prunes(client, monkeypatch, sync_hunt):
-    _, a = user(apify="tok")
+    a_id, a = user(apify="tok")
+    add(client, a, "modelo")
     monkeypatch.setattr(radar, "apify_run", lambda token, body, timeout=None: ITEMS[:4])
     client.post("/api/radar/hot/hunt", headers=a)
     with SessionLocal() as db:
-        hunt = db.query(RadarPostCache).filter(RadarPostCache.norm == radar_hot.HUNT_KEY).one()
-        hunt.fetched_at = hunt.fetched_at - timedelta(hours=3)
+        hunt = db.query(RadarPostCache).filter(RadarPostCache.norm == radar_hot.hunt_key(a_id)).one()
+        hunt.fetched_at = hunt.fetched_at - timedelta(hours=1)
         db.commit()
     monkeypatch.setattr(radar, "apify_run", lambda token, body, timeout=None: [tweet("1", ITEMS[0]["text"], likes=99_999)])
     monkeypatch.setattr(radar_hot, "KEEP_MAX", 2)
@@ -187,6 +208,40 @@ def test_new_hunt_updates_numbers_and_prunes(client, monkeypatch, sync_hunt):
     data = client.get("/api/radar/hot", headers=a).json()
     assert data["last"]["new"] == 0, "o mesmo post só atualiza os números"
     assert data["total"] == 2 and data["items"][0]["likes"] == 99_999, "a biblioteca guarda só os de nota maior"
+
+
+def test_your_own_best_posts_are_free_and_private(client):
+    from datetime import datetime, timezone
+
+    from app.models import Folder, TweetSample, XAccount
+
+    a_id, a = user()
+    _, b = user()
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        folder = Folder(owner_id=a_id, name="Minhas")
+        db.add(folder)
+        db.flush()
+        acc = XAccount(folder_id=folder.id, username="minhaconta")
+        db.add(acc)
+        db.flush()
+        rows = [("t1", "Vocês homens gozam rápido mesmo? Sinceramente", 90_000, 300),
+                ("t2", "Se esse post bater 500 comentários eu posto sem censura", 20_000, 900),
+                ("t3", "RT @outra: repost não conta", 999_999, 1),
+                ("t4", "Me chama no privado que eu mostro", 999_999, 1),
+                ("t5", "Post antigo demais pra contar aqui rs", 999_999, 1)]
+        for tid, text, views, replies in rows:
+            posted = now - timedelta(days=200 if tid == "t5" else 1)
+            db.add(TweetSample(account_id=acc.id, tweet_id=tid, posted_at=posted, timezone_used="America/Sao_Paulo",
+                               hour_local=10, weekday=1, text_preview=text, view_count=views, reply_count=replies))
+        db.commit()
+    mine = client.get("/api/radar/hot", headers=a).json()["mine"]
+    assert [m["tweet_id"] for m in mine] == ["t2", "t1"], "sem repost, link ou +90 dias; resposta pesa mais na nota"
+    assert mine[1]["url"] == "https://x.com/minhaconta/status/t1" and mine[1]["fmt"] == "pergunta"
+    assert client.get("/api/radar/hot", params={"fmt": "promessa"}, headers=a).json()["mine"][0]["tweet_id"] == "t2"
+    assert client.get("/api/radar/hot", headers=b).json()["mine"] == [], "os seus posts são só seus"
+    with SessionLocal() as db:
+        assert radar_hot.examples(db, owner_id=a_id)[:2] == [rows[1][1], rows[0][1]], "o Grok aprende com os seus melhores"
 
 
 def test_hot_grok_remix_and_new_texts(client, monkeypatch):
