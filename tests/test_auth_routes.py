@@ -26,6 +26,7 @@ PROTECTED = [
     ("post", "/api/check-all", None),
     ("get", "/api/cloaker/progress/0123456789abcdef0123456789abcdef", None),
     ("get", "/api/accounts/1/detail?period=7d", None),
+    ("get", "/api/metrics?period=7d", None),
     ("get", "/api/robo", None),
     ("put", "/api/robo", {"enabled": False}),
     ("post", "/api/robo/run", None),

@@ -24,7 +24,8 @@ def html():
 
 def info_block() -> str:
     start = APP_JS.index("// ---------- Info: Algoritmo do X")
-    return APP_JS[start:]
+    end = APP_JS.find("// ---------- Métricas:", start)
+    return APP_JS[start:end if end > 0 else None]
 
 
 def test_sidebar_has_the_info_group_and_its_pages(html):

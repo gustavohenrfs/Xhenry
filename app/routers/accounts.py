@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.cache import cached_json
+from app.algo_metrics import algo_metrics
 from app.database import get_db
 from app.models import DEFAULT_TZ, Folder, FolderKind, User, XAccount
 from app.routers.auth import approved_user
@@ -224,6 +225,24 @@ def get_dashboard(
     # O dono entra na chave: cada usuário tem o próprio dashboard.
     body, etag = cached_json(
         db, ("dashboard", user.id, period, folder_id), lambda: dashboard(db, user.id, period, folder_id)
+    )
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(body, media_type="application/json", headers=headers)
+
+
+@router.get("/api/metrics")
+def get_metrics(
+    request: Request,
+    period: str = Query(default="7d"),
+    folder_id: int | None = Query(default=None),
+    user: User = Depends(approved_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Aba Métricas: os sinais que o algoritmo do X premia (só lê o banco, mesmo cache e ETag do dashboard)."""
+    body, etag = cached_json(
+        db, ("metrics", user.id, period, folder_id), lambda: algo_metrics(db, user.id, period, folder_id)
     )
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
     if request.headers.get("if-none-match") == etag:

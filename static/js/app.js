@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", radar: "Radar de trend", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários",
+const titles = { dashboard: "Dashboard", metricas: "Métricas", radar: "Radar de trend", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários",
   algo: "Algoritmo do X", rede: "Rede de RT", ia: "Suporte I.A", suporte: "Suporte" };
 const TOKEN_KEY = "access_token";
 const state = {
@@ -21,6 +21,14 @@ document.querySelectorAll("input:not([autocomplete]), textarea:not([autocomplete
   if (!field.closest("#auth-form")) field.setAttribute("autocomplete", "off");
 });
 let lineChart = null;
+let mxSignalsChart = null;  // gráficos da aba Métricas
+let mxQualityChart = null;
+let mxHoursChart = null;
+let metricsData = null;
+let metricsSeq = 0;
+let metricsStale = true;
+let mxTop = "bookmarks";
+let mxSort = "points";
 let barChart = null;
 let mixChart = null;
 let drawerChart = null;
@@ -38,7 +46,7 @@ function applyChartTheme() {
   Chart.defaults.color = cssVar("--muted");
   Chart.defaults.borderColor = cssVar("--line");
   if (mixChart) mixChart.data.datasets[0].borderColor = cssVar("--slice-gap");
-  [lineChart, barChart, mixChart, drawerChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
+  [lineChart, barChart, mixChart, drawerChart, mxSignalsChart, mxQualityChart, mxHoursChart, ...archivedCharts].forEach((chart) => chart && chart.update("none"));
 }
 function setTheme(theme, remember) {
   document.documentElement.dataset.theme = theme;
@@ -345,8 +353,9 @@ function setTab(tab) {
   document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("on", pane.id === "pane-" + tab));
   document.getElementById("heading").textContent = titles[tab];
   const controls = document.getElementById("dashboard-controls");
-  if (controls) controls.classList.toggle("hidden", tab !== "dashboard");
+  if (controls) controls.classList.toggle("hidden", tab !== "dashboard" && tab !== "metricas");  // Métricas usa o mesmo período e o mesmo Atualizar
   if (tab === "dashboard" && dashboardDirty) { dashboardDirty = false; load({ silent: true }); }
+  if (tab === "metricas" && (metricsStale || !metricsData)) loadMetrics();
   if (tab === "ops") closeOpsFolder();
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
@@ -1620,6 +1629,9 @@ async function load({ silent = false } = {}) {
     }
     renderLastCollect(data.last_collected_at);
     renderDashboard(data, sig, !silent && !cached && lastSig !== "", silent);
+    // "Atualizar dados" e o ao vivo passam por aqui: a aba Métricas acompanha.
+    if (state.tab === "metricas") loadMetrics({ silent: true });
+    else metricsStale = true;
     markLive(true);
     startLive();
     if (!silent) prefetchPeriods();
@@ -1712,7 +1724,7 @@ document.getElementById("nav").addEventListener("click", (event) => {
   if (button) setTab(button.dataset.tab);
 });
 // Celular: abas embaixo; "Mais" abre as que não cabem (MORE_TABS).
-const MORE_TABS = ["archived", "tools", "settings", "algo", "rede", "ia", "suporte"];
+const MORE_TABS = ["metricas", "archived", "tools", "settings", "algo", "rede", "ia", "suporte"];
 function setMoreOpen(open) {
   document.getElementById("more-sheet").classList.toggle("open", open);
   document.getElementById("more-btn").setAttribute("aria-expanded", String(open));
@@ -1736,7 +1748,8 @@ document.getElementById("period-wrap").addEventListener("click", (event) => {
   const button = event.target.closest("[data-period]");
   if (!button) return;
   setPeriod(button.dataset.period);
-  load();
+  if (state.tab === "metricas") { dashboardDirty = true; loadMetrics(); }
+  else { metricsStale = true; load(); }
 });
 document.getElementById("ops-back").addEventListener("click", closeOpsFolder);
 document.getElementById("ops-folder-edit").addEventListener("click", () => { const folder = opsFolder(); if (folder) editFolder(folder); });
@@ -3239,6 +3252,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) auto
 // ---------- ícones e telas vazias ----------
 // Mesmo traço dos ícones das abas (index.html); usados nas telas vazias e na busca rápida.
 const ICONS = {
+  metricas: '<path d="M3.5 12.5h3.2l2.3-6 4 12 2.4-6h5.1"/>',
   algo: '<path d="M5 5.5a2 2 0 0 1 2-2h11.5v14H7a2 2 0 0 0-2 2Z"/><path d="M5 19.5a2 2 0 0 0 2 2h11.5v-4"/><path d="M9 8h6M9 11h4"/>',
   rede: '<circle cx="6" cy="12" r="2.4"/><circle cx="18" cy="6" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="m8.2 10.9 7.6-3.8M8.2 13.1l7.6 3.8"/>',
   ia: '<path d="M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H11l-4.5 3.5V16a2 2 0 0 1-2-2Z"/><path d="m12 7.2.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9Z"/>',
@@ -3322,6 +3336,8 @@ function startLive() {
       roleSideLoads();
       if (state.tab === "dashboard" && !document.hidden) load({ silent: true });
       else dashboardDirty = true;  // recarrega quando o Dashboard voltar à tela
+      if (state.tab === "metricas" && !document.hidden) loadMetrics({ silent: true });
+      else metricsStale = true;
     }
     if (stamp.alerts !== before.alerts) { checkViral(); loadAlerts(); }
     if (stamp.radar !== before.radar && state.tab === "radar") loadRadar({ silent: true });
@@ -4369,7 +4385,7 @@ document.querySelectorAll("[data-tool]").forEach((button) => button.addEventList
 try { setTool(localStorage.getItem("tool_tab") || "post"); } catch { setTool("post"); }
 
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"],
+const TAB_LIST = [["dashboard", "Dashboard"], ["metricas", "Métricas"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"],
   ["algo", "Algoritmo do X"], ["rede", "Rede de RT"], ["ia", "Suporte I.A"], ["suporte", "Suporte (WhatsApp)"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
@@ -4882,3 +4898,267 @@ function paintSupport() {
   const email = supportTopic === 1 && state.user && state.user.email ? state.user.email : "";
   document.getElementById("support-open").href = "https://wa.me/" + SUPPORT_NUMBER + "?text=" + encodeURIComponent(SUPPORT_TOPICS[supportTopic][1] + email);
 }
+
+// ---------- Métricas: os sinais que o algoritmo do X premia ----------
+// Lê /api/metrics (só o banco, o mesmo cache do dashboard). Mesmo período e pasta do Dashboard; o
+// "Atualizar dados" e o ao vivo recarregam esta aba também. O que o X não entrega (tempo de leitura,
+// replies que você respondeu) aparece como indisponível, com a pista que existe.
+const MX_SIGNALS = {
+  replies: { label: "Replies", color: "#ff2ec8" },
+  bookmarks: { label: "Salvamentos", color: "#4fe3ff" },
+  quotes: { label: "Citações", color: "#9b8cff" },
+  retweets: { label: "Reposts", color: "#ffd27a" },
+  likes: { label: "Curtidas", color: "#8d86a8" },
+};
+const MX_COLUMNS = [
+  ["username", "Conta"], ["phase", "Fase"], ["posts", "Posts"], ["bookmarks_per_post", "Salv./post"],
+  ["replies_per_post", "Replies/post"], ["quotes", "Citações"], ["points_per_k", "Nota/mil"], ["spark", "14 dias"],
+];
+function dec(value, digits) {
+  if (value === null || value === undefined) return "—";
+  return Number(value).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: digits === undefined ? 1 : digits });
+}
+function metricsQuery() { return "/api/metrics?period=" + state.period + (state.folderId ? "&folder_id=" + state.folderId : ""); }
+async function loadMetrics({ silent = false } = {}) {
+  const seq = ++metricsSeq;
+  try {
+    const data = await api(metricsQuery());
+    if (seq !== metricsSeq) return;
+    metricsStale = false;
+    paintMetrics(data);
+  } catch (error) {
+    if (!silent && error.message !== PENDING && error.message !== SESSION_EXPIRED) toast(error.message || "Não leu as métricas.");
+  }
+}
+function mxDeltaText(cur, prev) {
+  const d = delta(cur, prev);
+  return d ? { text: (d.dir === "up" ? "▲ " : d.dir === "down" ? "▼ " : "") + d.text, dir: d.dir } : null;
+}
+function paintMetrics(data) {
+  const first = !metricsData;
+  metricsData = data;
+  const t = data.totals;
+  const prev = data.previous;
+  const folder = state.folderId && state.data ? (state.data.folders || []).find((f) => f.id === state.folderId) : null;
+  document.getElementById("mx-scope").textContent = (folder ? "Pasta " + folder.name : "Todas as contas") + " · " + num(t.posts) + " posts · "
+    + num(t.views) + " views · período do Dashboard";
+  const score = document.getElementById("mx-score");
+  countMx(score, t.points_per_k, (v) => dec(v, 1), first);
+  const d = prev ? mxDeltaText(t.points_per_k, prev.points_per_k) : null;
+  const deltaNode = document.getElementById("mx-score-delta");
+  deltaNode.className = "mx-score-delta" + (d ? " is-" + d.dir : "");
+  deltaNode.textContent = d ? d.text + " " + (COMPARE_TEXT[state.period] || "") : (t.posts ? "" : "Sem posts lidos nesse período.");
+  paintMxStack(data.mix);
+  paintMxKpis(data);
+  paintMxCharts(data);
+  paintMxTable();
+  paintMxTop();
+}
+const COMPARE_TEXT = { today: "vs ontem", yesterday: "vs anteontem", "7d": "vs 7 dias anteriores", "30d": "vs 30 dias anteriores",
+  "3m": "vs 3 meses anteriores", "1y": "vs ano anterior" };
+// O número grande conta do valor anterior até o novo (do zero na primeira vez).
+function countMx(node, value, format, fromZero) {
+  if (value === null || value === undefined || reduceMotion.matches) { node.textContent = value === null || value === undefined ? "—" : format(value); return; }
+  const from = fromZero ? 0 : Number(node.dataset.value || 0);
+  node.dataset.value = value;
+  const begin = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - begin) / 900);
+    node.textContent = format(from + (value - from) * (1 - Math.pow(1 - k, 3)));
+    if (k < 1) requestAnimationFrame(step);
+    else node.textContent = format(value);
+  };
+  requestAnimationFrame(step);
+}
+function paintMxStack(mix) {
+  const total = mix.reduce((sum, item) => sum + item.points, 0);
+  const stack = document.getElementById("mx-stack");
+  const legend = document.getElementById("mx-stack-legend");
+  if (!total) {
+    stack.replaceChildren(el("span", "mx-stack-empty"));
+    legend.replaceChildren(el("li", "text-xs text-mute", "Nenhum ponto ainda nesse período."));
+    return;
+  }
+  stack.replaceChildren(...mix.filter((item) => item.points > 0).map((item) => {
+    const part = el("span", "mx-seg");
+    part.style.setProperty("--share", (item.points / total * 100).toFixed(2) + "%");
+    part.style.setProperty("--c", MX_SIGNALS[item.key].color);
+    part.title = item.label + ": " + Math.round(item.points / total * 100) + "% dos pontos";
+    return part;
+  }));
+  legend.replaceChildren(...mix.map((item) => {
+    const li = el("li");
+    const dot = el("i");
+    dot.style.background = MX_SIGNALS[item.key].color;
+    li.append(dot, el("span", "", item.label), el("b", "font-mono", Math.round(item.points / total * 100) + "%"),
+      el("small", "", num(item.count) + " × " + dec(item.weight, 1)));
+    return li;
+  }));
+}
+function mxKpi({ label, value, unit, cur, prev, lines, tone, off }) {
+  const card = el("article", "mx-kpi glow" + (off ? " is-off" : "") + (tone ? " is-" + tone : ""));
+  card.append(el("p", "mx-kpi-label", label));
+  const big = el("p", "mx-kpi-value font-display", value);
+  if (unit) big.append(el("small", "", unit));
+  card.append(big);
+  const d = cur !== undefined && prev !== undefined && prev !== null ? mxDeltaText(cur, prev) : null;
+  if (d) card.append(el("p", "mx-kpi-delta is-" + d.dir, d.text));
+  lines.forEach((line, index) => card.append(el("p", index ? "mx-kpi-note" : "mx-kpi-weight", line)));
+  return card;
+}
+function paintMxKpis(data) {
+  const t = data.totals;
+  const p = data.previous || {};
+  const accounts = data.accounts.length || 1;
+  const repliesPerDay = t.replies / Math.max(1, data.series.length);
+  document.getElementById("mx-kpis").replaceChildren(
+    mxKpi({ label: "Salvamentos por post", value: dec(t.bookmarks_per_post, 1), cur: t.bookmarks_per_post, prev: p.bookmarks_per_post,
+      lines: ["+10 cada · vale 20 curtidas", "KPI número 1 da fase de 1 mil a 10 mil. " + dec(t.bookmarks_per_k, 2) + " a cada mil views."], tone: "cyan" }),
+    mxKpi({ label: "Replies por post", value: dec(t.replies_per_post, 1), cur: t.replies_per_post, prev: p.replies_per_post,
+      lines: ["+13,5 cada · respondida vira +75 (150 curtidas)", "Meta: responder pelo menos 1 por conta por dia. " + dec(repliesPerDay / accounts, 1) + " replies por conta por dia no período."], tone: "pink" }),
+    mxKpi({ label: "Citações recebidas", value: num(t.quotes), cur: t.quotes, prev: p.quotes,
+      lines: ["Entra em 3 sistemas · vale 3 reposts", "KPI da fase de 10 mil a 50 mil. " + dec(t.quotes_per_post, 2) + " por post."], tone: "violet" }),
+    mxKpi({ label: "Reposts por post", value: dec(t.retweets_per_post, 1), cur: t.retweets_per_post, prev: p.retweets_per_post,
+      lines: ["+1 cada · vale 2 curtidas", "Citar com comentário rende 3 vezes mais: peça citação, não só repost."], tone: "amber" }),
+    mxKpi({ label: "Tempo de leitura", value: t.save_rate === null ? "—" : dec(t.save_rate, 1), unit: t.save_rate === null ? "" : "% salvam", off: true,
+      lines: ["O X não mostra tempo de leitura para ninguém de fora", "A pista mais próxima: de cada 100 curtidas, quantas também salvaram. Threads e textos que prendem sobem esse número."] }),
+    mxKpi({ label: "Replies que você mandou", value: data.available.own_replies ? num(t.own_replies) : "—", cur: data.available.own_replies ? t.own_replies : undefined, prev: p.own_replies, off: !data.available.own_replies,
+      lines: [data.available.own_replies ? "Respostas das suas contas lidas pelo robô" : "O robô lê os posts, não as respostas das suas contas",
+        "Quais replies você respondeu o X não entrega. Responda todas na primeira hora: é o sinal mais forte que existe."] })
+  );
+}
+function mxDayLabels(series) {
+  return series.map((day) => {
+    const [y, m, d] = day.date.split("-");
+    return d + "/" + m;
+  });
+}
+function paintMxCharts(data) {
+  if (!window.Chart) return;
+  const labels = mxDayLabels(data.series);
+  const line = (key, extra) => Object.assign({
+    label: MX_SIGNALS[key].label, data: data.series.map((day) => day[key]), borderColor: MX_SIGNALS[key].color, legendColor: MX_SIGNALS[key].color,
+    backgroundColor: MX_SIGNALS[key].color + "22", borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .35, fill: false,
+  }, extra || {});
+  const options = {
+    responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+    scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: { beginAtZero: true, ticks: { precision: 0 } } },
+  };
+  const signals = { labels, datasets: [line("replies"), line("bookmarks"), line("quotes")] };
+  if (mxSignalsChart) updateChart(mxSignalsChart, signals, options);
+  else mxSignalsChart = markChart(new Chart(document.getElementById("mx-signals"), { type: "line", data: signals, options }));
+  const quality = { labels, datasets: [{
+    label: "Nota por mil views", data: data.series.map((day) => day.points_per_k), borderColor: "#ff2ec8", legendColor: "#ff2ec8",
+    backgroundColor: "rgba(255,46,200,.14)", borderWidth: 2.2, pointRadius: 0, pointHoverRadius: 4, tension: .35, fill: true, spanGaps: true,
+  }] };
+  const qualityOptions = { ...options, plugins: { legend: { display: false } }, scales: { ...options.scales, y: { beginAtZero: true } } };
+  if (mxQualityChart) updateChart(mxQualityChart, quality, qualityOptions);
+  else mxQualityChart = markChart(new Chart(document.getElementById("mx-quality"), { type: "line", data: quality, options: qualityOptions }));
+  const best = data.hours.filter((slot) => slot.avg !== null).sort((a, b) => b.avg - a.avg)[0];
+  document.getElementById("mx-hours-best").textContent = best
+    ? "Pontos por post, pela hora em que ele saiu. A melhor foi " + best.hour + "h, com " + dec(best.avg, 1) + " pontos por post (" + best.posts + (best.posts === 1 ? " post)." : " posts).")
+    : "Pontos por post, pela hora em que ele saiu. Sem posts no período.";
+  const hours = { labels: data.hours.map((slot) => slot.hour + "h"), datasets: [{
+    label: "Pontos por post", data: data.hours.map((slot) => slot.avg), legendColor: "#4fe3ff", borderRadius: 5, maxBarThickness: 22,
+    backgroundColor: data.hours.map((slot) => best && slot.hour === best.hour ? "#ff2ec8" : "rgba(79,227,255,.38)"),
+  }] };
+  const hourOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+    scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { beginAtZero: true } } };
+  if (mxHoursChart) updateChart(mxHoursChart, hours, hourOptions);
+  else mxHoursChart = markChart(new Chart(document.getElementById("mx-hours"), { type: "bar", data: hours, options: hourOptions }));
+}
+function mxSpark(values) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 84 24");
+  svg.setAttribute("class", "mx-spark");
+  svg.setAttribute("aria-hidden", "true");
+  const max = Math.max(...values, 1);
+  const points = values.map((v, i) => (i * 84 / Math.max(1, values.length - 1)).toFixed(1) + "," + (22 - v / max * 20).toFixed(1)).join(" ");
+  const line = document.createElementNS(ns, "polyline");
+  line.setAttribute("points", points);
+  svg.append(line);
+  return svg;
+}
+function paintMxTable() {
+  const host = document.getElementById("mx-accounts");
+  const rows = (metricsData.accounts || []).slice();
+  if (!rows.length) {
+    host.replaceChildren(emptyState("metricas", "Nenhuma conta aqui", "Adicione contas em Operações; as métricas aparecem depois da primeira leitura."));
+    return;
+  }
+  const value = (row) => mxSort === "username" ? row.username : mxSort === "phase" ? (row.followers || 0) : mxSort === "spark"
+    ? row.spark.reduce((a, b) => a + b, 0) : (row[mxSort] ?? -1);
+  rows.sort((a, b) => mxSort === "username" ? a.username.localeCompare(b.username) : value(b) - value(a));
+  const head = el("div", "mx-row is-head");
+  head.setAttribute("role", "row");
+  MX_COLUMNS.forEach(([key, label]) => {
+    const button = el("button", "mx-col" + (mxSort === key || (key === "points_per_k" && mxSort === "points") ? " on" : ""), label);
+    button.type = "button";
+    button.setAttribute("role", "columnheader");
+    button.addEventListener("click", () => { mxSort = key; paintMxTable(); });
+    head.append(button);
+  });
+  host.replaceChildren(head, ...rows.map((row) => {
+    const line = el("button", "mx-row" + (row.status && ["ghost_ban", "search_ban", "suspended"].includes(row.status) ? " is-bad" : ""));
+    line.type = "button";
+    line.setAttribute("role", "row");
+    if (row.color) line.style.setProperty("--folder", row.color);
+    line.addEventListener("click", () => openDrawer(row.id));
+    const who = el("span", "mx-who");
+    who.setAttribute("role", "cell");
+    who.append(el("b", "", "@" + row.username), el("small", "", row.folder + (row.followers !== null ? " · " + num(row.followers) + " seguidores" : "")));
+    if (row.status && row.status !== "healthy") who.append(el("span", "account-status rounded-full border px-2 py-0.5 text-[10px] st-" + row.status, row.status_label));
+    const phase = el("span", "mx-phase");
+    phase.setAttribute("role", "cell");
+    if (row.phase) {
+      phase.append(el("b", "", row.phase.label), el("small", "", row.phase.tip));
+      phase.dataset.kpi = row.phase.kpi;
+    } else phase.append(el("small", "", "sem seguidores lidos"));
+    const cell = (text, key, hot) => {
+      const span = el("span", "mx-num font-mono" + (hot ? " is-hot" : ""), text);
+      span.setAttribute("role", "cell");
+      span.dataset.label = MX_COLUMNS.find(([k]) => k === key)[1];
+      return span;
+    };
+    const kpi = row.phase ? row.phase.kpi : null;
+    const note = cell(dec(row.points_per_k, 1), "points_per_k", kpi === "points");
+    const d = row.points_per_k_prev !== null ? mxDeltaText(row.points_per_k, row.points_per_k_prev) : null;
+    if (d) note.append(el("small", "mx-mini-delta is-" + d.dir, d.dir === "up" ? "▲" : d.dir === "down" ? "▼" : "·"));
+    const spark = el("span", "mx-spark-cell");
+    spark.setAttribute("role", "cell");
+    spark.append(mxSpark(row.spark));
+    line.append(who, phase, cell(num(row.posts), "posts"), cell(dec(row.bookmarks_per_post, 1), "bookmarks_per_post", kpi === "bookmarks"),
+      cell(dec(row.replies_per_post, 1), "replies_per_post", kpi === "replies"), cell(num(row.quotes), "quotes", kpi === "quotes"), note, spark);
+    return line;
+  }));
+}
+function paintMxTop() {
+  document.querySelectorAll("[data-mx-top]").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.mxTop === mxTop)));
+  const host = document.getElementById("mx-top");
+  const posts = (metricsData.top || {})[mxTop] || [];
+  if (!posts.length) { host.replaceChildren(el("li", "text-sm text-mute", "Nenhum post com esse sinal no período.")); return; }
+  const main = { bookmarks: ["bookmarks", "salvamentos"], replies: ["replies", "replies"], quotes: ["quotes", "citações"], points_per_k: ["points", "pontos"] }[mxTop];
+  host.replaceChildren(...posts.map((post, index) => {
+    const li = el("li", "mx-post");
+    const rank = el("span", "mx-rank font-display", String(index + 1));
+    const body = el("div", "mx-post-body");
+    const link = el("a", "mx-post-text", post.text || "(sem texto)");
+    link.href = post.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    const meta = el("p", "mx-post-meta");
+    meta.append(el("span", "", "@" + post.account), el("span", "", num(post.views) + " views"), el("span", "", num(post.replies) + " replies"),
+      el("span", "", num(post.bookmarks) + " salvos"), el("span", "", num(post.quotes) + " citações"));
+    body.append(link, meta);
+    const big = el("p", "mx-post-big");
+    big.append(el("b", "font-display", mxTop === "points_per_k" ? dec(post.points * 1000 / Math.max(1, post.views), 1) : num(post[main[0]])),
+      el("small", "", mxTop === "points_per_k" ? "por mil views" : main[1]));
+    li.append(rank, body, big);
+    return li;
+  }));
+}
+document.querySelectorAll("[data-mx-top]").forEach((button) => button.addEventListener("click", () => {
+  mxTop = button.dataset.mxTop;
+  if (metricsData) paintMxTop();
+}));
