@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import random
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -220,28 +221,135 @@ GENERIC_Q = [
     "Quem me explicar {topic} direitinho ganha um nude, comenta 😏",
     "Duvido um homem comentar {topic} sem olhar minha foto primeiro rs",
 ]
-# Sem assunto: perguntas quentes que servem a qualquer hora ("Pergunta quente").
+# Sem assunto: perguntas quentes que servem a qualquer hora ("Perguntas quentes"). Variadas por formato:
+# enquete, pergunta polêmica, desafio, promessa, lista, confissão e duplo sentido.
 EVERGREEN_Q = [
+    # enquete
     "Os homens gostam de peluda ou lisinha? Tem alguém que diz que não faz diferença? Estou curiosa",
+    "Peito ou bunda? Só pode escolher um 😏",
+    "Com luz acesa ou apagada? Responde rápido 👀",
+    "Sexo de manhã ou de madrugada? Escolhe um e defende",
+    "Morena ou loira? E não vale dizer as duas rs",
+    "Lingerie preta ou vermelha? Vou usar a que ganhar 🔥",
+    "Rapidinha ou a noite toda? Só pode um 😏",
+    "Vocês preferem mulher que geme alto ou baixinho? Sinceramente",
+    "Beijo no pescoço ou puxão de cabelo? Escolhe 👀",
+    "Por cima ou por baixo? Responde sem pensar rs",
+    "Mulher tímida ou mulher safada? Os dois têm fã aqui, quero ver quem ganha",
+    "Banho junto ou cada um no seu? rs",
+    "Áudio gemendo ou foto? Qual deixa vocês mais loucos? 👀",
+    "Primeiro encontro: só beijo ou já vai pra casa dela? Sinceramente",
+    "Mulher que manda mensagem primeiro: atirada ou corajosa?",
+    "Calcinha de renda ou sem calcinha? Pergunta séria 😏",
+    "Mulher de salto ou de tênis? Defende a sua rs",
+    "Cama, sofá ou chuveiro? Ordem de preferência, valendo 🔥",
+    "Mulher baixinha ou alta? Só pode uma 👀",
+    "Vocês preferem que a mulher fale safadeza ou fique quietinha?",
+    # pergunta polêmica
     "Por que os homens acham difícil continuar transando depois que gozam, vocês são fracos?",
     "Vocês homens gozam rápido mesmo ou é só falta de prática? Sinceramente",
-    "Fantasias que toda mulher quer experimentar pelo menos uma vez. A primeira é…",
-    "Homem que demora pra gozar é bom ou cansativo? Briguem 👀",
-    "Peito ou bunda? Só pode escolher um 😏",
-    "Qual a coisa mais safada que vocês já fizeram e nunca contaram pra ninguém? Prometo não julgar rs",
-    "Duvido um homem aguentar 10 minutos comigo sem gozar 😏",
-    "Homem de verdade aguenta a segunda logo depois da primeira? Ou é lenda? 👀",
-    "Confesso: eu gosto mais de mandar nude do que de receber. É errado?",
-    "Se esse post bater 1000 curtidas eu posto aquela foto que vocês pedem todo dia 🔥",
-    "Vocês preferem mulher que geme alto ou baixinho? Sinceramente",
-    "Com luz acesa ou apagada? Responde rápido 👀",
-    "Homens: tamanho importa ou é desculpa de quem não sabe usar? Briguem rs",
+    "Por que todo homem acha que é bom de cama?",
+    "Por que homem some depois que consegue o que quer?",
+    "Vocês homens fingem que gostam de preliminar? Sejam sinceros",
+    "Por que homem fica com sono logo depois? É preguiça ou cansaço mesmo? rs",
+    "Homem de 30 é melhor de cama que de 20? Me convençam",
     "Qual a primeira coisa que vocês olham numa mulher? Mentir é proibido 👀",
-    "Sexo de manhã ou de madrugada? Escolhe um e defende",
     "Quantos minutos vocês aguentam? Sejam sinceros, ninguém tá olhando 😏",
     "Homens, vocês preferem que a mulher tome a iniciativa ou gostam de mandar?",
+    "Vocês homens pensam em sexo quantas vezes por dia? Chuta um número",
+    "Por que homem gosta tanto de foto de pé? Alguém me explica 👀",
+    "O que vocês fariam se acordassem do meu lado? Quero ver criatividade 😏",
+    "Qual parte do corpo da mulher vocês acham mais subestimada?",
+    "Homem que manda nude sem pedir acha mesmo que tá agradando?",
+    "Homens: tamanho importa ou é desculpa de quem não sabe usar? Briguem rs",
+    "Vocês preferem mulher experiente ou que vocês ensinam?",
+    "Por que homem acha que mulher não gosta de sexo tanto quanto ele?",
+    "Homem que não beija bem merece segunda chance? Sinceramente",
+    "Qual a coisa mais safada que vocês já fizeram e nunca contaram pra ninguém? Prometo não julgar rs",
+    "Vocês já foram pegos no flagra? Conta como foi 👀",
+    "Homem ciumento é chato ou é sinal de que gosta? Opinem",
+    "Por que homem casado é o que mais chama mulher pra conversar? Alguém explica",
+    "Qual foi o lugar mais louco que vocês já transaram?",
+    "Homem que fala que nunca broxou tá mentindo? rs",
+    # desafio
+    "Duvido um homem aguentar 10 minutos comigo sem gozar 😏",
+    "Homem de verdade aguenta a segunda logo depois da primeira? Ou é lenda? 👀",
+    "Duvido você ler esse post até o fim sem pensar besteira rs",
+    "Aposto que nenhum homem aqui aguenta uma noite inteira comigo",
+    "Duvido um homem me descrever em 3 palavras sem ser safado",
+    "Ninguém aguenta uma mulher que quer mais de uma vez, concordam?",
+    "Duvido alguém comentar sem olhar minha foto primeiro rs",
+    "Aposto que você abriu esse post esperando nude 👀",
+    "Duvido um homem admitir nos comentários que já fingiu que gostou de algo",
+    "Aposto que metade dos homens daqui não sabe onde fica o ponto G rs",
+    "Duvido você mandar esse post pro seu amigo mais safado",
+    # promessa
+    "Se esse post bater 1000 curtidas eu posto aquela foto que vocês pedem todo dia 🔥",
+    "Se esse post bater 500 comentários eu posto sem censura 😏",
+    "Se esse post bater 300 respostas eu conto minha fantasia mais safada",
+    "Prometo responder todo mundo que comentar o que faria comigo rs",
+    "Se eu chegar em 1000 curtidas hoje eu posto de lingerie 🔥",
+    "Se esse post bater 200 RT eu mando nude no próximo post rs",
+    "Se esse post passar de 100 comentários eu conto o que eu tô vestindo agora 👀",
+    "Prometo que quem comentar primeiro vai ganhar minha resposta mais safada rs",
+    # lista
+    "Fantasias que toda mulher quer experimentar pelo menos uma vez. A primeira é…",
     "Coisas que todo homem faz na cama e acha que a gente gosta. A primeira é…",
-    "Estou curiosa: homem casado é o que mais curte foto de mulher no X? 👀",
+    "Sinais de que um homem é bom de cama. O primeiro é…",
+    "Coisas que deixam qualquer mulher louca em 5 segundos. A primeira é…",
+    "Motivos que fazem uma mulher nunca mais responder um homem. O primeiro é…",
+    "Tipos de homem que toda mulher já pegou. O primeiro é…",
+    "Coisas que eu faria se tivesse coragem. A primeira é…",
+    "Erros que todo homem comete no primeiro encontro. O primeiro é…",
+    # confissão
+    "Confesso: eu gosto mais de mandar nude do que de receber. É errado?",
+    "Confissão: eu fico molhadinha só de ler os comentários de vocês rs",
+    "Confesso que já mandei nude pra pessoa errada… quem nunca?",
+    "Admito: homem de moletom cinza me desconcentra 👀",
+    "Confesso que durmo sem calcinha. Vocês dormem como? rs",
+    "Admito que já fingi… e vocês, já perceberam alguma vez?",
+    "Estou curiosa: homem gosta mais de mulher que manda áudio ou foto?",
+    "Confesso que leio todos os comentários safados de vocês antes de dormir rs",
+    "Admito: voz grossa me ganha antes de qualquer foto 👀",
+    "Estou curiosa: quantos aqui já se apaixonaram por alguém do X?",
+    # duplo sentido
+    "Hoje eu acordei querendo sentar… na cadeira do trabalho, claro rs",
+    "Tô precisando de alguém pra me ajudar a abrir um pote… e outras coisas rs",
+    "Procura-se homem que saiba usar as mãos. Pra montar um móvel, claro rs",
+    "Hoje eu tô carente de atenção e de outras coisas 👀",
+    "Não sei cozinhar, mas sei comer muito bem rs",
+    "Ajoelhou tem que rezar, né? rs",
+    "Gosto de homem que pega firme… no volante, claro 😏",
+    "Tô com vontade de fazer uma coisa que começa com S e termina com O rs",
+    "Mulher sozinha em casa num sábado… o que vocês acham que eu tô fazendo? 👀",
+    "Meu ponto fraco é homem que sabe o que faz com a boca. Conversando, claro rs",
+    "Hoje eu só queria alguém pra me fazer suar… na academia, óbvio 😏",
+    "Tô precisando de uma mão amiga. Ou duas rs",
+]
+# Por hora do dia em São Paulo (moment_of): bom dia, madrugada e fim de semana.
+MORNING_Q = [
+    "Bom dia pra quem acordou animado hoje… vocês me entenderam rs",
+    "Bom dia! Vocês acordam com vontade ou é só eu? 👀",
+    "Café ou sexo de manhã? Só pode um rs",
+    "Acordei sem roupa e sem coragem de levantar. E vocês? 😏",
+    "Bom dia só pra quem pensou besteira antes de levantar rs",
+    "Quem aí já acordou pensando em mim? Sinceramente 👀",
+]
+NIGHT_Q = [
+    "Quem tá acordado essa hora tá pensando em quê? Sinceramente 👀",
+    "Madrugada e eu sem sono… alguém me cansa? rs",
+    "Insônia ou saudade de alguém na cama? 😏",
+    "Quem tá online agora comenta, vamos ver quem tá sozinho rs",
+    "Deitada aqui só de camiseta… alguém mais acordado? 👀",
+    "Duvido quem tá acordado agora não estar pensando besteira rs",
+]
+WEEKEND_Q = [
+    "Sextou! Vocês vão sair ou ficar em casa fazendo besteira? rs",
+    "Final de semana bom é o que termina com a cama bagunçada, concordam? 😏",
+    "Sábado à noite: balada ou motel? Sinceramente rs",
+    "Domingo é dia de ficar na cama… sozinha não tem graça 👀",
+    "Fim de semana chegou e eu tô sem ninguém pra estragar minha reputação rs",
+    "Se esse post bater 500 curtidas até domingo eu posto aquela foto 🔥",
 ]
 EVERGREEN = [
     "Qual a primeira coisa que vocês reparam numa mulher? Sinceridade 👀",
@@ -252,7 +360,14 @@ EVERGREEN = [
     "Duvido um homem me responder sem usar emoji rs",
     "Praia ou piscina? Escolhe e me leva 😏",
     "Estou curiosa: o que faz um homem parar de rolar o feed? 👀",
+    "Vestido ou calça jeans? Qual fica melhor numa mulher? rs",
+    "Sinais de que um homem tá interessado. O primeiro é…",
+    "Homem cheiroso já ganha metade da conversa, concordam?",
+    "Primeiro encontro: cinema ou barzinho? Escolhe 👀",
 ]
+MORNING = ["Bom dia! Quem aí já tomou café pensando em mim? rs", "Bom dia pra quem me deu bom dia primeiro 👀"]
+NIGHT = ["Quem tá acordado essa hora? Me conta o que tá fazendo rs", "Boa noite pra quem ainda tá aqui comigo 👀"]
+WEEKEND = ["Sextou! Qual o plano de vocês pra hoje? rs", "Domingo preguiçoso: cama ou rolê? 👀"]
 
 
 # Prefixos que o Google Trends põe nas buscas de jogo: "Classificações de A x B" → "A x B".
@@ -393,6 +508,45 @@ def hot_questions(heat: str = "quente", seed: int = 0, size: int = MAX_IDEAS) ->
     return diverse(lines, f"evergreen|{heat}|{seed}", size)
 
 
+# Momento do dia (São Paulo): (nome na tela, banco quente, banco leve).
+MOMENTS = {
+    "manha": ("Bom dia", MORNING_Q, MORNING),
+    "madrugada": ("Madrugada", NIGHT_Q, NIGHT),
+    "fds": ("Fim de semana", WEEKEND_Q, WEEKEND),
+}
+
+
+def moment_of(now: datetime | None = None) -> str | None:
+    """manha (5h–11h), madrugada (23h–5h), fds (sexta depois das 17h, sábado e domingo) ou None."""
+    from app.radar import DEFAULT_TZ_INFO
+
+    local = (now or datetime.now(timezone.utc)).astimezone(DEFAULT_TZ_INFO)
+    if local.hour >= 23 or local.hour < 5:
+        return "madrugada"
+    if local.hour < 11:
+        return "manha"
+    if local.weekday() in (5, 6) or (local.weekday() == 4 and local.hour >= 17):
+        return "fds"
+    return None
+
+
+def question_bank(heat: str = "quente", now: datetime | None = None) -> dict[str, Any]:
+    """O banco inteiro de perguntas sem assunto, com formato e momento; a tela sorteia, filtra e marca as usadas."""
+    from app.radar_hot import LABELS, format_of
+
+    hot = heat == "quente"
+    moment = moment_of(now)
+    items = []
+    for key, (_, quente, leve) in MOMENTS.items():
+        items += [{"text": text, "moment": key} for text in (quente if hot else leve)]
+    items += [{"text": text, "moment": None} for text in (EVERGREEN_Q if hot else EVERGREEN)]
+    for item in items:
+        item["fmt"] = format_of(item["text"])
+        item["fmt_label"] = LABELS[item["fmt"]][0]
+    return {"heat": heat, "moment": moment, "moment_label": MOMENTS[moment][0] if moment else None,
+            "moments": {key: label for key, (label, _, _) in MOMENTS.items()}, "items": items}
+
+
 # Exemplos do próprio dono: o tom que dá milhões de views no nicho.
 OWNER_EXAMPLES_LEVE = [
     "Se o Lula ganhar nessa eleição eu mando fotinha",
@@ -448,28 +602,60 @@ def grok_prompt(topic: dict[str, Any], heat: str = "leve", refs: list[str] | Non
     return "\n".join(lines)
 
 
+HOT_COUNT = 10  # textos novos por pedido ao Grok
+
+
+def bank_examples(fmt: str | None, heat: str = "quente", size: int = 6, seed: str = "") -> list[str]:
+    """Frases do banco no formato pedido (ou variadas): referência de tom para o Grok."""
+    from app.radar_hot import format_of
+
+    pool = EVERGREEN_Q if heat == "quente" else EVERGREEN
+    if fmt:
+        pool = [line for line in pool if format_of(line) == fmt] or pool
+    return diverse(pool, f"bank|{fmt}|{heat}|{seed}", size)
+
+
 def hot_prompt(heat: str = "quente", refs: list[str] | None = None, source: dict[str, Any] | None = None,
-               hooks: list[str] | None = None) -> str:
-    """Pedido ao Grok para a área de textos quentes: recriar um texto da biblioteca ou escrever textos novos."""
+               hooks: list[str] | None = None, fmt: str | None = None, seed: str = "") -> str:
+    """Pedido ao Grok para a área de textos quentes: recriar um texto (da biblioteca ou do banco) ou escrever
+    textos novos, todos num formato (fmt) ou um de cada."""
+    from app.radar_hot import LABELS
+
     owner = OWNER_EXAMPLES_QUENTE if heat == "quente" else OWNER_EXAMPLES_LEVE
     lines = [
-        "Você escreve posts curtos de texto para contas de modelos adultas (+18) no X, em português do Brasil, com "
-        "gírias de internet. O público é só de homens. O objetivo é viralizar (milhões de views) com respostas e "
-        "discussão nos comentários.",
+        "Você é a melhor copywriter de contas de modelos adultas (+18) de texto no X, em português do Brasil, com "
+        "gírias de internet. O público é só de homens. O objetivo é viralizar (milhões de views): o algoritmo do X "
+        "entrega o post que gera respostas e discussão, então cada texto precisa fazer o homem querer responder, "
+        "discordar, escolher um lado ou provar alguma coisa nos comentários.",
         "Tom dos posts do dono que funcionam: " + " | ".join(f'"{e}"' for e in owner),
+        "Mais exemplos no tom certo: " + " | ".join(f'"{e}"' for e in bank_examples(fmt, heat, 6, seed)),
     ]
     if refs:
         lines.append("Textos do nicho que estão engajando agora (referência, não copie): " + " | ".join(f'"{r}"' for r in refs))
+    lines.append(
+        "O que faz viralizar: primeira linha curta que prende; pergunta direta aos homens (\"vocês homens…\", "
+        "\"homens,…\"); mexer com o ego masculino (duração, tamanho, pegada, fôlego); escolha entre duas opções; "
+        "curiosidade (\"estou curiosa\"); promessa que o público quer cobrar; terminar com pergunta, \"rs\" ou um "
+        "emoji (😏 👀 🔥). Frases naturais, como uma mulher real escreveria no celular, sem cara de anúncio."
+    )
     if source:
         lines.append(f"Texto que viralizou: \"{source['text']}\" (formato: {source['fmt_label']}; por que funciona: "
                      f"{source['why']}). Recrie a ideia em 6 versões novas, no mesmo formato, com outras palavras, "
                      "outros ângulos e outros ganchos. Nunca repita a frase original.")
     else:
-        lines.append(FORMAT_GUIDE)
+        if fmt and fmt in LABELS:
+            label, why = LABELS[fmt]
+            lines.append(f"Todos no formato {label}: {why}")
+        else:
+            lines.append(FORMAT_GUIDE)
         if hooks:
-            lines.append("Se fizer sentido, pegue carona em um destes assuntos em alta no Brasil: " + ", ".join(hooks) + ".")
-        lines.append("Escreva 8 posts novos, um por linha, sem numeração nem aspas, cada um num formato diferente.")
-    lines += [rules(heat), "Cada post com até 200 caracteres."]
+            lines.append("Pode pegar carona em um destes assuntos em alta no Brasil quando encaixar naturalmente: "
+                         + ", ".join(hooks) + ". A maioria dos textos deve funcionar sem assunto nenhum.")
+        else:
+            lines.append("Sem assunto do momento: textos que funcionam a qualquer hora, em qualquer dia.")
+        lines.append(f"Escreva {HOT_COUNT} posts novos e diferentes entre si, um por linha, sem numeração nem aspas"
+                     + (", cada um num formato diferente." if not fmt else "."))
+    lines += [rules(heat), "Cada post com até 200 caracteres. Não explique nada, só os posts."]
     return "\n".join(lines)
 
 

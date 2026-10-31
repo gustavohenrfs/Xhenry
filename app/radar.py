@@ -520,13 +520,13 @@ def apify_search(token: str, term: str) -> list[dict[str, Any]]:
     return apify_run(token, {"searchTerms": [term], "sort": "Top", "tweetLanguage": "pt", "maxItems": 20})
 
 
-def apify_run(token: str, body: dict[str, Any]) -> list[dict[str, Any]]:
+def apify_run(token: str, body: dict[str, Any], timeout: float = APIFY_SEARCH_TIMEOUT) -> list[dict[str, Any]]:
     """Roda o ator do robô com o pedido dado e devolve os itens; erro vira RadarError legível."""
     import robo
 
-    url = f"{robo.APIFY_API}/acts/{robo.apify_actor()}/run-sync-get-dataset-items?timeout={int(APIFY_SEARCH_TIMEOUT) - 10}"
+    url = f"{robo.APIFY_API}/acts/{robo.apify_actor()}/run-sync-get-dataset-items?timeout={int(timeout) - 10}"
     try:
-        response = httpx.post(url, json=body, headers={"Authorization": f"Bearer {token}"}, timeout=APIFY_SEARCH_TIMEOUT)
+        response = httpx.post(url, json=body, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
     except httpx.HTTPError as exc:
         raise RadarError(f"sem resposta do Apify ({type(exc).__name__}).") from exc
     if response.status_code >= 400:

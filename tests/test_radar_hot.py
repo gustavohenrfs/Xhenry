@@ -91,7 +91,13 @@ def test_hot_rows_keep_only_clean_text_posts():
     assert radar_hot.has_cta("vem no meu privado") and radar_hot.has_cta("https://t.co/x") and not radar_hot.has_cta("se o lula ganhar")
 
 
-def test_hunt_needs_a_token_then_caches_for_everyone(client, monkeypatch):
+@pytest.fixture
+def sync_hunt(monkeypatch):
+    """A caçada roda em segundo plano; aqui roda na hora, para o teste ver o resultado."""
+    monkeypatch.setattr(radar_hot, "run_in_background", lambda work: work())
+
+
+def test_hunt_needs_a_token_then_caches_for_everyone(client, monkeypatch, sync_hunt):
     _, nobody = user()
     resp = client.post("/api/radar/hot/hunt", headers=nobody)
     assert resp.status_code == 400 and "Apify" in resp.json()["detail"]
@@ -99,17 +105,24 @@ def test_hunt_needs_a_token_then_caches_for_everyone(client, monkeypatch):
     _, b = user()
     calls = []
 
-    def run(token, body):
-        calls.append((token, body))
+    def run(token, body, timeout=None):
+        calls.append((token, body, timeout))
         return ITEMS
 
     monkeypatch.setattr(radar, "apify_run", run)
-    first = client.post("/api/radar/hot/hunt", headers=a).json()
-    assert first["cached"] is False and first["total"] == 4 and first["last"]["new"] == 4
-    token, body = calls[0]
-    assert token == "tok-a" and body["searchTerms"] == radar_hot.HOT_QUERIES and body["sort"] == "Top"
-    assert all("lang:pt" in q and "-filter:links" in q for q in body["searchTerms"])
-    assert first["items"][0]["id"] and first["items"][0]["fmt_label"] == "Promessa", "maior nota primeiro"
+    started = client.post("/api/radar/hot/hunt", headers=a).json()
+    assert started["cached"] is False and started["hunting"] is True
+    token, body, timeout = calls[0]
+    assert token == "tok-a" and timeout == radar_hot.HUNT_TIMEOUT
+    assert body["searchTerms"] == radar_hot.QUERY_POOL[:5], "no máximo 5 buscas por execução (limite do ator)"
+    assert body["maxItems"] == 250 and body["minimumFavorites"] == radar_hot.MIN_FAVORITES and body["sort"] == "Top"
+    assert body["tweetLanguage"] == "pt" and all("min_faves" not in q for q in body["searchTerms"])
+    first = client.get("/api/radar/hot", headers=a).json()
+    assert first["total"] == 4 and first["hunting"] is False
+    assert first["last"]["read"] == len(ITEMS) and first["last"]["kept"] == 4 and first["last"]["new"] == 4
+    assert first["last"]["reasons"] == {"repost": 1, "link_ou_venda": 2, "proibido": 1, "curto": 1,
+                                        "poucas_curtidas": 1, "resposta": 1}, "diagnóstico do que ficou de fora"
+    assert first["items"][0]["fmt_label"] == "Promessa", "maior nota primeiro"
     assert first["next_hunt_at"], "diz até quando a caçada não gasta"
     again = client.post("/api/radar/hot/hunt", headers=b).json()
     assert again["cached"] is True and len(calls) == 1, "2 h de cache para todos, sem token de quem clicou"
@@ -119,18 +132,60 @@ def test_hunt_needs_a_token_then_caches_for_everyone(client, monkeypatch):
         assert db.query(HotText).filter(HotText.owner_id == a_id).count() == 4
 
 
-def test_new_hunt_updates_numbers_and_prunes(client, monkeypatch):
+def test_empty_or_failed_hunt_never_locks_and_queries_rotate(client, monkeypatch, sync_hunt):
     _, a = user(apify="tok")
-    monkeypatch.setattr(radar, "apify_run", lambda token, body: ITEMS[:4])
+    bodies = []
+
+    def empty(token, body, timeout=None):
+        bodies.append(body["searchTerms"])
+        return [{"noResults": True}]
+
+    monkeypatch.setattr(radar, "apify_run", empty)
+    client.post("/api/radar/hot/hunt", headers=a)
+    data = client.get("/api/radar/hot", headers=a).json()
+    assert data["last"]["kept"] == 0 and data["last"]["reasons"] == {"vazio": 1} and data["next_hunt_at"] is None
+    client.post("/api/radar/hot/hunt", headers=a)
+    assert len(bodies) == 2, "caçada vazia não trava as 2 h"
+    assert bodies[1] == radar_hot.QUERY_POOL[5:10], "rodízio: a próxima usa as 5 buscas seguintes"
+
+    def broken(token, body, timeout=None):
+        bodies.append(body["searchTerms"])
+        raise radar.RadarError("a conta do Apify está sem crédito (402).")
+
+    monkeypatch.setattr(radar, "apify_run", broken)
+    client.post("/api/radar/hot/hunt", headers=a)
+    failed = client.get("/api/radar/hot", headers=a).json()
+    assert "402" in failed["last"]["error"] and failed["next_hunt_at"] is None and failed["hunting"] is False
+    monkeypatch.setattr(radar, "apify_run", empty)
+    client.post("/api/radar/hot/hunt", headers=a)
+    assert bodies[3] == bodies[2] == radar_hot.QUERY_POOL[10:15], "erro não pula as buscas: repete as mesmas"
+
+
+def test_hunt_lock_stops_double_spending(client, monkeypatch):
+    _, a = user(apify="tok")
+    pending = []
+    monkeypatch.setattr(radar_hot, "run_in_background", pending.append)
+    first = client.post("/api/radar/hot/hunt", headers=a).json()
+    second = client.post("/api/radar/hot/hunt", headers=a).json()
+    assert first["hunting"] is True and second["hunting"] is True and len(pending) == 1, "só uma caçada por vez"
+    monkeypatch.setattr(radar, "apify_run", lambda token, body, timeout=None: ITEMS[:4])
+    pending[0]()
+    assert client.get("/api/radar/hot", headers=a).json()["total"] == 4
+
+
+def test_new_hunt_updates_numbers_and_prunes(client, monkeypatch, sync_hunt):
+    _, a = user(apify="tok")
+    monkeypatch.setattr(radar, "apify_run", lambda token, body, timeout=None: ITEMS[:4])
     client.post("/api/radar/hot/hunt", headers=a)
     with SessionLocal() as db:
         hunt = db.query(RadarPostCache).filter(RadarPostCache.norm == radar_hot.HUNT_KEY).one()
         hunt.fetched_at = hunt.fetched_at - timedelta(hours=3)
         db.commit()
-    monkeypatch.setattr(radar, "apify_run", lambda token, body: [tweet("1", ITEMS[0]["text"], likes=99_999)])
+    monkeypatch.setattr(radar, "apify_run", lambda token, body, timeout=None: [tweet("1", ITEMS[0]["text"], likes=99_999)])
     monkeypatch.setattr(radar_hot, "KEEP_MAX", 2)
-    data = client.post("/api/radar/hot/hunt", headers=a).json()
-    assert data["cached"] is False and data["last"]["new"] == 0, "o mesmo post só atualiza os números"
+    client.post("/api/radar/hot/hunt", headers=a)
+    data = client.get("/api/radar/hot", headers=a).json()
+    assert data["last"]["new"] == 0, "o mesmo post só atualiza os números"
     assert data["total"] == 2 and data["items"][0]["likes"] == 99_999, "a biblioteca guarda só os de nota maior"
 
 
@@ -151,17 +206,23 @@ def test_hot_grok_remix_and_new_texts(client, monkeypatch):
                 "Homens, eu prometo um nude dos seios aqui se lula ganhar\n"
                 "- Se o Corinthians perder eu mando foto, link na bio\n"
                 "Quem curte novinha?\n"
-                "Se esse post bater 1000 respostas eu posto sem censura")
+                "Duvido um homem aguentar 10 minutos comigo")
 
     monkeypatch.setattr(radar_ideas, "ask_grok_lines", fake)
     body = client.post("/api/radar/hot/grok", json={"id": source, "heat": "quente"}, headers=a).json()
-    assert body["ideas"] == ["Homens, se o Flamengo ganhar eu prometo um nude aqui",
-                             "Se esse post bater 1000 respostas eu posto sem censura"], "sem cópia, sem link, sem menor"
+    assert [i["text"] for i in body["ideas"]] == ["Homens, se o Flamengo ganhar eu prometo um nude aqui",
+                                                  "Duvido um homem aguentar 10 minutos comigo"], "sem cópia, link ou menor"
+    assert [i["fmt"] for i in body["ideas"]] == ["promessa", "desafio"]
     assert "prometo um nude dos seios" in prompts[0] and "Promessa" in prompts[0] and "Nunca repita" in prompts[0]
-    fresh = client.post("/api/radar/hot/grok", json={}, headers=a).json()
+    fresh = client.post("/api/radar/hot/grok", json={"fmt": "desafio"}, headers=a).json()
     assert fresh["source"] is None and fresh["ideas"]
-    assert "8 posts novos" in prompts[1] and "Nível QUENTE" in prompts[1] and "nunca sexualizar uma pessoa real" in prompts[1]
-    assert "Nunca mencione link" in prompts[1]
+    assert "10 posts novos" in prompts[1] and "Todos no formato Desafio" in prompts[1] and "Sem assunto" in prompts[1]
+    assert "Nível QUENTE" in prompts[1] and "nunca sexualizar uma pessoa real" in prompts[1] and "Nunca mencione link" in prompts[1]
+    like = client.post("/api/radar/hot/grok", json={"text": "Peito ou bunda? Só pode escolher um 😏"}, headers=a).json()
+    assert like["ideas"] and "Peito ou bunda?" in prompts[2] and "Enquete" in prompts[2]
+    assert client.post("/api/radar/hot/grok", json={"text": "chama no telegram"}, headers=a).status_code == 400
+    client.post("/api/radar/hot/grok", json={"trend": True}, headers=a)
+    assert "Pode pegar carona" not in prompts[3] or "assuntos em alta" in prompts[3]
 
 
 def test_quente_ideas_are_varied_and_keep_the_rules():
@@ -205,14 +266,34 @@ def test_quente_never_sexualizes_a_named_person_and_skips_long_politics():
     assert leve[0].startswith("Se o Flamengo ganhar hoje"), "leve sem semente continua igual a antes"
 
 
-def test_hot_questions_route_rotates(client):
+def test_question_bank_by_format_and_moment(client):
     _, a = user()
-    one = client.get("/api/radar/hot/questions", params={"seed": 1}, headers=a).json()["ideas"]
-    two = client.get("/api/radar/hot/questions", params={"seed": 2}, headers=a).json()["ideas"]
-    assert len(one) == 5 and len(set(one)) == 5 and one != two
-    leve = client.get("/api/radar/hot/questions", params={"heat": "leve"}, headers=a).json()["ideas"]
-    assert set(leve) <= set(radar_ideas.EVERGREEN)
+    one = client.get("/api/radar/hot/questions", params={"seed": 1}, headers=a).json()
+    two = client.get("/api/radar/hot/questions", params={"seed": 2}, headers=a).json()
+    assert len(one["ideas"]) == 5 and len(set(one["ideas"])) == 5 and one["ideas"] != two["ideas"]
+    items = one["items"]
+    assert len(items) >= 100 and len({i["text"] for i in items}) == len(items), "banco grande e sem repetição"
+    assert len({i["fmt"] for i in items}) == 7, "todos os formatos"
+    assert {i["moment"] for i in items} == {None, "manha", "madrugada", "fds"}
+    assert all(not radar_hot.has_cta(i["text"]) and not radar_hot.unsafe(i["text"]) for i in items)
+    leve = client.get("/api/radar/hot/questions", params={"heat": "leve"}, headers=a).json()
+    assert set(leve["ideas"]) <= set(radar_ideas.EVERGREEN)
     assert client.get("/api/radar/hot/questions", params={"heat": "fogo"}, headers=a).status_code == 422
+
+
+def test_moment_follows_sao_paulo_clock():
+    from datetime import datetime, timezone
+
+    def at(day, hour):  # São Paulo = UTC-3
+        return datetime(2026, 11, day, (hour + 3) % 24, 0, tzinfo=timezone.utc).replace(day=day + (hour + 3) // 24)
+
+    assert radar_ideas.moment_of(at(4, 8)) == "manha"        # quarta 8h
+    assert radar_ideas.moment_of(at(4, 15)) is None          # quarta 15h
+    assert radar_ideas.moment_of(at(4, 23)) == "madrugada"   # quarta 23h
+    assert radar_ideas.moment_of(at(6, 19)) == "fds"         # sexta 19h
+    assert radar_ideas.moment_of(at(7, 15)) == "fds"         # sábado 15h
+    bank = radar_ideas.question_bank("quente", at(4, 8))
+    assert bank["moment"] == "manha" and bank["moment_label"] == "Bom dia"
 
 
 def test_angle_and_polemic_bonus():

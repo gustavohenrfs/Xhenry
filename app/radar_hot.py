@@ -24,28 +24,40 @@ from app import radar_sources as src
 from app.models import HotText, RadarPostCache
 
 HUNT_KEY = "__hot__"  # a última caçada fica em radar_post_cache com esse norm
-HUNT_GAP = timedelta(hours=2)
-HUNT_MAX_ITEMS = 120
+HUNT_GAP = timedelta(hours=2)  # só depois de uma caçada que trouxe textos; vazia ou com erro não trava nada
 KEEP = timedelta(days=45)
 KEEP_MAX = 600
 MIN_LIKES = 30
-_hunting = threading.Lock()
 SHOWN = 40
-
-# Buscas do nicho na sintaxe do X: só português, sem resposta, sem link (conta de texto), com curtida mínima.
-_TAIL = " lang:pt -filter:replies -filter:links"
-HOT_QUERIES = [
-    '"vocês homens"' + _TAIL + " min_faves:300",
-    '"os homens gostam"' + _TAIL + " min_faves:300",
-    '"homens" "estou curiosa"' + _TAIL + " min_faves:200",
-    '"se o" ganhar "eu mando"' + _TAIL + " min_faves:200",
-    'prometo nude' + _TAIL + " min_faves:200",
-    '"fantasias sexuais"' + _TAIL + " min_faves:300",
-    'homens gozam' + _TAIL + " min_faves:300",
-    '"sinceramente homens"' + _TAIL + " min_faves:200",
-    '"peluda ou lisinha"' + _TAIL + " min_faves:200",
-    '"se esse post bater"' + _TAIL + " min_faves:300",
+# Limites do ator apidojo/tweet-scraper: no máximo 5 buscas por execução e cada busca precisa render pelo
+# menos 50 posts (abaixo disso ele cobra o mínimo e devolve pouco ou nada). Curtida mínima vai no campo
+# minimumFavorites (min_faves: na busca não é documentado).
+HUNT_BATCH = 5
+PER_QUERY = 50
+MIN_FAVORITES = 100
+HUNT_TIMEOUT = 300.0  # o run-sync do Apify espera até 300 s; roda numa thread, a tela acompanha
+# Buscas do nicho (amplas o bastante para render 50 posts cada). Cada caçada usa as 5 seguintes, em rodízio.
+_TAIL = " -filter:replies -filter:links"
+QUERY_POOL = [
+    "vocês homens" + _TAIL,
+    "os homens gostam" + _TAIL,
+    "homens gozam" + _TAIL,
+    "prometo nude" + _TAIL,
+    "se esse post bater" + _TAIL,
+    "peluda ou lisinha" + _TAIL,
+    "estou curiosa homens" + _TAIL,
+    "fantasias sexuais" + _TAIL,
+    "sinceramente homens" + _TAIL,
+    "duvido um homem" + _TAIL,
+    "homem que aguenta" + _TAIL,
+    "qual vocês preferem" + _TAIL,
+    "mando nude" + _TAIL,
+    "homens preferem" + _TAIL,
+    "confesso que" + _TAIL,
 ]
+HOT_QUERIES = QUERY_POOL  # nome antigo
+_hunting = threading.Lock()
+_state: dict[str, Any] = {"running": False, "started_at": None}
 
 # (chave, nome na tela, por que funciona, regex no texto normalizado). A ordem decide: o primeiro que bate vale.
 FORMATS = [
@@ -53,7 +65,7 @@ FORMATS = [
      r"\bse (?:o |a |os |as )?[a-z0-9 ]{1,40}\b(?:ganhar|perder|passar|bater|chegar|vencer|fizer|tiver)\b|"
      r"\bprometo\b|\beu mando\b|\beu posto\b|\bse esse post\b"),
     ("lista", "Lista", "Lista com gancho: a curiosidade puxa para a próxima linha.",
-     r"\b(?:fantasias|coisas|motivos|tipos|sinais)\b.{0,40}\bque (?:toda|todo|eu|voce|voces)\b|\ba primeira e\b|"
+     r"\b(?:fantasias|coisas|motivos|tipos|sinais)\b.{0,40}\bque (?:toda|todo|eu|voce|voces)\b|\ba primeira e\b|\bo primeiro e\b|"
      r"\b\d+ coisas\b"),
     ("enquete", "Enquete", "Duas opções: todo mundo tem opinião e responde.",
      r"\b[a-z]+ ou [a-z]+\b[^?]{0,40}\?|\bqual (?:voces|vcs) preferem\b|\bescolhe(?:m)? (?:um|uma)\b"),
@@ -114,20 +126,43 @@ def score_of(likes: int, retweets: int, replies: int, views: int) -> int:
     return int(likes + 2 * retweets + 3 * replies + views // 200)
 
 
-def hot_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Itens do Apify → textos que servem: sem repost, resposta, link, venda, conteúdo proibido ou texto curto."""
+def hot_rows(items: list[dict[str, Any]], reasons: dict[str, int] | None = None) -> list[dict[str, Any]]:
+    """Itens do Apify → textos que servem: sem repost, resposta, link, venda, conteúdo proibido ou texto curto.
+    reasons (opcional) conta por que cada item ficou de fora, para o diagnóstico da caçada."""
     import robo
+
+    def skip(reason: str) -> None:
+        if reasons is not None:
+            reasons[reason] = reasons.get(reason, 0) + 1
 
     rows, seen = [], set()
     for item in items:
         tid = robo.tweet_id_of(item)
         text = (robo.tweet_text_of(item) or "").strip()
-        if not tid or tid in seen or robo.is_repost(item) or len(text) < 15 or text.startswith("@"):
+        if not tid:
+            skip("vazio")
             continue
-        if unsafe(text) or has_cta(text) or item.get("isReply") is True:
+        if tid in seen:
+            skip("repetido")
+            continue
+        if robo.is_repost(item) or item.get("isRetweet") is True:
+            skip("repost")
+            continue
+        if text.startswith("@") or item.get("isReply") is True:
+            skip("resposta")
+            continue
+        if len(text) < 15:
+            skip("curto")
+            continue
+        if unsafe(text):
+            skip("proibido")
+            continue
+        if has_cta(text):
+            skip("link_ou_venda")
             continue
         metrics = robo.tweet_metrics(item)
         if metrics["like_count"] < MIN_LIKES:
+            skip("poucas_curtidas")
             continue
         author = item.get("author") if isinstance(item.get("author"), dict) else {}
         handle = str(robo.pick(author, "userName", "username", "screen_name", default="") or "")[:80]
@@ -174,6 +209,16 @@ def item_of(row: HotText) -> dict[str, Any]:
             "why": why, "posted_at": _as_utc(row.posted_at).isoformat() if row.posted_at else None}
 
 
+def hunt_ready_at(hunt: RadarPostCache | None) -> datetime | None:
+    """Até quando uma nova caçada só devolve a biblioteca: só conta caçada que deu certo e trouxe texto."""
+    if hunt is None:
+        return None
+    info = (hunt.posts or [{}])[0]
+    if info.get("error") or not info.get("kept"):
+        return None
+    return _as_utc(hunt.fetched_at) + HUNT_GAP
+
+
 def library(db: Session, fmt: str | None = None, limit: int = SHOWN, now: datetime | None = None) -> dict[str, Any]:
     """A biblioteca para a tela: os de nota mais alta (filtro por formato), contagem por formato e a caçada."""
     now = now or _now()
@@ -184,43 +229,93 @@ def library(db: Session, fmt: str | None = None, limit: int = SHOWN, now: dateti
     counts = dict(db.execute(select(HotText.fmt, func.count()).group_by(HotText.fmt)).all())
     hunt = last_hunt(db)
     at = _as_utc(hunt.fetched_at) if hunt else None
+    ready = hunt_ready_at(hunt)
     return {
         "items": [item_of(row) for row in rows],
         "formats": [{"key": key, "label": label, "why": why, "count": counts.get(key, 0)}
                     for key, (label, why) in LABELS.items()],
         "total": sum(counts.values()),
         "hunted_at": at.isoformat() if at else None,
-        "next_hunt_at": (at + HUNT_GAP).isoformat() if at and at + HUNT_GAP > now else None,
+        "next_hunt_at": ready.isoformat() if ready and ready > now else None,
         "last": (hunt.posts or [{}])[0] if hunt else None,
+        "hunting": bool(_state["running"]),
     }
 
 
-def hunt(db: Session, owner_id: int, token: str | None, now: datetime | None = None) -> dict[str, Any]:
-    """Caçada nova no Apify (token de quem clicou) ou, dentro de HUNT_GAP, a biblioteca sem gastar nada."""
+def next_batch(hunt: RadarPostCache | None) -> tuple[list[str], int]:
+    """As próximas HUNT_BATCH buscas do rodízio e onde a seguinte começa."""
+    start = int(((hunt.posts or [{}])[0] if hunt else {}).get("next", 0) or 0) % len(QUERY_POOL)
+    batch = [QUERY_POOL[(start + i) % len(QUERY_POOL)] for i in range(HUNT_BATCH)]
+    return batch, (start + HUNT_BATCH) % len(QUERY_POOL)
+
+
+def hunt_body(queries: list[str]) -> dict[str, Any]:
+    return {"searchTerms": queries, "sort": "Top", "tweetLanguage": "pt", "minimumFavorites": MIN_FAVORITES,
+            "maxItems": PER_QUERY * len(queries)}
+
+
+def _stamp(db: Session, owner_id: int | None, now: datetime, info: dict[str, Any]) -> None:
+    for old in db.scalars(select(RadarPostCache).where(RadarPostCache.norm == HUNT_KEY)):
+        db.delete(old)
+    db.flush()
+    db.add(RadarPostCache(norm=HUNT_KEY, owner_id=owner_id, fetched_at=now, posts=[info]))
+    db.commit()
+
+
+def hunt_now(db: Session, owner_id: int, token: str, now: datetime | None = None) -> dict[str, Any]:
+    """Uma caçada no Apify: guarda os textos e deixa o diagnóstico (lidos, aproveitados, motivos, erro)."""
     from app import radar
 
     now = now or _now()
-    previous = last_hunt(db)
-    if previous is not None and _as_utc(previous.fetched_at) + HUNT_GAP > now:
+    queries, following = next_batch(last_hunt(db))
+    try:
+        items = radar.apify_run(token, hunt_body(queries), timeout=HUNT_TIMEOUT)
+    except radar.RadarError as exc:
+        # Erro não avança o rodízio nem trava as 2 h: tentar de novo repete as mesmas buscas.
+        _stamp(db, owner_id, now, {"error": str(exc), "read": 0, "kept": 0, "new": 0,
+                                   "next": QUERY_POOL.index(queries[0]), "queries": queries})
+        raise
+    reasons: dict[str, int] = {}
+    rows = hot_rows(items, reasons)
+    new = store(db, rows, owner_id, now)
+    info = {"read": len(items), "kept": len(rows), "new": new, "reasons": reasons, "next": following, "queries": queries}
+    _stamp(db, owner_id, now, info)
+    return info
+
+
+def start_hunt(owner_id: int, token: str | None, db: Session, now: datetime | None = None) -> dict[str, Any]:
+    """Começa uma caçada em segundo plano; dentro de HUNT_GAP de uma caçada boa, só devolve a biblioteca."""
+    now = now or _now()
+    ready = hunt_ready_at(last_hunt(db))
+    if ready and ready > now:
         return library(db, now=now) | {"cached": True}
     if not (token or "").strip():
         raise PermissionError("Token do Apify em falta. Cole o seu em Configurações para caçar textos quentes.")
     if not _hunting.acquire(blocking=False):
-        return library(db, now=now) | {"cached": True}  # outra pessoa já está caçando: ninguém paga duas vezes
-    try:
-        items = radar.apify_run(token.strip(), {"searchTerms": HOT_QUERIES, "sort": "Top", "tweetLanguage": "pt",
-                                               "maxItems": HUNT_MAX_ITEMS})
-        rows = hot_rows(items)
-        new = store(db, rows, owner_id, now)
-        for old in db.scalars(select(RadarPostCache).where(RadarPostCache.norm == HUNT_KEY)):
-            db.delete(old)
-        db.flush()
-        db.add(RadarPostCache(norm=HUNT_KEY, owner_id=owner_id, fetched_at=now,
-                              posts=[{"read": len(items), "kept": len(rows), "new": new}]))
-        db.commit()
-    finally:
-        _hunting.release()
-    return library(db, now=now) | {"cached": False}
+        return library(db, now=now) | {"cached": False}  # outra pessoa já está caçando: ninguém paga duas vezes
+    _state.update(running=True, started_at=now.isoformat())
+    key = token.strip()
+
+    def work() -> None:
+        from app.database import SessionLocal
+
+        try:
+            with SessionLocal() as own:
+                hunt_now(own, owner_id, key)
+        except Exception:  # o erro legível já ficou gravado na caçada (ou é um defeito, que vai para o log)
+            import logging
+
+            logging.getLogger("xhenry").exception("radar hot: caçada falhou")
+        finally:
+            _state.update(running=False)
+            _hunting.release()
+
+    run_in_background(work)
+    return library(db, now=now) | {"cached": False, "hunting": True}
+
+
+def run_in_background(work) -> None:
+    threading.Thread(target=work, name="radar-hot-cacar", daemon=True).start()
 
 
 def examples(db: Session, n: int = 6) -> list[str]:

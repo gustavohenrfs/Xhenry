@@ -1535,6 +1535,16 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 .hot-text { font-size: .95rem; line-height: 1.45; color: var(--fg); overflow-wrap: anywhere; white-space: pre-line; }
 .hot-why { font-size: .72rem; color: var(--muted); }
 .hot-remix:not([hidden]) { display: grid; gap: .5rem; padding-top: .35rem; }
+/* Os três blocos do card (Perguntas quentes, Grok, Caçados no X), separados por uma linha fina. */
+.hot-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.hot-block-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem .75rem; margin-bottom: .6rem; }
+.hot-block .hot-question:not(:empty) { margin-top: 0; }
+.hot-used-tag:not(:empty) { font-size: .65rem; color: var(--muted); padding: .05rem .45rem; border: 1px dashed var(--line-strong); border-radius: 999px; }
+.hot-q-list:not([hidden]) { display: grid; gap: .5rem; margin-top: .75rem; max-height: 32rem; overflow-y: auto; overscroll-behavior: contain; padding-right: .25rem; }
+@media (min-width: 1024px) { .hot-q-list:not([hidden]) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.hot-q-item { display: flex; flex-direction: column; gap: .45rem; padding: .75rem .85rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--field); min-width: 0; }
+.hot-q-item.is-used .hot-text { color: var(--muted); }
+#hot-grok-out .idea-item .hot-fmt { align-self: flex-start; }
 .hot-remix[hidden] { display: none; }
 @media (max-width: 767px) {
   .radar-controls { width: 100%; }

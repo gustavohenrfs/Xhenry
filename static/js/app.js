@@ -3543,7 +3543,7 @@ async function loadRadar({ silent = false } = {}) {
   try {
     const data = await api("/api/radar?region=" + radarRegion + "&heat=" + radarHeat);
     paintRadar(data);
-    if (!hotData) loadHot();
+    if (!hotData || hotData.hunting) loadHot();
     // O servidor começou uma leitura (dados velhos ou nenhum): olha de novo em 20 s, até 3 vezes.
     if (data.refreshing && radarRetry < 3) {
       radarRetry += 1;
@@ -3597,13 +3597,13 @@ function ideaActions(text) {
   const box = el("span", "idea-actions");
   const copy = el("button", "idea-btn", "Copiar");
   copy.type = "button";
-  copy.addEventListener("click", (event) => { event.stopPropagation(); copyIdea(text); });
+  copy.addEventListener("click", (event) => { event.stopPropagation(); copyIdea(text); markHotUsed(text); });
   const post = el("a", "idea-btn is-post", "Postar");
   post.href = "https://x.com/intent/post?text=" + encodeURIComponent(text);
   post.target = "_blank";
   post.rel = "noopener noreferrer";
   post.title = "Abre o X com o texto pronto";
-  post.addEventListener("click", (event) => event.stopPropagation());
+  post.addEventListener("click", (event) => { event.stopPropagation(); markHotUsed(text); });
   box.append(copy, post);
   return box;
 }
@@ -3832,32 +3832,207 @@ function setCostLabel(button, text) {
   const label = button.querySelector(".cost-label");
   if (label) label.textContent = text; else button.textContent = text;
 }
-// ---------- Textos quentes do nicho ----------
-// Biblioteca compartilhada (GET grátis); "Caçar" roda o Apify de quem clicou (vale 2 h para todos);
-// "Recriar com Grok" e "Textos novos com Grok" usam a chave xAI. Textos de terceiros entram só por textContent.
+// ---------- Textos quentes ----------
+// Três blocos: Perguntas quentes (banco grátis, sem assunto, com as usadas marcadas neste navegador),
+// Textos novos com Grok (chave xAI) e Caçados no X (Apify de quem clicou; a caçada roda em segundo plano
+// e a tela acompanha). Textos de terceiros entram só por textContent.
+const HOT_REASONS = { vazio: "sem resultado", repetido: "repetidos", repost: "reposts", resposta: "respostas", curto: "curtos",
+  proibido: "conteúdo proibido", link_ou_venda: "com link ou venda", poucas_curtidas: "com poucas curtidas" };
 let hotData = null;
 let hotFormat = "";
 let hotSeed = 0;
-let hotQuestionAt = 0;
-let hotQuestions = [];
+let hotBank = null;
+let hotQFilter = "";  // "" = agora (momento + gerais); formato; ou "m:<momento>"
+let hotQAt = 0;
+let hotQOrder = [];
+let hotPoll = null;
+let hotUsed = new Set();
+try { hotUsed = new Set(JSON.parse(localStorage.getItem("hot_used") || "[]")); } catch { hotUsed = new Set(); }
+function markHotUsed(text) {
+  if (hotUsed.has(text)) return;
+  hotUsed.add(text);
+  try { localStorage.setItem("hot_used", JSON.stringify([...hotUsed].slice(-800))); } catch { /* sem storage */ }
+  if (hotBank) paintHotCount();
+}
+// Sorteio que muda a cada dia mas fica igual durante o dia (a ordem não pula a cada clique).
+function dayRank(text) {
+  const key = new Date().toISOString().slice(0, 10) + text;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i += 1) hash = Math.imul(hash ^ key.charCodeAt(i), 16777619);
+  return hash >>> 0;
+}
+function hotQItems() {
+  const items = hotBank ? hotBank.items : [];
+  if (hotQFilter.startsWith("m:")) return items.filter((item) => item.moment === hotQFilter.slice(2));
+  if (hotQFilter) return items.filter((item) => item.fmt === hotQFilter && (!item.moment || item.moment === hotBank.moment));
+  return items.filter((item) => !item.moment || item.moment === hotBank.moment);
+}
+function orderHotQuestions() {
+  const now = hotBank && hotBank.moment;
+  hotQOrder = hotQItems().slice().sort((a, b) =>
+    (hotUsed.has(a.text) - hotUsed.has(b.text)) || ((b.moment === now && !hotQFilter) - (a.moment === now && !hotQFilter)) || (dayRank(a.text) - dayRank(b.text)));
+  hotQAt = 0;
+}
+async function loadHotBank() {
+  try {
+    hotBank = await api("/api/radar/hot/questions?heat=" + radarHeat);
+  } catch { hotBank = null; }
+  orderHotQuestions();
+  paintHotFilters();
+  showHotQuestion();
+  paintHotList();
+}
+const paintHotQuestion = loadHotBank;  // nome usado quando o nível (Leve/Quente) muda
+function paintHotCount() {
+  const items = hotQItems();
+  const fresh = items.filter((item) => !hotUsed.has(item.text)).length;
+  document.getElementById("hot-q-count").textContent = fresh + " novas de " + items.length
+    + (hotBank && hotBank.moment_label ? " · agora: " + hotBank.moment_label.toLowerCase() : "");
+}
+function paintHotFilters() {
+  const host = document.getElementById("hot-q-filters");
+  if (!hotBank) { host.replaceChildren(); return; }
+  const formats = [...new Map(hotBank.items.map((item) => [item.fmt, item.fmt_label])).entries()];
+  const options = [["", "Agora"]].concat(formats, Object.entries(hotBank.moments).map(([key, label]) => ["m:" + key, label]));
+  host.replaceChildren(...options.map(([key, label]) => {
+    const chip = el("button", "chip" + (hotQFilter === key ? " on" : ""), label);
+    chip.type = "button";
+    chip.setAttribute("aria-pressed", String(hotQFilter === key));
+    chip.addEventListener("click", () => {
+      hotQFilter = key;
+      orderHotQuestions();
+      paintHotFilters();
+      showHotQuestion();
+      paintHotList();
+    });
+    return chip;
+  }));
+  paintHotCount();
+}
+function moreLikeThis(text, target) {
+  const button = costButton("Mais como essa", "grok", "idea-btn");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    askHotGrok(button, target || document.getElementById("hot-grok-out"), { text });
+  });
+  return button;
+}
+function showHotQuestion() {
+  const host = document.getElementById("hot-question");
+  if (!hotQOrder.length) { host.replaceChildren(el("p", "text-sm text-mute", "Nenhuma pergunta nesse filtro.")); return; }
+  const item = hotQOrder[hotQAt % hotQOrder.length];
+  const top = el("div", "radar-hook-top");
+  top.append(el("span", "radar-hook-label", item.fmt_label));
+  if (item.moment && hotBank.moments[item.moment]) top.append(el("span", "radar-note", hotBank.moments[item.moment]));
+  if (hotUsed.has(item.text)) top.append(el("span", "hot-used-tag", "já usada"));
+  const actions = ideaActions(item.text);
+  const next = costButton("Outra", "free", "idea-btn");
+  next.addEventListener("click", () => { hotQAt += 1; showHotQuestion(); });
+  actions.append(next, moreLikeThis(item.text));
+  host.replaceChildren(top, el("p", "hot-question-line font-display", item.text), actions);
+}
+function paintHotList() {
+  const list = document.getElementById("hot-q-list");
+  if (list.hidden) return;
+  list.replaceChildren(...hotQOrder.map((item) => {
+    const li = el("li", "hot-q-item" + (hotUsed.has(item.text) ? " is-used" : ""));
+    const head = el("div", "hot-item-top");
+    head.append(el("span", "radar-cat hot-fmt", item.fmt_label), el("span", "hot-used-tag", hotUsed.has(item.text) ? "já usada" : ""));
+    const actions = ideaActions(item.text);
+    actions.append(moreLikeThis(item.text));
+    li.append(head, el("p", "hot-text", item.text), actions);
+    return li;
+  }));
+}
+document.getElementById("hot-q-toggle").addEventListener("click", (event) => {
+  const list = document.getElementById("hot-q-list");
+  list.hidden = !list.hidden;
+  event.currentTarget.setAttribute("aria-expanded", String(!list.hidden));
+  event.currentTarget.textContent = list.hidden ? "Ver todas" : "Esconder a lista";
+  paintHotList();
+});
+document.getElementById("hot-q-reset").addEventListener("click", () => {
+  hotUsed = new Set();
+  try { localStorage.removeItem("hot_used"); } catch { /* sem storage */ }
+  orderHotQuestions();
+  paintHotCount();
+  showHotQuestion();
+  paintHotList();
+  toast("Pronto: todas as perguntas voltaram a contar como novas.", "ok");
+});
+// Lista do Grok: cada texto com o formato, Copiar/Postar e "Mais como essa".
+function grokList(ideas, target) {
+  const list = el("ol", "idea-list");
+  ideas.forEach((idea) => {
+    const text = typeof idea === "string" ? idea : idea.text;
+    const li = el("li", "idea-item");
+    if (idea.fmt_label) li.append(el("span", "radar-cat hot-fmt", idea.fmt_label));
+    const actions = ideaActions(text);
+    actions.append(moreLikeThis(text, target));
+    li.append(el("p", "idea-text", text), actions);
+    list.append(li);
+  });
+  return list;
+}
+async function askHotGrok(button, out, options) {
+  const opts = options || {};
+  const label = button.querySelector(".cost-label").textContent;
+  button.disabled = true;
+  setCostLabel(button, "Pedindo ao Grok…");
+  const body = { heat: radarHeat, id: opts.id === undefined ? null : opts.id, text: opts.text || null };
+  if (opts.id === undefined && !opts.text) {
+    body.fmt = hotQFilter && !hotQFilter.startsWith("m:") ? hotQFilter : null;
+    body.trend = document.getElementById("hot-grok-trend").checked;
+  }
+  try {
+    const data = await api("/api/radar/hot/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    out.hidden = false;
+    const title = opts.text ? "Mais como: “" + opts.text.slice(0, 60) + (opts.text.length > 60 ? "…”" : "”")
+      : opts.id !== undefined ? "Versões novas no mesmo formato" : "Textos novos do Grok";
+    out.replaceChildren(el("p", "text-xs text-mute", title), grokList(data.ideas, out));
+    if (out.id === "hot-grok-out") out.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (error) { toast(error.message || "O Grok não respondeu.", "error"); }
+  setCostLabel(button, label);
+  button.disabled = false;
+}
+// Caçados no X.
 async function loadHot() {
   try {
     paintHot(await api("/api/radar/hot" + (hotFormat ? "?fmt=" + hotFormat : "")));
   } catch (error) {
     document.getElementById("hot-status").textContent = error.message || "Não leu a biblioteca de textos quentes.";
   }
-  if (!hotQuestions.length) paintHotQuestion();
+  if (!hotBank) loadHotBank();
 }
 function hotStatus(data) {
+  if (data.hunting) return "Caçando no X agora… pode levar até 5 minutos. Pode continuar usando o painel.";
   const parts = [data.total ? data.total + " textos na biblioteca" : "Biblioteca vazia"];
-  if (data.hunted_at) parts.push("última caçada " + agoText(data.hunted_at));
-  if (data.last && data.last.new !== undefined) parts.push(data.last.new + " novos nela");
+  const last = data.last || {};
+  if (data.hunted_at) {
+    if (last.error) parts.push("a última caçada falhou " + agoText(data.hunted_at) + ": " + last.error);
+    else {
+      parts.push("última caçada " + agoText(data.hunted_at) + ": o X devolveu " + (last.read || 0) + " posts, " + (last.kept || 0) + " serviram, " + (last.new || 0) + " novos");
+      const out = Object.entries(last.reasons || {}).filter(([, n]) => n).map(([key, n]) => n + " " + (HOT_REASONS[key] || key));
+      if (out.length) parts.push("fora: " + out.join(", "));
+    }
+  }
   if (data.next_hunt_at) parts.push("até " + new Date(data.next_hunt_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + " caçar mostra a biblioteca sem gastar crédito");
   return parts.join(" · ");
 }
 function paintHot(data) {
+  const wasHunting = hotData && hotData.hunting;
   hotData = data;
+  const button = document.getElementById("hot-hunt");
+  button.disabled = !!data.hunting;
+  setCostLabel(button, data.hunting ? "Caçando no X…" : "Caçar textos quentes");
   document.getElementById("hot-status").textContent = hotStatus(data);
+  clearTimeout(hotPoll);
+  if (data.hunting) hotPoll = setTimeout(() => { if (state.tab === "radar") loadHot(); }, 5000);
+  else if (wasHunting) {
+    const last = data.last || {};
+    if (last.error) toast("A caçada falhou: " + last.error, "error");
+    else toast("Caçada pronta: " + (last.new || 0) + " textos novos.", (last.kept || 0) ? "ok" : "info");
+  }
   const chips = document.getElementById("hot-formats");
   const all = [{ key: "", label: "Todos", count: data.total, why: "" }].concat(data.formats.filter((f) => f.count));
   chips.replaceChildren(...(data.total ? all : []).map((item) => {
@@ -3870,7 +4045,7 @@ function paintHot(data) {
   const host = document.getElementById("hot-list");
   if (!data.items.length) {
     const li = el("li");
-    li.append(emptyState("radar", "Nenhum texto quente ainda", "Caçar textos quentes busca no X os posts de texto do nicho que mais engajaram (usa crédito do seu Apify) e guarda aqui para todo mundo.", "Caçar agora", huntHot));
+    li.append(emptyState("radar", data.hunting ? "Caçando…" : "Nenhum texto caçado ainda", "Caçar textos quentes busca no X os posts de texto do nicho que mais engajaram (usa crédito do seu Apify) e guarda aqui para todo mundo.", data.hunting ? null : "Caçar agora", huntHot));
     host.replaceChildren(li);
     return;
   }
@@ -3889,7 +4064,7 @@ function hotRow(item) {
   const remix = costButton("Recriar com Grok", "grok", "idea-btn");
   const out = el("div", "hot-remix");
   out.hidden = true;
-  remix.addEventListener("click", () => askHotGrok(remix, out, item.id));
+  remix.addEventListener("click", () => askHotGrok(remix, out, { id: item.id }));
   actions.append(remix);
   if (item.url) {
     const open = el("a", "idea-btn", "Abrir no X");
@@ -3904,51 +4079,18 @@ function hotRow(item) {
 async function huntHot() {
   const button = document.getElementById("hot-hunt");
   button.disabled = true;
-  setCostLabel(button, "Caçando no X…");
+  setCostLabel(button, "Começando…");
   try {
     const data = await api("/api/radar/hot/hunt", { method: "POST" });
     hotFormat = "";
     paintHot(data);
-    toast(data.cached ? "A última caçada foi há pouco: mostrando a biblioteca, sem gastar crédito." : "Caçada pronta: " + ((data.last && data.last.new) || 0) + " textos novos.", data.cached ? "info" : "ok");
-  } catch (error) { toast(error.message || "Não caçou os textos.", "error"); }
-  setCostLabel(button, "Caçar textos quentes");
-  button.disabled = false;
-}
-async function askHotGrok(button, out, id) {
-  const label = button.querySelector(".cost-label").textContent;
-  button.disabled = true;
-  setCostLabel(button, "Pedindo ao Grok…");
-  try {
-    const data = await api("/api/radar/hot/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: id === undefined ? null : id, heat: radarHeat }) });
-    out.hidden = false;
-    out.replaceChildren(el("p", "text-xs text-mute", id === undefined ? "Textos novos do Grok" : "Versões novas no mesmo formato"), ideaList(data.ideas));
-  } catch (error) { toast(error.message || "O Grok não respondeu.", "error"); }
-  setCostLabel(button, label);
-  button.disabled = false;
-}
-async function paintHotQuestion() {
-  try {
-    const data = await api("/api/radar/hot/questions?heat=" + radarHeat + "&seed=" + hotSeed);
-    hotQuestions = data.ideas;
-    hotQuestionAt = 0;
-  } catch { hotQuestions = []; }
-  showHotQuestion();
-}
-function showHotQuestion() {
-  const host = document.getElementById("hot-question");
-  if (!hotQuestions.length) { host.replaceChildren(); return; }
-  const line = hotQuestions[hotQuestionAt % hotQuestions.length];
-  const top = el("div", "radar-hook-top");
-  top.append(el("span", "radar-hook-label", "Pergunta quente"), el("span", "radar-note", "serve a qualquer hora, sem assunto"));
-  const actions = ideaActions(line);
-  const next = costButton("Outra", "free", "idea-btn");
-  next.addEventListener("click", () => {
-    hotQuestionAt += 1;
-    if (hotQuestionAt >= hotQuestions.length) { hotSeed += 1; paintHotQuestion(); return; }
-    showHotQuestion();
-  });
-  actions.append(next);
-  host.replaceChildren(top, el("p", "hot-question-line font-display", line), actions);
+    if (data.cached) toast("A última caçada foi há pouco: mostrando a biblioteca, sem gastar crédito.", "info");
+    else if (data.hunting) toast("Caçada começou. Leva alguns minutos; aviso quando terminar.", "info");
+  } catch (error) {
+    toast(error.message || "Não caçou os textos.", "error");
+    button.disabled = false;
+    setCostLabel(button, "Caçar textos quentes");
+  }
 }
 (function decorateHotButtons() {
   const hunt = document.getElementById("hot-hunt");
