@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,13 @@ class DraftPatch(BaseModel):
 @router.get("/api/drafts")
 def list_drafts(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     return postar.board(db, user.id)
+
+
+@router.get("/api/drafts/results")
+def draft_results(folder_id: int | None = Query(default=None), user: User = Depends(approved_user),
+                  db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Como os textos se saíram: cada "Postei" ligado ao post real lido pelo robô, somado por frase."""
+    return postar.results(db, user.id, folder_id)
 
 
 @router.post("/api/drafts", status_code=201)

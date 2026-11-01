@@ -363,7 +363,7 @@ function setTab(tab) {
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
   if (tab === "radar") { loadRadar(); refreshRadar({ auto: true }); }
-  if (tab === "postar") loadDrafts();
+  if (tab === "postar") { loadDrafts(); loadDraftResults(); }
   if (tab === "users") loadUsers();
   document.querySelectorAll(".nav-divider, .more-divider").forEach((node) => node.classList.toggle("on", INFO_TABS.includes(tab)));
   if (tab === "algo") paintWeights();
@@ -1688,6 +1688,7 @@ function setFolder(id) {
   if (state.tab === "metricas") loadMetrics();
   paintDrafts();
   paintDraftGrid();
+  if (state.tab === "postar") loadDraftResults();
 }
 function renderDashboard(data, sig, swap, live) {
   paintFolderPick(data.folders);
@@ -1772,6 +1773,7 @@ async function load({ silent = false } = {}) {
     // "Atualizar dados" e o ao vivo passam por aqui: a aba Métricas acompanha.
     if (state.tab === "metricas") loadMetrics({ silent: true });
     else metricsStale = true;
+    if (state.tab === "postar") loadDraftResults();
     markLive(true);
     startLive();
     if (!silent) prefetchPeriods();
@@ -4110,10 +4112,10 @@ function paintAccountsInfo() {
   const info = hotBank && hotBank.accounts_info;
   node.hidden = !hotAccounts || !info;
   if (node.hidden) return;
-  const total = info.sua + info.nicho;
+  const total = (info.lote || 0) + info.sua + info.nicho;
   node.classList.toggle("is-empty", !total);
   node.textContent = total
-    ? "Entraram " + info.sua + (info.sua === 1 ? " frase das suas contas" : " frases das suas contas") + " e " + info.nicho
+    ? "Entraram " + (info.lote ? info.lote + " do seu lote, " : "") + info.sua + (info.sua === 1 ? " frase das suas contas" : " frases das suas contas") + " e " + info.nicho
       + " do nicho. Elas aparecem primeiro, com a marca de onde vieram."
     : "Nenhum post passou no filtro de viral ainda. " + info.rule;
 }
@@ -4148,7 +4150,8 @@ function paintHotFilters() {
 function provenTag(item) {
   if (!item.source) return null;
   const views = item.views ? " · " + num(item.views) + " views" : "";
-  return el("span", "hot-proven is-" + item.source, item.source === "sua" ? "Já bombou na sua conta" + views : "Inspirada no nicho" + views);
+  const label = { lote: "Deu certo no seu lote", sua: "Já bombou na sua conta", nicho: "Inspirada no nicho" }[item.source] || "Comprovada";
+  return el("span", "hot-proven is-" + item.source, label + views);
 }
 // Variações grátis de um texto que engajou (troca abertura, fecho, meta e ordem; sem API).
 function freeVariations(text, target) {
@@ -4930,6 +4933,7 @@ async function pzAct(promise, message) {
     toast(error.message || "Não deu certo. Tente de novo.", "error");
   }
   await loadDrafts({ silent: true });
+  loadDraftResults();
 }
 function draftCard(account) {
   const status = pzStateOf(account);
@@ -5050,6 +5054,69 @@ document.querySelectorAll("[data-pz-filter]").forEach((button) => button.addEven
   pzFilter = button.dataset.pzFilter;
   paintPzFilter();
   paintDraftGrid();
+}));
+
+// Como os textos se saíram: cada Postei ligado ao post real (robô), uma linha por frase, campeãs marcadas.
+// As campeãs também entram no "Com base nas contas" do Radar. Sem link para o X (o dono usa multilogin).
+let resultsData = null;
+let resultsSeq = 0;
+let pzSort = "views";
+async function loadDraftResults() {
+  const seq = ++resultsSeq;
+  try {
+    const data = await api("/api/drafts/results" + (state.folderId ? "?folder_id=" + state.folderId : ""));
+    if (seq !== resultsSeq) return;
+    resultsData = data;
+    paintDraftResults();
+  } catch { /* a aba já avisa dos outros erros */ }
+}
+function shortNum(value) {
+  if (value === null || value === undefined) return "—";
+  if (value >= 1e6) return (value / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " mi";
+  if (value >= 1e4) return Math.round(value / 1e3) + " mil";
+  return num(value);
+}
+function paintDraftResults() {
+  if (!resultsData) return;
+  document.querySelectorAll("[data-pz-sort]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.pzSort === pzSort)));
+  const note = document.getElementById("pz-results-note");
+  const list = document.getElementById("pz-results-list");
+  const read = resultsData.phrases.filter((r) => r.matched);
+  const waiting = resultsData.pending;
+  note.textContent = (read.length ? (read.length === 1 ? "1 frase lida" : read.length + " frases lidas") + " nos últimos " + resultsData.days + " dias"
+    + (resultsData.normal_views ? ". Seu post normal faz " + shortNum(resultsData.normal_views) + " views." : ".") : "Ainda sem resultado.")
+    + (waiting ? " " + (waiting === 1 ? "1 post esperando" : waiting + " posts esperando") + " a leitura do robô." : "");
+  if (!resultsData.phrases.length) {
+    list.replaceChildren(el("li", "pz-results-empty", "Marque Postei nos textos do lote. Depois que o robô ler as contas, cada frase aparece aqui com views e comentários."));
+    return;
+  }
+  const key = { views: (r) => r.avg_views ?? -1, replies: (r) => r.avg_replies ?? -1, recent: (r) => Date.parse(r.last_at) }[pzSort];
+  const rows = resultsData.phrases.slice().sort((a, b) => key(b) - key(a));
+  const top = Math.max(1, ...rows.map((r) => (pzSort === "replies" ? r.avg_replies : r.avg_views) || 0));
+  list.replaceChildren(...rows.map((row, index) => {
+    const li = el("li", "pz-result" + (row.champion ? " is-champ" : "") + (row.matched ? "" : " is-waiting"));
+    li.style.setProperty("--i", Math.min(index, 12));
+    const value = (pzSort === "replies" ? row.avg_replies : row.avg_views) || 0;
+    li.style.setProperty("--w", row.matched ? Math.max(3, value / top * 100).toFixed(1) + "%" : "0%");
+    const head = el("div", "pz-result-head");
+    head.append(el("span", "radar-cat hot-fmt", row.fmt_label));
+    if (row.champion) head.append(el("span", "pz-champ", "Campeã"));
+    head.append(el("span", "pz-result-reach", row.matched ? "em " + (row.matched === 1 ? "1 conta" : row.matched + " contas")
+      + (row.posts > row.matched ? " (" + (row.posts - row.matched) + " esperando)" : "") : "esperando a leitura"));
+    const stats = el("dl", "pz-result-stats");
+    [["views em média", shortNum(row.avg_views)], ["comentários em média", shortNum(row.avg_replies)],
+      ["melhor conta", row.best ? "@" + row.best.username + " " + shortNum(row.best.views) : "—"]].forEach(([label, text]) => {
+      const box = el("div", "");
+      box.append(el("dt", "", label), el("dd", "font-display", text));
+      stats.append(box);
+    });
+    li.append(head, el("p", "pz-result-text", row.text), el("div", "pz-meter"), stats, ideaActions(row.text));
+    return li;
+  }));
+}
+document.querySelectorAll("[data-pz-sort]").forEach((button) => button.addEventListener("click", () => {
+  pzSort = button.dataset.pzSort;
+  paintDraftResults();
 }));
 
 // Guardar (Radar): escolhe a conta numa lista com busca, igual à busca rápida.

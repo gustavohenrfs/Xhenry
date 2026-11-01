@@ -120,3 +120,104 @@ def remove(db: Session, owner_id: int, draft_id: int) -> None:
     db.delete(owned_draft(db, owner_id, draft_id))
     db.commit()
 
+
+
+# ---------- Como os textos se saíram ----------
+# Cada "Postei" é ligado ao post real que o robô leu da mesma conta: texto igual ou quase (sem caixa, acento,
+# pontuação e emoji) e publicado entre 6 h antes e 1 h depois do clique. As frases iguais em contas diferentes
+# somam numa linha só. Campeã = acima da mediana das frases do lote e acima das suas views normais (ou com
+# conversa: CHAMPION_REPLIES respostas em média).
+MATCH_BEFORE = timedelta(hours=6)
+MATCH_AFTER = timedelta(hours=1)
+RESULTS_DAYS = 30
+CHAMPION_REPLIES = 20
+
+
+def _words(text: str) -> set[str]:
+    return set(norm(text).split())
+
+
+def same_post(draft_text: str, tweet_text: str) -> bool:
+    a, b = norm(draft_text), norm(tweet_text)
+    if not a or not b:
+        return False
+    if a == b or a.startswith(b[:60]) or b.startswith(a[:60]):
+        return True
+    wa, wb = _words(a), _words(b)
+    return len(wa & wb) / max(1, len(wa | wb)) >= .75
+
+
+def _median(values: list[float]) -> float:
+    values = sorted(values)
+    return values[len(values) // 2] if values else 0
+
+
+def results(db: Session, owner_id: int, folder_id: int | None = None) -> dict[str, Any]:
+    from app.algo_metrics import is_own_reply
+    from app.models import TweetSample
+    from app.radar_hot import LABELS, format_of
+
+    now = now_utc()
+    accounts = {a.id: a for a in selected_accounts(db, owner_id, folder_id)}
+    empty = {"phrases": [], "pending": 0, "normal_views": 0, "days": RESULTS_DAYS}
+    if not accounts:
+        return empty
+    drafts = db.scalars(select(PostDraft).where(
+        PostDraft.owner_id == owner_id, PostDraft.posted_at.is_not(None), PostDraft.account_id.in_(accounts),
+        PostDraft.posted_at >= now - timedelta(days=RESULTS_DAYS)).order_by(PostDraft.posted_at)).all()
+    if not drafts:
+        return empty
+    oldest = min(as_utc(d.posted_at) for d in drafts) - MATCH_BEFORE
+    tweets = db.execute(select(
+        TweetSample.account_id, TweetSample.tweet_id, TweetSample.posted_at, TweetSample.text_preview,
+        TweetSample.view_count, TweetSample.reply_count, TweetSample.like_count,
+    ).where(TweetSample.account_id.in_(accounts), TweetSample.posted_at >= oldest)).all()
+    by_account: dict[int, list[Any]] = {}
+    for row in tweets:
+        if row.text_preview and not is_own_reply(row):
+            by_account.setdefault(row.account_id, []).append(row)
+    normal = db.execute(select(TweetSample.view_count).where(
+        TweetSample.account_id.in_(accounts), TweetSample.posted_at >= now - timedelta(days=90))).scalars().all()
+    normal_views = _median([v or 0 for v in normal])
+
+    used: set[str] = set()
+    phrases: dict[str, dict[str, Any]] = {}
+    pending = 0
+    for draft in drafts:
+        at = as_utc(draft.posted_at)
+        candidates = [t for t in by_account.get(draft.account_id, [])
+                      if t.tweet_id not in used and at - MATCH_BEFORE <= as_utc(t.posted_at) <= at + MATCH_AFTER
+                      and same_post(draft.text, t.text_preview)]
+        hit = min(candidates, key=lambda t: abs((as_utc(t.posted_at) - at).total_seconds()), default=None)
+        key = same_key(draft.text)
+        phrase = phrases.setdefault(key, {"text": draft.text, "posts": 0, "matched": 0, "views": 0, "replies": 0,
+                                          "likes": 0, "best": None, "last_at": None})
+        phrase["posts"] += 1
+        phrase["last_at"] = at.isoformat()
+        if hit is None:
+            pending += 1
+            continue
+        used.add(hit.tweet_id)
+        account = accounts[draft.account_id]
+        views, replies = hit.view_count or 0, hit.reply_count or 0
+        phrase["matched"] += 1
+        phrase["views"] += views
+        phrase["replies"] += replies
+        phrase["likes"] += hit.like_count or 0
+        if phrase["best"] is None or views > phrase["best"]["views"]:
+            phrase["best"] = {"username": account.username, "views": views, "replies": replies,
+                              "url": f"https://x.com/{account.username}/status/{hit.tweet_id}"}
+    rows = []
+    for phrase in phrases.values():
+        matched = phrase["matched"]
+        fmt = format_of(phrase["text"])
+        phrase |= {"avg_views": round(phrase["views"] / matched) if matched else None,
+                   "avg_replies": round(phrase["replies"] / matched) if matched else None,
+                   "fmt": fmt, "fmt_label": LABELS[fmt][0], "champion": False}
+        rows.append(phrase)
+    seen = [r for r in rows if r["matched"]]
+    middle = _median([r["avg_views"] for r in seen])
+    for row in seen:
+        row["champion"] = row["avg_views"] >= middle and (row["avg_views"] >= normal_views or row["avg_replies"] >= CHAMPION_REPLIES)
+    rows.sort(key=lambda r: (r["matched"] == 0, -(r["avg_views"] or 0)))
+    return {"phrases": rows, "pending": pending, "normal_views": int(normal_views), "days": RESULTS_DAYS}

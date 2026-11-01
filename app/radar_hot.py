@@ -386,9 +386,16 @@ def viral(item: dict[str, Any], own_median: int = 0) -> bool:
 def proven(db: Session, owner_id: int | None, limit: int = 16) -> list[dict[str, Any]]:
     """Os textos que viralizaram de verdade (viral): os das suas contas (source "sua") e os das contas do nicho
     que você caça (source "nicho", e acima da mediana da biblioteca), sem link, venda ou conteúdo proibido, com
-    um formato diferente primeiro."""
+    um formato diferente primeiro. As campeãs do seu lote (aba Postar, source "lote") vêm antes de tudo: já
+    deram certo nas suas contas e você sabe qual frase foi."""
     items = []
+    lote = []
     if owner_id:
+        from app.postar import results
+
+        lote = [{"text": " ".join(r["text"].split()), "fmt": r["fmt"], "source": "lote", "author": r["best"]["username"],
+                 "views": r["avg_views"], "replies": r["avg_replies"], "score": score_of(0, 0, r["avg_replies"], r["avg_views"])}
+                for r in results(db, owner_id)["phrases"] if r["champion"] and good_text(r["text"])]
         items += [{"text": " ".join(m["text"].split()), "fmt": m["fmt"], "source": "sua", "author": m["author"],
                    "views": m["views"], "replies": m["replies"], "score": m["score"]} for m in mine(db, owner_id, _now(), limit=30)]
     items += [{"text": " ".join(row.text.split()), "fmt": row.fmt, "source": "nicho", "author": row.author,
@@ -399,7 +406,7 @@ def proven(db: Session, owner_id: int | None, limit: int = 16) -> list[dict[str,
     niche_scores = sorted((i["score"] or 0) for i in items if i["source"] == "nicho")
     niche_median = niche_scores[len(niche_scores) // 2] if len(niche_scores) >= 6 else 0
     items = [i for i in items if viral(i, own_median) and (i["source"] == "sua" or (i["score"] or 0) >= niche_median)]
-    out, used, seen = [], set(), set()
+    out, used, seen = list(lote), set(), {src.norm(i["text"]) for i in lote}
     for item in items:  # primeiro um de cada formato (variedade), depois por nota
         key = src.norm(item["text"])
         if item["fmt"] not in used and key not in seen:
@@ -414,13 +421,16 @@ def proven(db: Session, owner_id: int | None, limit: int = 16) -> list[dict[str,
     return out[:limit]
 
 
+SOURCE_REF = {"lote": "média do seu lote, frase que você postou em várias contas", "sua": "sua conta", "nicho": "conta do nicho"}
+
+
 def proven_refs(db: Session, owner_id: int | None, n: int = 8) -> list[str]:
     """Os comprovados com os números, para o Grok saber o que deu certo e onde."""
     def short(value: int) -> str:
         return f"{value / 1_000_000:.1f} mi".replace(".", ",") if value >= 1_000_000 else (
             f"{round(value / 1000)} mil" if value >= 1000 else str(value))
     return [f'"{item["text"][:220]}" ({short(item["views"] or 0)} views, {short(item["replies"] or 0)} replies, '
-            f'{"sua conta" if item["source"] == "sua" else "conta do nicho"})' for item in proven(db, owner_id, n)]
+            f'{SOURCE_REF[item["source"]]})' for item in proven(db, owner_id, n)]
 
 
 def examples(db: Session, n: int = 6, owner_id: int | None = None) -> list[str]:

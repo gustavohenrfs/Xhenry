@@ -602,7 +602,7 @@ def adapt_proven(topic_title: str, proven: list[dict[str, Any]], key: str) -> st
         return None
     rng = random.Random(f"proven|{key}")
     item = rng.choice(pool)
-    text = item["text"] if item.get("source") == "sua" else (variations(item["text"], 1, seed=rng.randint(0, 999)) or [None])[0]
+    text = item["text"] if item.get("source") in ("sua", "lote") else (variations(item["text"], 1, seed=rng.randint(0, 999)) or [None])[0]
     if not text:
         return None
     line = rng.choice(PROVEN_HOOKS).format(topic=topic_title) + _low(text)
@@ -906,8 +906,8 @@ def question_bank(heat: str = "quente", now: datetime | None = None,
     moment = moment_of(now)
     items = []
     for item in proven or []:
-        if item["source"] == "sua":
-            items.append({"text": item["text"], "moment": None, "source": "sua", "views": item["views"], "replies": item["replies"]})
+        if item["source"] in ("sua", "lote"):  # as suas entram iguais, para repostar
+            items.append({"text": item["text"], "moment": None, "source": item["source"], "views": item["views"], "replies": item["replies"]})
         else:
             for line in variations(item["text"], 2):
                 items.append({"text": line, "moment": None, "source": "nicho", "views": item["views"], "replies": item["replies"]})
