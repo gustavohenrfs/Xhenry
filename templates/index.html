@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=43">
+  <link rel="stylesheet" href="/static/css/styles.css?v=44">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=61"></script>
+  <script defer src="/static/js/app.js?v=62"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -80,6 +80,7 @@
     </aside>
     <main class="min-w-0 flex-1 relative z-10">
       <header class="app-header sticky top-0 z-20 border-b border-neon/15 bg-ink/85 px-4 backdrop-blur md:px-8">
+        <i id="folder-sweep" class="folder-sweep" aria-hidden="true"></i>
         <div class="top-grid">
           <div class="top-user flex min-w-0 items-center gap-2 md:hidden">
             <div data-user-avatar class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neon/40 text-xs text-neon"></div>
@@ -90,10 +91,17 @@
           </div>
           <img src="/static/img/logo-128.webp" width="128" height="128" decoding="async" alt="XHenry" class="top-logo brand-logo h-11 w-11 md:hidden">
           <h1 id="heading" class="top-title font-display text-3xl text-white">Dashboard</h1>
-          <label id="folder-wrap" class="folder-pick" title="Mostrar só uma pasta (cada pasta pode ser uma operação)">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg>
-            <select id="folder-pick" aria-label="Pasta"><option value="">Todas as pastas</option></select>
-          </label>
+          <div id="folder-wrap" class="fsw">
+            <button id="folder-pick" type="button" class="fsw-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="folder-list" title="Escolher a operação (pasta)">
+              <span class="fsw-orb" aria-hidden="true"></span>
+              <span class="fsw-text"><span id="folder-name" class="fsw-name">Todas as pastas</span><span id="folder-sub" class="fsw-sub"></span></span>
+              <svg class="fsw-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+            </button>
+            <div id="folder-pop" class="fsw-pop">
+              <p class="fsw-title">Mostrar a operação</p>
+              <ul id="folder-list" class="fsw-list" role="listbox" aria-label="Escolher pasta" tabindex="-1"></ul>
+            </div>
+          </div>
           <div id="dashboard-controls" class="top-controls flex min-w-0 max-w-full items-center gap-2 md:gap-3">
             <button id="refresh-all" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar dados</button>
             <div id="period-wrap" class="flex min-w-0 max-w-full overflow-x-auto rounded-full border border-neon/30 p-1 text-sm">

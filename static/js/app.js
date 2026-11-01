@@ -356,7 +356,7 @@ function setTab(tab) {
   const controls = document.getElementById("dashboard-controls");
   if (controls) controls.classList.toggle("hidden", tab !== "dashboard" && tab !== "metricas");  // Métricas usa o mesmo período e o mesmo Atualizar
   const folderWrap = document.getElementById("folder-wrap");
-  if (folderWrap) folderWrap.hidden = !FOLDER_TABS.includes(tab);
+  if (folderWrap) { folderWrap.hidden = !FOLDER_TABS.includes(tab); if (folderWrap.hidden) setFolderOpen(false); }
   if (tab === "dashboard" && dashboardDirty) { dashboardDirty = false; load({ silent: true }); }
   if (tab === "metricas" && (metricsStale || !metricsData)) loadMetrics();
   if (tab === "ops") closeOpsFolder();
@@ -1558,24 +1558,127 @@ function dashQuery(period, folderId) {
 // Responder agora), Postar e Rede de RT; a escolha fica lembrada neste navegador.
 const FOLDER_TABS = ["dashboard", "metricas", "postar", "rede"];
 try { const saved = Number(localStorage.getItem("folder_id")); if (saved > 0) state.folderId = saved; } catch { /* sem storage */ }
-function paintFolderPick(folders) {
-  const select = document.getElementById("folder-pick");
-  if (!select || !folders) return;
-  if (state.folderId && !folders.some((f) => f.id === state.folderId)) { setFolder(null); return; }  // pasta apagada
-  const options = [["", "Todas as pastas"]].concat(folders.map((f) => [String(f.id), f.name + " (" + f.accounts + ")"]));
-  const sig = JSON.stringify(options) + "|" + (state.folderId || "");
-  if (select.dataset.sig === sig) return;
-  select.dataset.sig = sig;
-  select.replaceChildren(...options.map(([value, label]) => {
-    const option = el("option", "", label);
-    option.value = value;
-    return option;
-  }));
-  select.value = state.folderId ? String(state.folderId) : "";
-  const color = state.folderId ? folderColor(state.folderId) : null;
-  select.parentElement.style.setProperty("--folder", color || "transparent");
-  select.parentElement.classList.toggle("is-on", !!state.folderId);
+// Seletor de operação: a cor da pasta é a tinta dele (órbita na pílula, faixa no item, laser no topo ao trocar).
+let folderList = [];
+let folderOpen = false;
+let folderIndex = 0;
+function folderTint(folder) { return folder && /^#[0-9a-f]{3,8}$/i.test(folder.color || "") ? folder.color : null; }
+// "Todas": um anel com as cores de todas as pastas.
+function folderOrb(folder) {
+  const color = folderTint(folder);
+  if (color) return color;
+  const colors = [...new Set(folderList.map(folderTint).filter(Boolean))];
+  if (colors.length < 2) return colors[0] || "rgb(var(--c-neon))";
+  const step = 100 / colors.length;
+  return "conic-gradient(" + colors.map((c, i) => c + " " + (i * step).toFixed(1) + "% " + ((i + 1) * step).toFixed(1) + "%").join(", ") + ")";
 }
+function contas(n) { return n === 1 ? "1 conta" : n + " contas"; }
+function folderRows() {
+  const total = folderList.reduce((sum, f) => sum + (f.accounts || 0), 0);
+  return [{ id: null, name: "Todas as pastas", accounts: total, note: folderList.length === 1 ? "1 pasta" : folderList.length + " pastas" }]
+    .concat(folderList.map((f) => ({ id: f.id, name: f.name, accounts: f.accounts || 0, note: f.description || "", folder: f })));
+}
+function paintFolderPick(folders) {
+  if (!folders) return;
+  folderList = folders;
+  if (state.folderId && !folders.some((f) => f.id === state.folderId)) { setFolder(null); return; }  // pasta apagada
+  const current = folders.find((f) => f.id === state.folderId) || null;
+  const row = folderRows().find((r) => r.id === (current ? current.id : null));
+  const wrap = document.getElementById("folder-wrap");
+  document.getElementById("folder-name").textContent = row.name;
+  document.getElementById("folder-sub").textContent = contas(row.accounts);
+  wrap.style.setProperty("--orb", folderOrb(current));
+  wrap.style.setProperty("--folder", folderTint(current) || "rgb(var(--c-neon))");
+  wrap.classList.toggle("is-on", !!current);
+  if (folderOpen) paintFolderList();
+}
+function paintFolderList() {
+  const list = document.getElementById("folder-list");
+  const rows = folderRows();
+  folderIndex = Math.max(0, Math.min(folderIndex, rows.length - 1));
+  list.replaceChildren(...rows.map((row, index) => {
+    const selected = (row.id || null) === (state.folderId || null);
+    const li = el("li", "fsw-item" + (selected ? " on" : "") + (index === folderIndex ? " active" : ""));
+    li.id = "folder-opt-" + index;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(selected));
+    li.style.setProperty("--i", index);
+    li.style.setProperty("--c", folderTint(row.folder) || "rgb(var(--c-neon))");
+    const orb = el("span", "fsw-orb");
+    orb.style.setProperty("--orb", folderOrb(row.folder));
+    const text = el("span", "fsw-text");
+    text.append(el("span", "fsw-name", row.name), el("span", "fsw-sub", [contas(row.accounts), row.note].filter(Boolean).join(", ")));
+    const check = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    check.setAttribute("viewBox", "0 0 24 24");
+    check.setAttribute("class", "fsw-check");
+    check.setAttribute("aria-hidden", "true");
+    check.innerHTML = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';  // marcação fixa
+    li.append(orb, text, check);
+    li.addEventListener("mousemove", () => { if (folderIndex !== index) { folderIndex = index; markFolderActive(); } });
+    li.addEventListener("click", () => chooseFolder(row.id));
+    return li;
+  }));
+  markFolderActive();
+}
+function markFolderActive() {
+  const list = document.getElementById("folder-list");
+  [...list.children].forEach((li, index) => li.classList.toggle("active", index === folderIndex));
+  const active = list.children[folderIndex];
+  if (active) { list.setAttribute("aria-activedescendant", active.id); active.scrollIntoView({ block: "nearest" }); }
+}
+function setFolderOpen(open) {
+  const wrap = document.getElementById("folder-wrap");
+  if (open === folderOpen) return;
+  folderOpen = open;
+  wrap.classList.toggle("open", open);
+  document.getElementById("folder-pick").setAttribute("aria-expanded", String(open));
+  if (open) {
+    folderIndex = Math.max(0, folderRows().findIndex((r) => (r.id || null) === (state.folderId || null)));
+    paintFolderList();
+    document.getElementById("folder-list").focus({ preventScroll: true });
+  }
+}
+function chooseFolder(id) {
+  setFolderOpen(false);
+  document.getElementById("folder-pick").focus({ preventScroll: true });
+  if ((id || null) === (state.folderId || null)) return;
+  setFolder(id);
+  folderSweep();
+}
+// Troca de operação: um feixe na cor da pasta atravessa o topo e a órbita da pílula pulsa.
+function folderSweep() {
+  if (reduceMotion.matches) return;
+  const color = folderTint(folderList.find((f) => f.id === state.folderId)) || "rgb(var(--c-neon))";
+  const line = document.getElementById("folder-sweep");
+  const button = document.getElementById("folder-pick");
+  line.style.setProperty("--c", color);
+  [line, button].forEach((node) => { node.classList.remove("go"); void node.offsetWidth; node.classList.add("go"); });
+}
+document.getElementById("folder-pick").addEventListener("click", () => setFolderOpen(!folderOpen));
+document.getElementById("folder-pick").addEventListener("keydown", (event) => {
+  if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); setFolderOpen(true); }
+});
+document.getElementById("folder-list").addEventListener("keydown", (event) => {
+  const rows = folderRows();
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    folderIndex = (folderIndex + (event.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+    markFolderActive();
+  } else if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    folderIndex = event.key === "Home" ? 0 : rows.length - 1;
+    markFolderActive();
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    chooseFolder(rows[folderIndex].id);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    setFolderOpen(false);
+    document.getElementById("folder-pick").focus({ preventScroll: true });
+  } else if (event.key === "Tab") setFolderOpen(false);
+});
+document.addEventListener("click", (event) => { if (folderOpen && !event.target.closest("#folder-wrap")) setFolderOpen(false); });
 function setFolder(id) {
   state.folderId = id || null;
   try { if (state.folderId) localStorage.setItem("folder_id", String(state.folderId)); else localStorage.removeItem("folder_id"); } catch { /* sem storage */ }
@@ -1586,7 +1689,6 @@ function setFolder(id) {
   paintDrafts();
   paintDraftGrid();
 }
-document.getElementById("folder-pick").addEventListener("change", (event) => setFolder(Number(event.target.value) || null));
 function renderDashboard(data, sig, swap, live) {
   paintFolderPick(data.folders);
   if (sig === lastSig) return;              // nada mudou: não mexe no DOM (zero flicker)
@@ -3144,6 +3246,7 @@ document.addEventListener("keydown", (event) => {
     setMoreOpen(false);
     closePalette();
     closePick();
+    setFolderOpen(false);
     document.getElementById("keep-help").classList.add("off");
     closeDrawer();
     document.getElementById("install-help").classList.add("off");

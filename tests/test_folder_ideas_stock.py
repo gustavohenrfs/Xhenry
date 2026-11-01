@@ -34,10 +34,16 @@ HTML = (ROOT / "templates/index.html").read_text(encoding="utf-8")
 def test_folder_picker_filters_every_tab():
     assert 'id="folder-pick"' in HTML, "seletor de pasta no topo"
     assert 'localStorage.setItem("folder_id"' in JS, "a pasta escolhida fica lembrada"
-    picker = JS.split("function setFolder")[1].split("\n}\n")[0]
+    picker = JS.split("function setFolder(id)")[1].split("\n}\n")[0]
     for loader in ("load(", "loadMetrics(", "paintDraftGrid(", "paintRede("):
         assert loader in picker, loader
     assert "state.folderId" in JS.split("function paintDraftGrid")[1].split("\n}\n")[0], "Postar respeita a pasta"
+    # seletor próprio: lista acessível, teclado, cor da pasta e o feixe ao trocar
+    assert 'role="listbox"' in HTML and 'aria-haspopup="listbox"' in HTML and 'id="folder-sweep"' in HTML
+    keys = JS.split('getElementById("folder-list").addEventListener("keydown"')[1].split("\n});\n")[0]
+    for key in ("ArrowDown", "ArrowUp", "Home", "End", "Enter", "Escape"):
+        assert key in keys, key
+    assert "aria-activedescendant" in JS and "reduceMotion.matches" in JS.split("function folderSweep")[1].split("\n}\n")[0]
 
 
 def test_stock_has_more_than_a_thousand_ready_lines():

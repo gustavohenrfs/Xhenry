@@ -2236,17 +2236,76 @@ html:has(#intro:not(.is-out)) { overflow: hidden; }
 /* Perguntas quentes: tipos à esquerda, "Com base nas contas" ao lado. */
 .hot-q-filterbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; }
 
-/* Filtro de pasta no topo: o ponto acende na cor da pasta escolhida. */
-.folder-pick {
-  position: relative; display: inline-flex; align-items: center; gap: .45rem; flex-shrink: 0; min-height: 2.25rem;
-  padding: 0 .75rem 0 .7rem; border: 1px solid rgb(var(--c-neon) / .3); border-radius: 999px; color: var(--muted); font-size: .85rem;
+/* ---------- Seletor de operação (pasta) ----------
+   A cor da pasta é a tinta: órbita na pílula (anel com todas as cores em "Todas"), faixa no item escolhido e um
+   feixe que atravessa o topo ao trocar. O menu é quase opaco: fica dentro do cabeçalho, que já tem blur. */
+.fsw { position: relative; flex-shrink: 0; --folder: rgb(var(--c-neon)); --orb: rgb(var(--c-neon)); }
+.fsw[hidden] { display: none; }
+.fsw-btn {
+  display: inline-flex; align-items: center; gap: .6rem; min-height: 2.6rem; max-width: 100%;
+  padding: .3rem .75rem .3rem .4rem; border: 1px solid var(--line-strong); border-radius: 999px;
+  background: var(--field); color: var(--fg); text-align: left;
+  transition: border-color .25s ease, box-shadow .35s ease, background .25s ease;
 }
-.folder-pick[hidden] { display: none; }
-.folder-pick svg { width: 1rem; height: 1rem; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
-.folder-pick select { max-width: 11rem; border: 0; background: transparent; color: var(--fg); font-size: .85rem; outline: none; cursor: pointer; text-overflow: ellipsis; }
-.folder-pick select option { background: rgb(var(--c-panel)); color: var(--fg); }
-.folder-pick.is-on { color: var(--accent); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--folder, var(--accent)); }
-.folder-pick:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--c-neon) / .14); }
+.fsw-btn:hover { border-color: rgb(var(--c-neon) / .55); }
+.fsw-btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--c-neon) / .2); }
+.fsw.is-on .fsw-btn { border-color: color-mix(in srgb, var(--folder) 65%, transparent); box-shadow: 0 0 22px -8px var(--folder), inset 0 0 14px -10px var(--folder); }
+.fsw.open .fsw-btn { border-color: var(--accent); }
+/* Anel oco: a cor por fora, o fundo do campo por dentro. */
+.fsw-orb {
+  position: relative; flex-shrink: 0; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: radial-gradient(circle, var(--field-solid, rgb(var(--c-ink))) 0 36%, transparent 38%), var(--orb);
+  box-shadow: 0 0 14px -3px color-mix(in srgb, var(--folder) 80%, transparent);
+}
+.fsw-orb::after { position: absolute; inset: 34%; border-radius: 50%; content: ""; background: var(--orb); opacity: .9; transform: scale(.55); }
+.fsw-text { display: grid; min-width: 0; line-height: 1.15; }
+.fsw-name { overflow: hidden; max-width: 11rem; font-size: .86rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.fsw-sub { overflow: hidden; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.fsw-chev { width: 1rem; height: 1rem; flex-shrink: 0; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .3s cubic-bezier(.2, .8, .2, 1), stroke .2s ease; }
+.fsw.open .fsw-chev { transform: rotate(180deg); stroke: var(--accent); }
+.fsw-pop {
+  position: absolute; top: calc(100% + .6rem); left: 0; z-index: 50; width: min(21rem, calc(100vw - 2rem)); padding: .45rem;
+  border: 1px solid var(--line-strong); border-radius: 1.35rem; background: var(--glass-pop);
+  box-shadow: inset 0 1px 0 var(--rim), 0 30px 80px -24px rgba(0, 0, 0, .6), 0 0 44px -18px var(--folder);
+  opacity: 0; visibility: hidden; transform: translateY(-8px) scale(.97); transform-origin: top left;
+  transition: opacity .18s ease, transform .24s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .24s;
+}
+.fsw.open .fsw-pop { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+.fsw-title { padding: .4rem .65rem .5rem; font-size: .7rem; color: var(--muted); }
+.fsw-list { display: grid; gap: .15rem; max-height: min(22rem, 60vh); overflow-y: auto; outline: none; scrollbar-width: thin; }
+.fsw-item {
+  position: relative; display: flex; align-items: center; gap: .7rem; padding: .55rem .65rem .55rem .75rem;
+  border-radius: .95rem; cursor: pointer; transition: background .15s ease;
+}
+.fsw-item .fsw-orb { width: 1.25rem; height: 1.25rem; box-shadow: 0 0 10px -3px var(--c); }
+.fsw-item .fsw-name { max-width: none; }
+.fsw.open .fsw-item { animation: fsw-in .34s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(var(--i, 0) * 26ms); }
+@keyframes fsw-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.fsw-item.active { background: linear-gradient(90deg, color-mix(in srgb, var(--c) 16%, transparent), transparent 85%); }
+.fsw-item.on::before {
+  position: absolute; left: .2rem; top: .5rem; bottom: .5rem; width: 3px; border-radius: 3px; content: "";
+  background: var(--c); box-shadow: 0 0 10px var(--c);
+}
+.fsw-check { width: 1.05rem; height: 1.05rem; margin-left: auto; flex-shrink: 0; fill: none; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transform: scale(.6); transition: opacity .2s ease, transform .25s cubic-bezier(.2, .8, .2, 1); }
+.fsw-item.on .fsw-check { opacity: 1; transform: none; }
+/* Ao trocar: a órbita pulsa e um feixe na cor da pasta atravessa a borda do topo. */
+.fsw-btn.go .fsw-orb { animation: fsw-orb .55s cubic-bezier(.2, .8, .2, 1); }
+@keyframes fsw-orb { 0% { transform: scale(.55) rotate(-90deg); } 60% { transform: scale(1.18) rotate(10deg); } 100% { transform: none; } }
+.folder-sweep {
+  position: absolute; bottom: -1px; left: 0; z-index: 1; width: 38%; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--c, var(--accent)) 45%, var(--c, var(--accent)) 55%, transparent);
+  box-shadow: 0 0 14px 1px var(--c, var(--accent)); opacity: 0;
+}
+.folder-sweep.go { animation: fsw-sweep .95s cubic-bezier(.55, 0, .25, 1) both; }
+@keyframes fsw-sweep { 0% { opacity: 0; transform: translateX(-100%); } 15% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(265%); } }
+@media (max-width: 767px) {
+  .fsw-name { max-width: 7.5rem; }
+  .fsw-pop { position: fixed; top: auto; left: 1rem; right: 1rem; width: auto; margin-top: .6rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fsw.open .fsw-item, .fsw-btn.go .fsw-orb, .folder-sweep.go { animation: none; }
+  .fsw-pop, .fsw-chev, .fsw-check { transition: none; }
+}
 .hot-accounts-info { margin-top: .5rem; font-size: .75rem; color: var(--ok); }
 .hot-accounts-info.is-empty { color: var(--warn); }
 .hot-q-more { display: flex; justify-content: center; padding: .4rem 0; }
