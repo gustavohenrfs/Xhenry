@@ -16,15 +16,35 @@
   <!-- Fontes e Chart.js servidos pelo próprio painel (cache de um ano): nenhuma conexão com servidor de fora. -->
   <link rel="preload" href="/static/fonts/outfit-latin.woff2?v=1" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/space-grotesk-latin.woff2?v=1" as="font" type="font/woff2" crossorigin>
-  <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. -->
-  <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}</script>
+  <link rel="preload" href="/static/img/logo-256.webp" as="image" type="image/webp">
+  <!-- Tema antes da primeira pintura (sem piscar): escolha salva ou o tema do sistema. Também marca a intro
+       curta quando ela já passou nesta aba (sessionStorage). -->
+  <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=38">
+  <link rel="stylesheet" href="/static/css/styles.css?v=39">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=54"></script>
+  <script defer src="/static/js/app.js?v=55"></script>
 </head>
 <body class="bg-ink text-blush">
+  <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
+       de verdade (app.js: introStep/endIntro). Sai com uma varredura de cima para baixo quando o painel está
+       pronto. Sem JS ou com erro, some sozinha (animação de segurança no CSS). -->
+  <div id="intro" class="intro" role="status" aria-live="polite" aria-label="Abrindo o XHenry">
+    <span class="intro-grid" aria-hidden="true"></span>
+    <span class="intro-beam" aria-hidden="true"></span>
+    <div class="intro-stage" aria-hidden="true">
+      <div class="intro-core">
+        <span class="intro-ring"></span>
+        <span class="intro-halo"></span>
+        <img src="/static/img/logo-256.webp" width="256" height="256" alt="" class="intro-logo" decoding="async">
+      </div>
+      <p class="intro-word font-display"><span>X</span><span>H</span><span>e</span><span>n</span><span>r</span><span>y</span></p>
+      <p class="intro-tag">Monitoramento Real</p>
+      <div class="intro-bar"><i id="intro-fill"></i></div>
+      <p id="intro-step" class="intro-step">Ligando o painel</p>
+    </div>
+  </div>
   <div id="bg-orbs">
     <div class="orb pink"></div>
     <div class="orb purple"></div>

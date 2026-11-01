@@ -2697,7 +2697,39 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// ---------- Intro ----------
+// A barra segue o que está carregando de verdade; a intro sai quando o boot termina (login na tela, painel
+// pronto ou tela de espera). Na primeira vez da aba ela fica pelo menos o tempo da sequência inteira;
+// depois disso, a versão curta sai assim que der.
+const INTRO_MIN_MS = 1700;
+let introClosed = false;
+function introStep(progress, label) {
+  const fill = document.getElementById("intro-fill");
+  if (!fill) return;
+  fill.style.transform = "scaleX(" + Math.max(0.04, Math.min(1, progress)) + ")";
+  if (label) document.getElementById("intro-step").textContent = label;
+}
+function endIntro() {
+  const intro = document.getElementById("intro");
+  if (!intro || introClosed) return;
+  introClosed = true;
+  try { sessionStorage.setItem("intro_seen", "1"); } catch { /* aba anônima: mostra de novo, sem problema */ }
+  introStep(1, "Pronto");
+  const short = document.documentElement.dataset.intro === "short";
+  const wait = short || reduceMotion.matches ? 0 : Math.max(0, INTRO_MIN_MS - performance.now());
+  setTimeout(() => {
+    intro.classList.add("is-out");
+    intro.setAttribute("aria-label", "XHenry aberto");
+    const remove = () => intro.remove();
+    intro.addEventListener("animationend", (event) => { if (event.target === intro) remove(); });
+    setTimeout(remove, 1200);  // garante a saída mesmo sem o evento de animação
+  }, wait);
+}
 async function boot() {
+  introStep(0.3, "Ligando o painel");
+  try { await bootPanel(); } finally { endIntro(); }
+}
+async function bootPanel() {
   // Link de convite do admin: /#invite=<token>. Abre o cadastro direto (sem login aberto neste navegador).
   const invite = !token() && location.hash.match(/^#invite=([\w\-]+)$/);
   if (invite) {
@@ -2739,8 +2771,10 @@ async function boot() {
   paintSnapshot();
   configReady.then(() => { if (!state.resetToken) setAuthMode("login"); });
   try {
-    const loading = load();  // não rejeita: os erros ficam dentro de load()
+    const loading = load().then(() => introStep(1, "Números na tela"));  // não rejeita: os erros ficam dentro de load()
+    introStep(0.45, "Conferindo o seu acesso");
     const user = await api("/api/me");
+    introStep(0.7, "Trazendo os seus números");
     paintUser(user);
     applyRole(user);
     if (!user.is_approved) { showPending(user); return; }
