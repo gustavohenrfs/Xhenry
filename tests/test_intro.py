@@ -21,7 +21,8 @@ def test_intro_is_in_the_first_paint():
     assert html.count("<script>") == 1, "continua um só script inline (tema + intro curta)"
     assert 'sessionStorage.getItem("intro_seen")' in html and 'dataset.intro="short"' in html
     assert 'rel="preload" href="/static/img/logo-256.webp"' in html and 'src="/static/img/logo-256.webp"' in html
-    assert "Monitoramento Real" in body[:body.index("</div>\n  </div>")]
+    intro = body[body.index('id="intro"'):body.index('id="bg-orbs"')]
+    assert "Monitoramento Real" in intro and 'id="intro-fill"' in intro and 'id="intro-step"' in intro
 
 
 def test_intro_never_traps_the_panel():
