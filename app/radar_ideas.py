@@ -606,10 +606,195 @@ def adapt_proven(topic_title: str, proven: list[dict[str, Any]], key: str) -> st
     return line if len(line) <= 280 else None
 
 
-def hot_questions(heat: str = "quente", seed: int = 0, size: int = MAX_IDEAS) -> list[str]:
-    """Perguntas quentes sem assunto (servem a qualquer hora), sorteadas pela semente."""
-    lines = EVERGREEN_Q if heat == "quente" else EVERGREEN
-    return diverse(lines, f"evergreen|{heat}|{seed}", size)
+# ---- Dia da semana: "sextou" só na sexta, "domingou" só no domingo ----
+WEEKDAY_NAMES = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+# (regex no texto normalizado, dias em que pode sair; 0 = segunda). Tuplas: as listas do módulo são só frases. "Segunda chance" não é dia: só "segunda feira".
+DAY_WORDS = (
+    (re.compile(r"\bate (?:o )?doming\w*\b"), {4, 5, 6}),
+    (re.compile(r"\b(?:fim|final) de semana\b|\bfds\b|\bfinde\b"), {4, 5, 6}),
+    (re.compile(r"\bsext(?:a|ou+|ouu+)\b|\bsexta feira\b"), {4}),
+    (re.compile(r"\bsabad(?:o|ou+)\b"), {5}),
+    (re.compile(r"\bdoming(?:o|ou+)\b"), {6}),
+    (re.compile(r"\bsegunda feira\b|\bsegundou+\b"), {0}),
+    (re.compile(r"\bterca feira\b|\btercou+\b"), {1}),
+    (re.compile(r"\bquarta feira\b|\bquartou+\b"), {2}),
+    (re.compile(r"\bquinta feira\b|\bquintou+\b"), {3}),
+)
+
+
+def now_sp() -> datetime:
+    from app.radar import DEFAULT_TZ_INFO
+
+    return datetime.now(timezone.utc).astimezone(DEFAULT_TZ_INFO)
+
+
+def fits_day(text: str, now: datetime | None = None) -> bool:
+    """Frase que cita um dia da semana só sai nesse dia (hora de São Paulo). "Até domingo" e "fim de semana"
+    valem de sexta a domingo."""
+    from app.radar import DEFAULT_TZ_INFO
+
+    day = (now or now_sp()).astimezone(DEFAULT_TZ_INFO).weekday()
+    key = src.norm(text)
+    for pattern, days in DAY_WORDS:
+        if pattern.search(key):
+            if day not in days:
+                return False
+            key = pattern.sub(" ", key)  # "até domingo" não cai de novo na regra do domingo
+    return True
+
+
+def today_line(now: datetime | None = None) -> str:
+    day = (now or now_sp()).weekday()
+    return (f"Hoje é {WEEKDAY_NAMES[day]}: se citar dia da semana, só o de hoje (nada de \"sextou\" fora da sexta, "
+            "\"domingou\" fora do domingo).")
+
+
+# ---- Gerador quente: monta frases novas combinando peças (grátis, sem API) ----
+# Persona: mulher adulta provocando o público masculino. Pesado e direto no vocabulário, sempre em tom de
+# pergunta, enquete, desafio, promessa, lista, confissão ou duplo sentido; nunca menor, sem consentimento ou
+# parente (o filtro unsafe confere tudo no fim), nunca link/venda.
+MIX_SIZE = 60
+POLL_PAIRS = (
+    ("de quatro", "por cima"), ("peito", "bunda"), ("chupar", "ser chupado"), ("puxão de cabelo", "tapa na bunda"),
+    ("gemido alto", "sussurro no ouvido"), ("lisinha", "peludinha"), ("na cama", "no chuveiro"),
+    ("sexo selvagem", "bem devagarinho"), ("lingerie", "pelada direto"), ("rapidinha no banheiro", "a noite inteira no motel"),
+    ("sentada lenta", "sentada forte"), ("gozar junto", "ela primeiro"), ("nude de frente", "nude de costas"),
+    ("acordar com boquete", "acordar com café"), ("transar de manhã", "transar de madrugada"),
+    ("mulher que geme alto", "mulher que morde o travesseiro"), ("beijo no pescoço", "mordida na orelha"),
+    ("mulher safada", "mulher tímida que vira bicho na cama"), ("luz acesa", "luz apagada"), ("sofá", "mesa da cozinha"),
+    ("calcinha de renda", "sem calcinha"), ("ela pedindo mais", "ela pedindo pra parar de tanto gozar"),
+    ("dedada", "língua"), ("espelho", "câmera ligada"), ("no carro", "no motel"), ("cavalgada", "papai e mamãe bem feito"),
+    ("conversa safada antes", "ir direto ao ponto"), ("mulher que manda", "mulher que obedece"),
+)
+POLL_FRAMES = [
+    "{A} ou {b}? {close}", "Pergunta séria pros homens: {a} ou {b}?", "Só pode escolher um: {a} ou {b}? {emoji}",
+    "{A} ou {b}? Responde sem pensar e sem mentir rs", "Homens, {a} ou {b}? Quero ver quem tem coragem de responder",
+    "Vou fazer o que ganhar nos comentários: {a} ou {b}? 😈", "{A} ou {b}? Defende a sua nos comentários {emoji}",
+]
+QUESTIONS = [
+    "vocês aguentam quantos minutos sem gozar", "por que homem goza e vira pro lado pra dormir",
+    "vocês sabem mesmo achar o clitóris ou é sorte", "vocês preferem chupar ou ser chupados",
+    "por que todo homem jura que é bom de cama e quase nenhum é", "vocês já broxaram na hora H",
+    "o que vocês fariam se eu sentasse no colo de vocês agora", "quantas vezes por semana é o mínimo pra vocês",
+    "vocês gostam de mulher que fala putaria na cama", "por que homem tem medo de mulher que sabe o que quer na cama",
+    "qual a posição que vocês nunca tiveram coragem de pedir", "vocês dão conta de uma mulher que quer três vezes seguidas",
+    "qual parte do meu corpo vocês beijariam primeiro", "vocês gozam rápido mesmo ou é falta de prática",
+    "tamanho importa ou é desculpa de quem não sabe usar", "vocês já fingiram que gozaram",
+    "o que deixa vocês duros mais rápido, foto ou áudio", "qual a coisa mais safada que uma mulher já fez com vocês",
+    "vocês preferem mulher que pede ou mulher que manda", "por que homem ama tanto uma mulher de quatro",
+    "vocês aguentam a segunda logo depois da primeira", "qual foi o lugar mais arriscado que vocês já transaram",
+    "vocês deixariam eu mandar em vocês por uma noite inteira", "o que vocês pensam quando veem uma mulher de legging",
+]
+Q_OPENERS = ["Homens,", "Vocês homens,", "Sinceramente, homens:", "Pergunta séria:", "Me respondam uma coisa:", "Preciso saber:", ""]
+Q_CLOSERS = ["Sinceramente", "Estou curiosa", "rs", "😏", "👀", "Sem mentir", "Ninguém tá olhando rs", "Quero ver quem é sincero"]
+DARES = [
+    "Duvido um homem aguentar {n} minutos comigo sem gozar", "Duvido você ler isso até o fim sem ficar duro",
+    "Aposto que nenhum homem aqui aguenta eu sentando sem parar", "Duvido um homem me deixar sem fôlego",
+    "Duvido alguém aqui me fazer gozar duas vezes na mesma noite", "Aposto que você não saberia o que fazer comigo molhadinha",
+    "Duvido você comentar o que faria comigo sem ficar com vergonha", "Aposto que metade dos homens daqui nunca fez uma mulher tremer",
+    "Duvido um homem me descrever em 3 palavras sem ser safado", "Aposto que você já imaginou eu de quatro e nem disfarça",
+    "Duvido você aguentar uma noite inteira no meu ritmo", "Aposto que você abriu esse post achando que ia ter nude",
+]
+DARE_CLOSERS = ["😏", "rs", "Prova nos comentários", "Quero ver quem é homem de verdade aqui 😈", "🔥", "Comenta se tiver coragem"]
+GOALS = ((100, "comentários"), (200, "comentários"), (300, "respostas"), (500, "curtidas"), (1000, "curtidas"), (200, "RT"))
+REWARDS = [
+    "posto um nude sem censura", "posto aquela foto de quatro", "conto com detalhes a minha última transa",
+    "posto uma foto só de calcinha", "gravo um áudio gemendo", "conto a minha fantasia mais suja",
+    "posto a foto do espelho sem nada", "respondo todo mundo do jeito mais safado possível",
+    "conto o lugar mais louco onde eu já transei", "posto a foto que eu nunca tive coragem",
+]
+PROMISE_FRAMES = [
+    "Se esse post bater {n} {unit} eu {reward} {emoji}", "{n} {unit} e eu {reward}. Combinado? 😈",
+    "Bateu {n} {unit}, eu {reward}. Valendo {emoji}", "Prometo: se chegar em {n} {unit} eu {reward} {emoji}",
+]
+LISTS = [
+    "Coisas que eu faria com você numa noite sem limite. A primeira é…", "Lugares onde eu já transei e ninguém sabe. O primeiro é…",
+    "Posições que toda mulher ama e homem nunca oferece. A primeira é…",
+    "Coisas que um homem faz na cama que me deixam molhada na hora. A primeira é…",
+    "Fantasias que eu nunca tive coragem de realizar. A primeira é…", "Sinais de que ele vai ser bom de cama. O primeiro é…",
+    "Erros que fazem uma mulher fingir o orgasmo. O primeiro é…", "Coisas que eu amo ouvir no meio da transa. A primeira é…",
+    "Motivos pra nunca mais transar com um homem. O primeiro é…", "Coisas que toda mulher faz sozinha e não conta. A primeira é…",
+]
+CONFESSIONS = [
+    "fico molhadinha lendo os comentários de vocês", "já transei no carro no estacionamento do shopping",
+    "durmo sem calcinha todo dia", "já me toquei pensando num seguidor daqui", "amo quando puxam meu cabelo na hora",
+    "já fingi orgasmo pra acabar logo", "mandei nude pro contatinho errado", "gemo tão alto que o vizinho já reclamou",
+    "o que mais me excita é homem que manda em mim na cama", "já gozei só com beijo no pescoço",
+    "tenho uma pasta de fotos que ninguém nunca viu", "fico com vontade toda vez que leio um comentário safado",
+]
+CONF_FRAMES = ["Confesso: eu {c}. {follow}", "Confissão de hoje: eu {c} 🙈 {follow}", "Admito que eu {c}. {follow}",
+               "Ninguém sabe disso, mas eu {c} 🤭 {follow}", "Estou curiosa: vocês acreditam que eu {c}?"]
+CONF_FOLLOW = ["Isso é errado?", "Quem mais?", "Vocês me julgam?", "E vocês, já?", "Me conta o seu agora", ""]
+DOUBLE = [
+    "Hoje tô com uma vontade de sentar que nem cadeira resolve rs", "Procuro homem que saiba usar a língua… pra conversar, claro 😏",
+    "Quero alguém pra me dar uma mão… e o resto também rs", "Tô tão carente que até o chuveiro tá recebendo atenção 👀",
+    "Minha especialidade é engolir… sapo, na vida. Claro rs", "Tô precisando de alguém que me pegue de jeito… no abraço, óbvio 😈",
+    "Sou ótima em montar… móvel, gente. Que mente suja rs", "Hoje eu só queria alguém pra me deixar sem voz… cantando, claro 😏",
+]
+EMOJI = ["🔥", "😏", "😈", "👀"]
+
+
+def _poll(rng: random.Random) -> str:
+    a, b = rng.choice(POLL_PAIRS)
+    if rng.random() < .5:
+        a, b = b, a
+    return rng.choice(POLL_FRAMES).format(A=_cap(a), a=a, b=b, close=rng.choice(Q_CLOSERS), emoji=rng.choice(EMOJI))
+
+
+def _question(rng: random.Random) -> str:
+    core = rng.choice(QUESTIONS)
+    openers = [o for o in Q_OPENERS if "homens" not in o.lower()] if re.search(r"\bhom(?:em|ens)\b", core) else Q_OPENERS  # sem "Homens, …todo homem"
+    opener = rng.choice(openers)
+    line = (f"{opener} {core}?" if opener else _cap(core) + "?")
+    return f"{line} {rng.choice(Q_CLOSERS)}"
+
+
+def _dare(rng: random.Random) -> str:
+    closer = rng.choice(DARE_CLOSERS)
+    joint = ". " if closer[0].isalpha() else " "  # "…sem gozar. Prova nos comentários" / "…sem gozar 😏"
+    return rng.choice(DARES).format(n=rng.choice((5, 10, 15))) + joint + closer
+
+
+def _promise(rng: random.Random) -> str:
+    n, unit = rng.choice(GOALS)
+    return rng.choice(PROMISE_FRAMES).format(n=n, unit=unit, reward=rng.choice(REWARDS), emoji=rng.choice(EMOJI))
+
+
+def _confession(rng: random.Random) -> str:
+    return rng.choice(CONF_FRAMES).format(c=rng.choice(CONFESSIONS), follow=rng.choice(CONF_FOLLOW))
+
+
+MAKERS = (_poll, _question, _dare, _promise, _confession, _poll, _question,
+          lambda rng: rng.choice(LISTS), lambda rng: rng.choice(DOUBLE))
+
+
+def compose(heat: str = "quente", seed: int = 0, size: int = MIX_SIZE, now: datetime | None = None) -> list[str]:
+    """Frases quentes novas montadas por peças (abertura, miolo, fecho, meta, prêmio). A semente muda a mistura;
+    só o nível quente (o leve fica no banco fixo, sugestivo)."""
+    from app.radar_hot import has_cta, unsafe
+
+    if heat != "quente":
+        return []
+    rng = random.Random(f"mix|{seed}")
+    out: list[str] = []
+    seen: set[str] = set()
+    for _ in range(size * 6):
+        if len(out) >= size:
+            break
+        line = " ".join(rng.choice(MAKERS)(rng).split())
+        key = src.norm(line)
+        if key in seen or len(line) > 220 or unsafe(line) or has_cta(line) or not fits_day(line, now):
+            continue
+        seen.add(key)
+        out.append(line)
+    return out
+
+
+def hot_questions(heat: str = "quente", seed: int = 0, size: int = MAX_IDEAS, now: datetime | None = None) -> list[str]:
+    """Perguntas quentes sem assunto (servem a qualquer hora), sorteadas pela semente: banco fixo + frases
+    montadas, só as que cabem no dia de hoje."""
+    lines = (EVERGREEN_Q + compose(heat, seed, now=now)) if heat == "quente" else EVERGREEN
+    return diverse([line for line in lines if fits_day(line, now)], f"evergreen|{heat}|{seed}", size)
 
 
 # Momento do dia (São Paulo): (nome na tela, banco quente, banco leve).
@@ -635,10 +820,11 @@ def moment_of(now: datetime | None = None) -> str | None:
 
 
 def question_bank(heat: str = "quente", now: datetime | None = None,
-                  proven: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                  proven: list[dict[str, Any]] | None = None, mix: int = 0) -> dict[str, Any]:
     """O banco inteiro de perguntas sem assunto, com formato e momento; a tela sorteia, filtra e marca as usadas.
     Com proven: as que já bombaram nas suas contas (iguais, para repostar depois) e variações das do nicho
-    (nunca o texto de outra conta igual), com source "sua" ou "nicho"."""
+    (nunca o texto de outra conta igual), com source "sua" ou "nicho". mix: semente das frases montadas pelo
+    gerador (made=True). Frase que cita outro dia da semana fica de fora."""
     from app.radar_hot import LABELS, format_of
 
     hot = heat == "quente"
@@ -653,6 +839,8 @@ def question_bank(heat: str = "quente", now: datetime | None = None,
     for key, (_, quente, leve) in MOMENTS.items():
         items += [{"text": text, "moment": key} for text in (quente if hot else leve)]
     items += [{"text": text, "moment": None} for text in (EVERGREEN_Q if hot else EVERGREEN)]
+    items += [{"text": text, "moment": None, "made": True} for text in compose(heat, mix, now=now)]
+    items = [item for item in items if fits_day(item["text"], now)]
     for item in items:
         item["fmt"] = format_of(item["text"])
         item["fmt_label"] = LABELS[item["fmt"]][0]
@@ -662,7 +850,7 @@ def question_bank(heat: str = "quente", now: datetime | None = None,
             seen.add(src.norm(item["text"]))
             unique.append(item)
     items = unique
-    return {"heat": heat, "moment": moment, "moment_label": MOMENTS[moment][0] if moment else None,
+    return {"heat": heat, "mix": mix, "moment": moment, "moment_label": MOMENTS[moment][0] if moment else None,
             "moments": {key: label for key, (label, _, _) in MOMENTS.items()}, "items": items}
 
 
@@ -689,13 +877,15 @@ FORMAT_GUIDE = (
 
 def rules(heat: str) -> str:
     level = (
-        "Nível QUENTE: pode ser direto e usar as palavras do nicho (nude, gozar, transar, peluda, lisinha, sentar, "
-        "safada), em tom de provocação e pergunta; não descreva ato sexual passo a passo."
+        "Nível QUENTE: pesado, provocante e sem pudor no vocabulário: use os termos sexuais do nicho (nude, gozar, "
+        "transar, chupar, boquete, sentar, de quatro, cavalgar, gemer, molhadinha, duro, peluda, lisinha, safada) "
+        "sempre em tom de provocação, pergunta, desafio, promessa ou confissão de quem posta; o texto instiga, não "
+        "narra cena de sexo passo a passo."
         if heat == "quente" else
         "Nível LEVE: sugestivo, nunca explícito (sem descrever sexo nem partes do corpo)."
     )
     return (
-        f"{level}\nRegras fixas: nunca sexualizar uma pessoa real com nome (o assunto é só a condição ou o gancho, "
+        f"{level}\n{today_line()}\nRegras fixas: nunca sexualizar uma pessoa real com nome (o assunto é só a condição ou o gancho, "
         "o conteúdo é sobre quem posta ou sobre os homens em geral); nada envolvendo menor de idade, falta de "
         "consentimento ou parentes; nada de ódio ou ofensa. Nunca mencione link, bio, grupo, Telegram, canal, "
         "privado, Pix ou venda: o post vive só do engajamento (respostas, curtidas, comentários)."
@@ -757,6 +947,11 @@ def hot_prompt(heat: str = "quente", refs: list[str] | None = None, source: dict
         "\"homens,…\"); mexer com o ego masculino (duração, tamanho, pegada, fôlego); escolha entre duas opções; "
         "curiosidade (\"estou curiosa\"); promessa que o público quer cobrar; terminar com pergunta, \"rs\" ou um "
         "emoji (😏 👀 🔥). Frases naturais, como uma mulher real escreveria no celular, sem cara de anúncio."
+    )
+    lines.append(
+        "Seja criativa e variada: não repita a estrutura nem as palavras dos exemplos; invente ângulos novos "
+        "(situações do dia a dia com duplo sentido, comparações, números, cenários, provocação ao ego, fantasias "
+        "comuns entre adultos, a reação dela lendo os comentários). Cada texto com uma ideia diferente."
     )
     if source:
         lines.append(f"Texto que viralizou: \"{source['text']}\" (formato: {source['fmt_label']}; por que funciona: "

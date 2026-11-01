@@ -68,6 +68,7 @@ class HotGrokIn(BaseModel):
     fmt: str | None = Field(default=None, pattern="^[a-z]{3,16}$")  # textos novos todos nesse formato
     trend: bool = False  # textos novos podem pegar carona nos assuntos em alta
     mode: str | None = Field(default=None, pattern="^campeoes$")  # variações dos textos que mais bombaram
+    accounts: bool = False  # "Com base nas contas": manda ao Grok o que viralizou nas suas contas e no nicho
     heat: str = Field(default="quente", pattern="^(leve|quente)$")
 
 
@@ -248,11 +249,13 @@ def delete_source(handle: str, user: User = Depends(approved_user), db: Session 
 
 @router.get("/api/radar/hot/questions")
 def hot_questions(heat: str = Query("quente", pattern="^(leve|quente)$"), seed: int = SEED,
+                  mix: int = Query(0, ge=0, le=1_000_000), accounts: bool = False,
                   user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Perguntas quentes sem assunto (grátis): o banco inteiro (formato e momento do dia), com as comprovadas
-    (suas e variações das do nicho), e 5 sorteadas."""
-    bank = radar_ideas.question_bank(heat, proven=proven_for(db, user, heat))
-    return bank | {"seed": seed, "ideas": radar_ideas.hot_questions(heat, seed)}
+    """Perguntas quentes sem assunto (grátis): o banco inteiro (formato e momento do dia) mais as frases montadas
+    pelo gerador (mix = semente de "Misturar novas"), e 5 sorteadas. Com accounts=1 ("Com base nas contas")
+    entram as que viralizaram de verdade (suas e variações das do nicho)."""
+    bank = radar_ideas.question_bank(heat, proven=proven_for(db, user, heat) if accounts else None, mix=mix)
+    return bank | {"seed": seed, "accounts": accounts, "ideas": radar_ideas.hot_questions(heat, seed)}
 
 
 @router.get("/api/radar/hot/variations")
@@ -295,11 +298,13 @@ def hot_grok(payload: HotGrokIn, user: User = Depends(approved_user), db: Sessio
             raise HTTPException(400, "Ainda não tem texto que bombou: espere o robô ler as suas contas ou cace as contas do nicho.")
         prompt = radar_ideas.champions_prompt(payload.heat, champions)
     else:
-        prompt = radar_ideas.hot_prompt(payload.heat, radar_hot.proven_refs(db, user.id), source, hooks, fmt, uuid4().hex[:6])
+        refs = radar_hot.proven_refs(db, user.id) if payload.accounts else None
+        prompt = radar_ideas.hot_prompt(payload.heat, refs, source, hooks, fmt, uuid4().hex[:6])
     try:
         lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, prompt), limit=radar_ideas.HOT_COUNT)
     except ValueError as exc:
         raise HTTPException(502, str(exc)) from exc
+    lines = [line for line in lines if radar_ideas.fits_day(line)]  # "sextou" só na sexta
     if source:
         lines = [line for line in lines if norm_of(line) != norm_of(source["text"])]
     if not lines:

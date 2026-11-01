@@ -354,9 +354,34 @@ def run_in_background(work) -> None:
     threading.Thread(target=work, name="radar-hot-cacar", daemon=True).start()
 
 
+# "Viralizou de verdade": só esses ensinam o gerador e o Grok. Post fraco ou sem formato (bom dia, foto sem
+# texto, "oi amores") nunca entra, mesmo sendo o melhor de um formato.
+VIRAL_VIEWS = 20_000      # nicho: views mínimas
+VIRAL_REPLIES = 100       # ...ou respostas (o que o X mais premia)
+OWN_VIRAL_VIEWS = 5_000   # suas contas são menores: a régua é mais baixa
+OWN_VIRAL_REPLIES = 50
+OWN_LIFT = 3              # e precisa ter feito pelo menos 3x a mediana das suas views
+
+
+def good_text(text: str) -> bool:
+    """Texto que serve de exemplo: tem formato de engajamento, tamanho de post e não é grito nem hashtag."""
+    letters = [c for c in text if c.isalpha()]
+    caps = sum(1 for c in letters if c.isupper()) / max(1, len(letters))
+    return (20 <= len(text) <= 220 and format_of(text) != FALLBACK[0] and "#" not in text and caps < .5
+            and text.count("\n") <= 3 and not unsafe(text) and not has_cta(text))
+
+
+def viral(item: dict[str, Any], own_median: int = 0) -> bool:
+    views, replies = item.get("views") or 0, item.get("replies") or 0
+    if item["source"] == "sua":
+        return (views >= max(OWN_VIRAL_VIEWS, OWN_LIFT * own_median) or replies >= OWN_VIRAL_REPLIES) and good_text(item["text"])
+    return (views >= VIRAL_VIEWS or replies >= VIRAL_REPLIES) and good_text(item["text"])
+
+
 def proven(db: Session, owner_id: int | None, limit: int = 16) -> list[dict[str, Any]]:
-    """Os textos que mais engajaram: os das suas contas (source "sua") e os das contas do nicho que você caça
-    (source "nicho"), já sem link, venda ou conteúdo proibido, com um formato diferente primeiro."""
+    """Os textos que viralizaram de verdade (viral): os das suas contas (source "sua") e os das contas do nicho
+    que você caça (source "nicho", e acima da mediana da biblioteca), sem link, venda ou conteúdo proibido, com
+    um formato diferente primeiro."""
     items = []
     if owner_id:
         items += [{"text": " ".join(m["text"].split()), "fmt": m["fmt"], "source": "sua", "author": m["author"],
@@ -364,6 +389,11 @@ def proven(db: Session, owner_id: int | None, limit: int = 16) -> list[dict[str,
     items += [{"text": " ".join(row.text.split()), "fmt": row.fmt, "source": "nicho", "author": row.author,
                "views": row.views, "replies": row.replies, "score": row.score}
               for row in db.scalars(select(HotText).order_by(HotText.score.desc()).limit(60))]
+    own_views = sorted(i["views"] or 0 for i in items if i["source"] == "sua")
+    own_median = own_views[len(own_views) // 2] if own_views else 0
+    niche_scores = sorted((i["score"] or 0) for i in items if i["source"] == "nicho")
+    niche_median = niche_scores[len(niche_scores) // 2] if len(niche_scores) >= 6 else 0
+    items = [i for i in items if viral(i, own_median) and (i["source"] == "sua" or (i["score"] or 0) >= niche_median)]
     out, used, seen = [], set(), set()
     for item in items:  # primeiro um de cada formato (variedade), depois por nota
         key = src.norm(item["text"])

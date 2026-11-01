@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=41">
+  <link rel="stylesheet" href="/static/css/styles.css?v=42">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=58"></script>
+  <script defer src="/static/js/app.js?v=59"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -380,7 +380,14 @@
                 <p id="hot-q-count" class="text-[11px] text-mute"></p>
               </div>
               <div id="hot-question" class="hot-question" aria-live="polite"></div>
-              <div id="hot-q-filters" class="mt-3 flex flex-wrap gap-1.5" aria-label="Filtrar perguntas"></div>
+              <div class="hot-q-filterbar mt-3">
+                <div id="hot-q-filters" class="flex flex-wrap gap-1.5" aria-label="Filtrar perguntas"></div>
+                <label class="radar-switch" title="Junta as frases que viralizaram de verdade nas suas contas e nas contas do nicho">
+                  <input id="hot-accounts" type="checkbox">
+                  <span class="radar-switch-track" aria-hidden="true"><i></i></span>
+                  <span>Com base nas contas</span>
+                </label>
+              </div>
               <div class="mt-2 flex flex-wrap items-center gap-3">
                 <button id="hot-q-toggle" type="button" class="idea-btn" aria-expanded="false" aria-controls="hot-q-list">Ver todas</button>
                 <button id="hot-q-reset" type="button" class="text-[11px] text-mute underline underline-offset-2">Zerar as usadas</button>
@@ -390,7 +397,7 @@
             <section class="hot-block" aria-labelledby="hot-grok-title">
               <div class="hot-block-head">
                 <h4 id="hot-grok-title" class="text-sm text-white">Textos novos com Grok</h4>
-                <p class="text-[11px] text-mute">10 textos inéditos no formato escolhido acima (ou um de cada), aprendendo com o que já bombou nas suas contas e no nicho.</p>
+                <p class="text-[11px] text-mute">10 textos inéditos no formato escolhido acima (ou um de cada). Com "Com base nas contas" ligado, o Grok também aprende com o que viralizou nas suas contas e no nicho.</p>
               </div>
               <div class="flex flex-wrap items-center gap-3">
                 <button id="hot-grok" type="button" class="hot-btn"><span class="cost-label">Gerar 10 textos</span></button>

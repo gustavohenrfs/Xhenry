@@ -2232,3 +2232,6 @@ html:has(#intro:not(.is-out)) { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .pz-tick button { transition: none; } }
 .pz-skel { height: 10rem; border-radius: 1.4rem; }
+
+/* Perguntas quentes: tipos à esquerda, "Com base nas contas" ao lado. */
+.hot-q-filterbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; }

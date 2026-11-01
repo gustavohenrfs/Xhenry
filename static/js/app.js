@@ -360,7 +360,7 @@ function setTab(tab) {
   if (tab === "ops") closeOpsFolder();
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
-  if (tab === "radar") loadRadar();
+  if (tab === "radar") { loadRadar(); refreshRadar({ auto: true }); }
   if (tab === "postar") loadDrafts();
   if (tab === "users") loadUsers();
   document.querySelectorAll(".nav-divider, .more-divider").forEach((node) => node.classList.toggle("on", INFO_TABS.includes(tab)));
@@ -3777,13 +3777,24 @@ function paintRadar(data) {
     return li;
   }) : [el("li", "text-sm text-mute", "Sem manchetes soltas agora.")]));
 }
-async function refreshRadar() {
+// auto: ao entrar na aba. Atualizou há menos de 2 min (429) ou falhou: fica o que já está na tela, sem aviso.
+let radarRefreshing = false;
+async function refreshRadar({ auto = false } = {}) {
+  if (radarRefreshing) return;
+  radarRefreshing = true;
+  const button = document.getElementById("radar-refresh");
+  const label = button.querySelector(".cost-label");
+  if (label) label.textContent = "Atualizando…";
   try {
     paintRadar(await api("/api/radar/refresh?heat=" + radarHeat, { method: "POST" }));
-    toast("Radar atualizado.");
-  } catch (error) { toast(error.message || "Não atualizou o radar."); }
+    if (!auto) toast("Radar atualizado.");
+  } catch (error) {
+    if (!auto) toast(error.message || "Não atualizou o radar.");
+  }
+  if (label) label.textContent = "Atualizar";
+  radarRefreshing = false;
 }
-document.getElementById("radar-refresh").addEventListener("click", refreshRadar);
+document.getElementById("radar-refresh").addEventListener("click", () => refreshRadar());
 document.querySelectorAll("[data-radar-heat]").forEach((button) => button.addEventListener("click", () => {
   if (radarHeat === button.dataset.radarHeat) return;
   radarHeat = button.dataset.radarHeat;
@@ -3878,6 +3889,9 @@ const HOT_REASONS = { vazio: "sem resultado", repetido: "repetidos", repost: "re
 let hotData = null;
 let hotFormat = "";
 let hotSeed = 0;
+let hotMix = 0;          // semente das frases montadas pelo gerador ("Misturar novas")
+let hotAccounts = false; // "Com base nas contas": entra o que viralizou nas suas contas e no nicho
+try { hotAccounts = localStorage.getItem("hot_accounts") === "1"; } catch { /* sem storage */ }
 let hotBank = null;
 let hotQFilter = "";  // "" = agora (momento + gerais); formato; ou "m:<momento>"
 let hotQAt = 0;
@@ -3914,7 +3928,7 @@ function orderHotQuestions() {
 }
 async function loadHotBank() {
   try {
-    hotBank = await api("/api/radar/hot/questions?heat=" + radarHeat);
+    hotBank = await api("/api/radar/hot/questions?heat=" + radarHeat + "&mix=" + hotMix + (hotAccounts ? "&accounts=1" : ""));
   } catch { hotBank = null; }
   orderHotQuestions();
   paintHotFilters();
@@ -4018,6 +4032,24 @@ document.getElementById("hot-q-toggle").addEventListener("click", (event) => {
   event.currentTarget.textContent = list.hidden ? "Ver todas" : "Esconder a lista";
   paintHotList();
 });
+{
+  const accounts = document.getElementById("hot-accounts");
+  accounts.checked = hotAccounts;
+  accounts.addEventListener("change", () => {
+    hotAccounts = accounts.checked;
+    try { localStorage.setItem("hot_accounts", hotAccounts ? "1" : "0"); } catch { /* sem storage */ }
+    if (!hotAccounts && hotQFilter === "proven") hotQFilter = "";
+    loadHotBank();
+  });
+  const mix = costButton("Misturar novas", "free", "idea-btn");
+  mix.title = "O gerador monta outras frases agora";
+  mix.addEventListener("click", async () => {
+    hotMix = 1 + Math.floor(Math.random() * 999999);
+    await loadHotBank();
+    toast("Frases novas misturadas.", "ok");
+  });
+  document.getElementById("hot-q-toggle").before(mix);
+}
 document.getElementById("hot-q-reset").addEventListener("click", () => {
   hotUsed = new Set();
   try { localStorage.removeItem("hot_used"); } catch { /* sem storage */ }
@@ -4051,6 +4083,7 @@ async function askHotGrok(button, out, options) {
     body.fmt = hotQFilter && !hotQFilter.startsWith("m:") ? hotQFilter : null;
     body.trend = document.getElementById("hot-grok-trend").checked;
   }
+  body.accounts = hotAccounts;
   try {
     const data = await api("/api/radar/hot/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     out.hidden = false;
