@@ -1876,7 +1876,9 @@ async function postIdeas(mode, button) {
   } catch (error) { toast(error.message || "Não montou as ideias.", "error"); }
   if (button) { setCostLabel(button, label); button.disabled = false; }
 }
-{
+// Montado no fim do script (antes do boot): costButton usa COSTS, que só existe mais abaixo. Chamado aqui
+// em cima, derrubava o app.js inteiro no carregamento (painel preso na intro e nos esqueletos).
+function mountPostIdeasButtons() {
   const free = costButton("Outras ideias grátis", "free", "idea-btn");
   free.addEventListener("click", () => postIdeas("free", free));
   const grok = costButton("Ideias do Grok (melhor)", "grok", "idea-btn is-post");
@@ -5093,6 +5095,7 @@ function paintReplies() {
 }
 setInterval(() => { if (state.tab === "metricas" && replyData) paintReplies(); }, 30000);
 
+mountPostIdeasButtons();
 boot();
 
 // ---------- Info: Algoritmo do X, Rede de RT, Suporte I.A e Suporte (WhatsApp) ----------
