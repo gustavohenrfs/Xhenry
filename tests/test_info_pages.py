@@ -65,9 +65,14 @@ def test_guide_keeps_everything_from_the_owner_reference(html):
 
 def test_warm_up_follows_the_house_method(html):
     section = html[html.index('id="algo-aquecer"'):html.index("</section>", html.index('id="algo-aquecer"'))]
-    assert "conta nova aquece de 5 a 7 dias, conta antiga de 3 a 7" in section
-    assert 'id="warm-nova"' in section and 'id="warm-antiga"' in section and "4 semanas" not in html
-    assert "Como aquecer uma conta antiga ou comprada?" in APP_JS and "Conta nova aquece de 5 a 7 dias" in APP_JS
+    assert "de 5 a 7 dias, visando só post em texto" in section
+    days = [part.split("</time>")[0] for part in section.split("<time>")[1:]]
+    assert days == ["Dia 0", "Dia 1", "Dia 2", "Dia 3", "Dia 4", "Dia 5", "Dia 6", "Dia 7+"]
+    for step in ("por 24 h a 48 h", "perfil verificado", "1 página grande", "nome de usuário", "link na bio",
+                 "2 ou 3 posts de texto", "3 posts de texto por dia"):
+        assert step in section, step
+    assert "4 semanas" not in html and 'id="warm-antiga"' not in html
+    assert "De 5 a 7 dias, visando só post em texto" in APP_JS and "Como aquecer uma conta antiga" not in APP_JS
 
 
 def test_rt_page_has_the_real_map_and_a_minimal_example(html):

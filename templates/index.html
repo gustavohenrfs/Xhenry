@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
   <link rel="stylesheet" href="/static/css/styles.css?v=40">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=56"></script>
+  <script defer src="/static/js/app.js?v=57"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -637,26 +637,18 @@
               </section>
               <section class="info-sec glow" id="algo-aquecer">
                 <h3 class="font-display">Aquecer conta</h3>
-                <p>O método da casa: <b>conta nova aquece de 5 a 7 dias, conta antiga de 3 a 7.</b> Conta antiga é a que já existe e estava parada, foi comprada ou está trocando de nicho. Quanto mais tempo ela ficou parada ou mais longe do nicho novo, mais perto dos 7 dias.</p>
-                <div class="warm-switch radar-seg" role="tablist" aria-label="Tipo de conta">
-                  <button type="button" role="tab" id="warm-tab-nova" aria-controls="warm-nova" aria-selected="true" data-warm="nova">Conta nova · 5 a 7 dias</button>
-                  <button type="button" role="tab" id="warm-tab-antiga" aria-controls="warm-antiga" aria-selected="false" data-warm="antiga">Conta antiga · 3 a 7 dias</button>
-                </div>
-                <ol id="warm-nova" class="steps warm-plan" role="tabpanel" aria-labelledby="warm-tab-nova">
-                  <li><b>Dia 0 · preparar.</b> E-mail e telefone confirmados, foto e capa comportadas, bio, post fixado, Premium se der e "conteúdo sensível" ligado antes de qualquer coisa +18.</li>
-                  <li><b>Dias 1 e 2 · só usar.</b> 15 a 20 minutos lendo o feed de verdade, 10 a 20 curtidas e 5 a 10 contas do nicho seguidas por dia. Nenhum post.</li>
-                  <li><b>Dias 3 e 4 · aparecer.</b> 1 a 3 replies por dia em contas do nicho (pergunta ou opinião, nunca link), até 10 a 15 seguidas por dia e 1 post simples, sem link.</li>
-                  <li><b>Dias 5 a 7 · ligar.</b> 2 a 3 posts por dia com 2 horas entre eles, 5 a 10 replies e responder todo mundo. O primeiro texto +18 entra no fim, com o sensível ligado e sem link no corpo.</li>
-                  <li><b>Pronta?</b> Verifique em Operações → Verificar: sem ghost ban nem search ban, pode subir para a rotina normal aos poucos.</li>
+                <p>O método da casa: <b>de 5 a 7 dias, visando só post em texto.</b> Cada dia é uma sessão curta: entra, faz o que está na lista e fecha. Pular etapa é o que mais derruba conta nova.</p>
+                <ol class="steps is-time warm-plan" aria-label="Aquecimento dia a dia">
+                  <li><time>Dia 0</time><b>Logar e deixar de molho.</b> Entre em todas as contas e feche. Deixe paradas por 24 h a 48 h.</li>
+                  <li><time>Dia 1</time><b>Molho.</b> Não abra a conta.</li>
+                  <li><time>Dia 2</time><b>Aquecer.</b> Rolar o feed por 5 a 10 minutos, entrar em Pesquisar e explorar um pouco a aba de Trends. Ficar um tempo nos vídeos para gerar retenção e fechar.</li>
+                  <li><time>Dia 3</time><b>Primeira curtida.</b> Rolar o feed, gerar retenção nos vídeos e explorar o Explorar. Pesquisar um perfil verificado, ver os posts e os reposts dele, curtir 1 post e fechar.</li>
+                  <li><time>Dia 4</time><b>Perfil básico.</b> O mesmo do dia 3, agora com 2 ou 3 curtidas e seguindo 1 página grande. Configurar o básico do perfil: foto, bio, banner e nome de exibição.</li>
+                  <li><time>Dia 5</time><b>Configurações fundas e 1º post.</b> Usar uns 3 minutos. Trocar o nome de usuário e, se precisar, o país. Pode colocar o link na bio. Depois, o primeiro post, só em texto.</li>
+                  <li><time>Dia 6</time><b>Ganhando ritmo.</b> Usar uns 5 minutos e fazer 2 ou 3 posts de texto.</li>
+                  <li><time>Dia 7+</time><b>Liberada.</b> Já pode usar normalmente, com 3 posts de texto por dia.</li>
                 </ol>
-                <ol id="warm-antiga" class="steps warm-plan" role="tabpanel" aria-labelledby="warm-tab-antiga" hidden>
-                  <li><b>Dia 0 · revisar.</b> Confirme e-mail e telefone, troque foto, capa e bio para o nicho novo (sempre comportadas), fixe um post novo e ligue o "conteúdo sensível" se for +18. Nada de apagar posts em massa no mesmo dia.</li>
-                  <li><b>Dias 1 e 2 · voltar a usar.</b> Ler o feed, curtir 10 a 20 posts e seguir 5 a 10 contas do nicho novo por dia, para o X entender o público que você quer.</li>
-                  <li><b>Dia 3 · aparecer.</b> 3 a 5 replies em contas do nicho e 1 ou 2 posts sem link. Conta que ficou pouco tempo parada e não mudou de nicho já pode seguir para a rotina.</li>
-                  <li><b>Dias 4 a 7 · ligar (parada há meses ou trocando de nicho).</b> 3 a 5 posts por dia, 10 a 20 replies, conteúdo +18 com o sensível ligado e responder todo mundo.</li>
-                  <li><b>Pronta?</b> Verifique em Operações → Verificar antes de pôr a conta na Rede de RT.</li>
-                </ol>
-                <p class="info-callout is-warn"><b>Limites que não se quebram.</b> Até 30 a 50 seguidas por dia · até 300 seguindo antes de ter 300 seguidores · nunca passar de 2.500 seguindo · nada +18 antes de terminar o aquecimento · nada de postar sempre no mesmo minuto, todo dia.</p>
+                <p class="info-callout is-warn"><b>Não pule etapa.</b> Link só na bio, nunca no post · até 30 a 50 seguidas por dia · nunca passar de 2.500 seguindo · nada de postar sempre no mesmo minuto, todo dia. Antes de colocar a conta na Rede de RT, confira em Operações → Verificar se não tem ghost ban nem search ban.</p>
               </section>
               <section class="info-sec glow" id="algo-rotina">
                 <h3 class="font-display">Rotina de cada dia (conta aquecida)</h3>

@@ -4680,13 +4680,6 @@ if ("IntersectionObserver" in window) {
   document.querySelectorAll(".info-sec[id]").forEach((section) => watcher.observe(section));
 }
 
-// Aquecer conta: abas Conta nova (5 a 7 dias) e Conta antiga (3 a 7 dias).
-document.querySelectorAll("[data-warm]").forEach((button) => button.addEventListener("click", () => {
-  document.querySelectorAll("[data-warm]").forEach((other) => other.setAttribute("aria-selected", String(other === button)));
-  document.getElementById("warm-nova").hidden = button.dataset.warm !== "nova";
-  document.getElementById("warm-antiga").hidden = button.dataset.warm !== "antiga";
-}));
-
 // Rede de RT: as contas do dashboard em volta da principal (mais views), coloridas pela saúde.
 const REDE_OUT = new Set(["ghost_ban", "search_ban", "suspended", "not_found", "protected"]);
 function paintRede() {
@@ -4747,13 +4740,15 @@ const IA_KB = [
     a: ["Viralizar no X é ganhar os primeiros 30 minutos. É ali que o algoritmo decide se o post vai para quem não te segue nas próximas 24 h.",
       ["Poste no seu pico (para +18: 22h–1h; geral: terça e quarta, 9h–10h).", "Abra com uma pergunta que faça homem responder: enquete de dois lados, desafio ao ego, \"vocês homens…\".", "Responda cada comentário na primeira hora: cada reply respondida vale 150 curtidas.", "Sem link no corpo do post e no máximo 2 hashtags.", "Use as suas outras contas para citar com comentário logo no começo (veja Rede de RT)."],
       "No Radar, a parte Textos quentes tem perguntas prontas nesse formato."] },
-  { q: "Como aquecer uma conta nova?", see: "algo-aquecer", keys: ["aquec", "conta nova", "criar conta", "comecar conta", "conta zerada", "primeira semana", "warm"],
-    a: ["Conta nova aquece de 5 a 7 dias:",
-      ["Dia 0: e-mail e telefone confirmados, foto e capa comportadas, bio, post fixado e \"conteúdo sensível\" ligado se for +18.", "Dias 1 e 2: só usar. Ler o feed, 10 a 20 curtidas e seguir 5 a 10 contas do nicho por dia. Nenhum post.", "Dias 3 e 4: 1 a 3 replies por dia, até 15 seguidas e 1 post simples, sem link.", "Dias 5 a 7: 2 a 3 posts por dia, 5 a 10 replies e o primeiro texto +18 no fim, com o sensível ligado."],
-      "Antes de soltar a conta, verifique em Operações → Verificar se não tem ghost ban nem search ban."] },
-  { q: "Como aquecer uma conta antiga ou comprada?", see: "algo-aquecer", keys: ["conta antiga", "conta comprada", "conta parada", "reativar", "trocar de nicho", "mudar nicho", "conta velha"],
-    a: ["Conta antiga aquece de 3 a 7 dias: perto de 3 se ficou pouco tempo parada e é do mesmo nicho, perto de 7 se ficou meses parada ou está trocando de nicho.",
-      ["Dia 0: confirmar e-mail e telefone, trocar foto, capa e bio para o nicho novo e ligar o sensível. Não apague posts em massa no mesmo dia.", "Dias 1 e 2: ler, curtir 10 a 20 e seguir 5 a 10 contas do nicho novo por dia.", "Dia 3: 3 a 5 replies e 1 ou 2 posts sem link.", "Dias 4 a 7, se precisar: 3 a 5 posts, 10 a 20 replies e conteúdo +18 com o sensível ligado."]] },
+  { q: "Como aquecer uma conta nova?", see: "algo-aquecer", keys: ["aquec", "conta nova", "criar conta", "comecar conta", "conta zerada", "primeira semana", "warm", "conta antiga", "conta comprada", "conta parada", "molho"],
+    a: ["De 5 a 7 dias, visando só post em texto. Cada dia é uma sessão curta:",
+      ["Dia 0: logar em todas e fechar. Deixar de molho por 24 h a 48 h.", "Dia 1: molho, não abre.",
+        "Dia 2: rolar o feed 5 a 10 min, explorar Pesquisar e Trends, ficar um pouco nos vídeos e fechar.",
+        "Dia 3: feed, vídeos e Explorar; pesquisar um perfil verificado, ver posts e reposts, curtir 1 post e fechar.",
+        "Dia 4: igual ao 3, com 2 ou 3 curtidas e seguindo 1 página grande. Perfil básico: foto, bio, banner e nome de exibição.",
+        "Dia 5: uns 3 min; trocar o nome de usuário e o país se precisar, link na bio e o 1º post em texto.",
+        "Dia 6: uns 5 min e 2 ou 3 posts de texto.", "Dia 7 em diante: uso normal, 3 posts de texto por dia."],
+      "Antes de pôr a conta na Rede de RT, confira em Operações → Verificar se não tem ghost ban nem search ban."] },
   { q: "Como evitar que a conta caia?", see: "algo-mata", keys: ["cair", "caiu", "ban", "banid", "suspens", "suspend", "derrub", "bloquead", "perder conta", "conta nao cair", "proteger conta", "seguranca"],
     a: ["O que mais derruba conta, em ordem:",
       ["Conteúdo +18 sem \"conteúdo sensível\" ligado: o X marca por você e isso é punição.", "Seguir mais de 30 a 50 por dia, ou passar de 2.500 seguindo.", "Pedir curtida ou repost em troca de algo (engagement farming).", "Link e divulgação em reply: é marcado como spam.", "Postar sempre no mesmo minuto, todo dia, e várias contas fazendo a mesma coisa juntas.", "Qualquer coisa com menor de idade: banimento direto."],
@@ -4835,7 +4830,7 @@ const IA_KB = [
   { q: "O que o painel faz por mim?", see: null, keys: ["painel", "xhenry", "saas", "o que voce faz", "funcionalidade", "ajuda do painel"],
     a: [["Dashboard: views, interações, melhor horário e crescimento das suas contas.", "Operações: pastas, contas e a verificação de ghost ban e search ban.", "Radar: o que está em alta no Brasil, ideias de post e textos quentes.", "Ferramentas: Verificar post (Grok) e Metadados (cópias com hash diferente).", "Alertas de post viralizando no celular."]] },
 ];
-const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como aquecer uma conta antiga ou comprada?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
+const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
 // Palavras que mostram que a pergunta é sobre o X (sem nenhuma delas e sem casar com a base, é fora do assunto).
 const IA_TOPIC = ["x", "twitter", "tweet", "post", "conta", "perfil", "seguidor", "algoritmo", "alcance", "feed", "rt", "reply", "bio", "story", "engaj", "viral", "ban", "nicho", "publico"];
 function iaTokens(text) { return plain(text).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean); }
