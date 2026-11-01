@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=45">
+  <link rel="stylesheet" href="/static/css/styles.css?v=46">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=63"></script>
+  <script defer src="/static/js/app.js?v=64"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -486,7 +486,7 @@
                 <p id="pz-count" class="pz-count" aria-live="polite">Lendo as contas…</p>
               </div>
               <ol id="pz-rail" class="pz-rail" aria-label="Contas do lote: cada risco aceso é uma conta já postada"></ol>
-              <p class="pz-tip">No Radar, toque em <b>Guardar</b> numa ideia e escolha a conta. Aqui você copia, cola no X pela conta certa e marca <b>Postei</b>.</p>
+              <p class="pz-tip">No Radar, toque em <b>Guardar</b> numa ideia e escolha a conta: quantas frases quiser por conta. Aqui você copia, cola no X pela conta certa e marca <b>Postei</b>. À meia-noite a fila zera; o que foi postado fica no ranking.</p>
             </header>
             <div class="pz-tools">
               <label class="acc-search">
@@ -508,7 +508,8 @@
                   <p id="pz-results-note" class="text-xs text-mute">Cada Postei ligado ao post que o robô leu, somado por frase.</p>
                 </div>
                 <div id="pz-results-sort" class="radar-seg" role="radiogroup" aria-label="Ordenar frases">
-                  <button type="button" role="radio" data-pz-sort="views" aria-checked="true">Mais views</button>
+                  <button type="button" role="radio" data-pz-sort="nota" aria-checked="true">Nota viral</button>
+                  <button type="button" role="radio" data-pz-sort="views" aria-checked="false">Mais views</button>
                   <button type="button" role="radio" data-pz-sort="replies" aria-checked="false">Mais comentários</button>
                   <button type="button" role="radio" data-pz-sort="recent" aria-checked="false">Recentes</button>
                 </div>

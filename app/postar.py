@@ -7,7 +7,8 @@ próximo texto da fila e o botão Copiar. O painel nunca posta: o usuário cola 
 
 from __future__ import annotations
 
-from datetime import timedelta
+import math
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -18,7 +19,7 @@ from app.models import Folder, PostDraft, XAccount
 from app.radar_sources import norm
 from app.services import as_utc, now_utc, owned_account, selected_accounts
 
-MAX_QUEUE = 20                      # textos na fila de uma conta
+MAX_QUEUE = 200                     # textos por conta por dia: na prática sem limite (só protege o banco)
 MAX_TEXT = 4000                     # post longo do X Premium cabe; o comum é 280
 BATCH_WINDOW = timedelta(hours=3)   # "Postei" conta no lote atual por 3 h
 KEEP_POSTED = timedelta(days=30)    # histórico do que já foi postado
@@ -46,22 +47,45 @@ def owned_draft(db: Session, owner_id: int, draft_id: int) -> PostDraft:
     return draft
 
 
-def board(db: Session, owner_id: int) -> dict[str, Any]:
-    """Todas as contas ativas do usuário, com a fila e o último "Postei" do lote atual."""
-    now = now_utc()
+def day_start(now: datetime | None = None) -> datetime:
+    """Meia-noite de hoje em São Paulo, em UTC: a fila de cada conta vale só para o dia."""
+    from app.radar import DEFAULT_TZ_INFO
+
+    local = (now or now_utc()).astimezone(DEFAULT_TZ_INFO)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def reset_day(db: Session, owner_id: int, now: datetime | None = None) -> None:
+    """Virada do dia: o que não foi postado até ontem sai da fila; o postado fica 30 dias para o ranking."""
+    now = now or now_utc()
+    db.execute(delete(PostDraft).where(PostDraft.owner_id == owner_id, PostDraft.posted_at.is_(None),
+                                       PostDraft.created_at < day_start(now)))
     db.execute(delete(PostDraft).where(PostDraft.owner_id == owner_id, PostDraft.posted_at.is_not(None),
                                        PostDraft.posted_at < now - KEEP_POSTED))
     db.commit()
+
+
+def board(db: Session, owner_id: int) -> dict[str, Any]:
+    """Todas as contas ativas do usuário, com a fila do dia, o último "Postei" do lote atual, quantas postou hoje
+    e a estimativa de alcance de cada formato (nota viral antes de postar)."""
+    from app.radar_hot import format_of
+
+    now = now_utc()
+    reset_day(db, owner_id, now)
+    today = day_start(now)
     accounts = selected_accounts(db, owner_id, None)
     folders = {f.id: f for f in db.scalars(select(Folder).where(Folder.owner_id == owner_id))}
     drafts = db.scalars(select(PostDraft).where(PostDraft.owner_id == owner_id).order_by(PostDraft.id)).all()
     queue: dict[int, list[dict[str, Any]]] = {}
     posted: dict[int, dict[str, Any]] = {}
+    today_posted: dict[int, int] = {}
     for draft in drafts:
         if draft.posted_at is None:
-            queue.setdefault(draft.account_id, []).append({"id": draft.id, "text": draft.text})
+            queue.setdefault(draft.account_id, []).append({"id": draft.id, "text": draft.text, "fmt": format_of(draft.text)})
             continue
         at = as_utc(draft.posted_at)
+        if at >= today:
+            today_posted[draft.account_id] = today_posted.get(draft.account_id, 0) + 1
         if now - at <= BATCH_WINDOW and (draft.account_id not in posted or at >= posted[draft.account_id]["at"]):
             posted[draft.account_id] = {"id": draft.id, "text": draft.text, "at": at}
     rows = []
@@ -74,14 +98,17 @@ def board(db: Session, owner_id: int) -> dict[str, Any]:
             "folder_id": account.folder_id, "folder_name": folder.name if folder else "",
             "folder_color": folder.color if folder else None,
             "queue": queue.get(account.id, []),
+            "today_posted": today_posted.get(account.id, 0),
             "posted": {"id": done["id"], "text": done["text"], "posted_at": done["at"].isoformat()} if done else None,
         })
     return {"accounts": rows, "batch": {"done": len([r for r in rows if r["posted"]]), "total": len(rows),
-                                        "hours": int(BATCH_WINDOW.total_seconds() // 3600)}}
+                                        "hours": int(BATCH_WINDOW.total_seconds() // 3600)},
+            "max_per_day": MAX_QUEUE, "potential": format_potential(db, owner_id)}
 
 
 def save(db: Session, owner_id: int, account_id: int, text: str) -> dict[str, Any]:
     account = owned_account(db, owner_id, account_id)
+    reset_day(db, owner_id)
     text = clean_text(text)
     if not text:
         raise HTTPException(400, "Escreva o texto do post.")
@@ -93,7 +120,7 @@ def save(db: Session, owner_id: int, account_id: int, text: str) -> dict[str, An
     if any(same_key(d.text) == key for d in mine):
         raise HTTPException(409, f"Esse texto já está na fila de @{account.username}.")
     if len(mine) >= MAX_QUEUE:
-        raise HTTPException(400, f"A fila de @{account.username} já tem {MAX_QUEUE} textos. Poste ou apague um.")
+        raise HTTPException(400, f"@{account.username} já tem {MAX_QUEUE} textos guardados hoje. Poste ou apague um.")
     others = {d.account_id for d in waiting if d.account_id != account.id and same_key(d.text) == key}
     elsewhere = list(db.scalars(select(XAccount.username).where(XAccount.id.in_(others)))) if others else []
     draft = PostDraft(owner_id=owner_id, account_id=account.id, text=text)
@@ -213,7 +240,8 @@ def results(db: Session, owner_id: int, folder_id: int | None = None) -> dict[st
         fmt = format_of(phrase["text"])
         phrase |= {"avg_views": round(phrase["views"] / matched) if matched else None,
                    "avg_replies": round(phrase["replies"] / matched) if matched else None,
-                   "fmt": fmt, "fmt_label": LABELS[fmt][0], "champion": False}
+                   "fmt": fmt, "fmt_label": LABELS[fmt][0], "champion": False,
+                   "rating": viral_rating(phrase["best"]["views"]) if phrase["best"] else None}
         rows.append(phrase)
     seen = [r for r in rows if r["matched"]]
     middle = _median([r["avg_views"] for r in seen])
@@ -221,3 +249,54 @@ def results(db: Session, owner_id: int, folder_id: int | None = None) -> dict[st
         row["champion"] = row["avg_views"] >= middle and (row["avg_views"] >= normal_views or row["avg_replies"] >= CHAMPION_REPLIES)
     rows.sort(key=lambda r: (r["matched"] == 0, -(r["avg_views"] or 0)))
     return {"phrases": rows, "pending": pending, "normal_views": int(normal_views), "days": RESULTS_DAYS}
+
+
+
+# ---------- Nota viral: a régua é de milhões ----------
+# 0 a 100 em escala logarítmica: 1 mil views = 50, 1 milhão = 100 (cada zero a mais vale o mesmo tanto).
+VIRAL_TIERS = (  # (views mínimas, chave, nome na tela)
+    (1_000_000, "viral", "Viral (milhões)"),
+    (500_000, "quase", "Quase viral"),
+    (100_000, "forte", "Forte"),
+    (10_000, "boa", "Boa"),
+    (0, "fraca", "Fraca"),
+)
+POTENTIAL_DAYS = 60
+POTENTIAL_MIN = 3  # posts do formato para arriscar uma estimativa
+
+
+def viral_rating(views: int | float | None, real: bool = True) -> dict[str, Any] | None:
+    if views is None:
+        return None
+    views = max(0, int(views))
+    score = 0 if views < 10 else min(100, round(math.log10(views) / 6 * 100))
+    key, label = next((k, l) for floor, k, l in VIRAL_TIERS if views >= floor)
+    return {"score": score, "tier": key, "label": label, "views": views, "real": real}
+
+
+def format_potential(db: Session, owner_id: int) -> dict[str, dict[str, Any]]:
+    """Estimativa antes de postar: até onde cada formato costuma chegar (o quartil de cima das views), com os
+    seus posts dos últimos 60 dias e os textos do nicho. É do formato, não da frase: a tela diz "estimativa"."""
+    from app.algo_metrics import is_own_reply
+    from app.models import HotText, TweetSample
+    from app.radar_hot import format_of
+
+    accounts = [a.id for a in selected_accounts(db, owner_id, None)]
+    views: dict[str, list[int]] = {}
+    if accounts:
+        rows = db.execute(select(TweetSample.text_preview, TweetSample.view_count).where(
+            TweetSample.account_id.in_(accounts), TweetSample.text_preview.is_not(None),
+            TweetSample.posted_at >= now_utc() - timedelta(days=POTENTIAL_DAYS)).limit(5000)).all()
+        for row in rows:
+            if not is_own_reply(row):
+                views.setdefault(format_of(row.text_preview), []).append(row.view_count or 0)
+    for fmt, value in db.execute(select(HotText.fmt, HotText.views)).all():
+        views.setdefault(fmt, []).append(value or 0)
+    out = {}
+    for fmt, values in views.items():
+        if len(values) < POTENTIAL_MIN:
+            continue
+        values.sort()
+        rating = viral_rating(values[int(len(values) * .75)], real=False)
+        out[fmt] = rating | {"n": len(values)}
+    return out

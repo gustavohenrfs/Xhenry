@@ -261,7 +261,10 @@ def hot_questions(heat: str = Query("quente", pattern="^(leve|quente)$"), seed: 
                 "nicho": sum(1 for p in proven if p["source"] == "nicho"),
                 "rule": radar_hot.VIRAL_RULE}
     bank = radar_ideas.question_bank(heat, proven=proven if heat == "quente" else None, mix=mix)
-    return bank | {"seed": seed, "accounts": accounts, "accounts_info": info, "ideas": radar_ideas.hot_questions(heat, seed)}
+    from app.postar import format_potential
+
+    return bank | {"seed": seed, "accounts": accounts, "accounts_info": info, "ideas": radar_ideas.hot_questions(heat, seed),
+                   "potential": format_potential(db, user.id)}
 
 
 @router.get("/api/radar/hot/variations")

@@ -2342,3 +2342,27 @@ html:has(#intro:not(.is-out)) { overflow: hidden; }
 .pz-result-stats dd { font-size: .98rem; color: var(--fg); font-variant-numeric: tabular-nums; }
 .hot-proven.is-lote { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .pz-result, .pz-meter::after { animation: none; } }
+
+/* ---------- Nota viral (régua de milhões) ----------
+   Número em destaque + faixa. Viral (milhões) acende em laser; estimativa (antes de postar) tem borda tracejada. */
+.vr {
+  display: inline-flex; align-items: center; gap: .4rem; padding: .12rem .6rem .12rem .2rem; border: 1px solid var(--line-strong);
+  border-radius: 999px; font-size: .7rem; color: var(--muted); white-space: nowrap; justify-self: start;
+}
+.vr b {
+  display: inline-grid; place-items: center; min-width: 1.6rem; height: 1.35rem; padding: 0 .3rem; border-radius: 999px;
+  font-size: .72rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg); background: var(--line);
+}
+.vr.is-guess { border-style: dashed; }
+.vr.is-fraca b { color: var(--muted); }
+.vr.is-boa { color: var(--warn); border-color: var(--warn-line); } .vr.is-boa b { color: var(--warn); background: var(--warn-bg); }
+.vr.is-forte { color: var(--ok); border-color: var(--ok-line); } .vr.is-forte b { color: var(--ok); background: var(--ok-bg); }
+.vr.is-quase { color: var(--accent); border-color: rgb(var(--c-neon) / .55); } .vr.is-quase b { color: var(--on-accent); background: var(--accent); }
+.vr.is-viral { color: var(--fg); border-color: transparent; background: linear-gradient(var(--field), var(--field)) padding-box, linear-gradient(90deg, var(--laser-b), var(--laser-a), var(--violet)) border-box; box-shadow: 0 0 18px -6px var(--laser-a); }
+.vr.is-viral b { color: #fff; background: linear-gradient(90deg, var(--laser-b), var(--laser-a)); }
+.vr.is-viral:not(.is-guess) { animation: vr-glow 2.4s ease-in-out infinite; }
+@keyframes vr-glow { 50% { box-shadow: 0 0 26px -4px var(--laser-a); } }
+.pz-result.tier-viral { border-color: transparent; background: linear-gradient(var(--field), var(--field)) padding-box, linear-gradient(120deg, var(--laser-b), var(--laser-a), var(--violet)) border-box; }
+.pz-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .3rem; }
+.pz-chip.is-day { color: var(--accent); border-color: rgb(var(--c-neon) / .45); }
+@media (prefers-reduced-motion: reduce) { .vr.is-viral:not(.is-guess) { animation: none; } }

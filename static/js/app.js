@@ -4187,6 +4187,8 @@ function showHotQuestion() {
   if (item.moment && hotBank.moments[item.moment]) top.append(el("span", "radar-note", hotBank.moments[item.moment]));
   const tag = provenTag(item);
   if (tag) top.append(tag);
+  const guess = viralBadge(hotBank.potential && hotBank.potential[item.fmt]);
+  if (guess) top.append(guess);
   if (hotUsed.has(item.text)) top.append(el("span", "hot-used-tag", "já usada"));
   const actions = ideaActions(item.text);
   const next = costButton("Outra", "free", "idea-btn");
@@ -4205,6 +4207,8 @@ function paintHotList() {
     head.append(el("span", "radar-cat hot-fmt", item.fmt_label));
     const tag = provenTag(item);
     if (tag) head.append(tag);
+    const guess = viralBadge(hotBank.potential && hotBank.potential[item.fmt]);
+    if (guess) head.append(guess);
     head.append(el("span", "hot-used-tag", hotUsed.has(item.text) ? "já usada" : ""));
     const actions = ideaActions(item.text);
     actions.append(freeVariations(item.text), moreLikeThis(item.text));
@@ -4855,6 +4859,16 @@ async function loadDrafts({ silent = false } = {}) {
   }
   return draftsData;
 }
+// Nota viral (0 a 100, régua de milhões): real pelo melhor post ou estimativa do formato antes de postar.
+function viralBadge(rating) {
+  if (!rating) return null;
+  const badge = el("span", "vr is-" + rating.tier + (rating.real ? "" : " is-guess"));
+  badge.append(el("b", "", String(rating.score)), el("span", "", rating.label + (rating.real ? "" : ", estimativa")));
+  badge.title = rating.real
+    ? "Nota viral pelo melhor post: " + num(rating.views) + " views (1 milhão = 100)"
+    : "Estimativa do formato: posts assim costumam chegar a ~" + num(rating.views) + " views (1 milhão = 100)";
+  return badge;
+}
 function pzStateOf(account) { return account.posted ? "done" : account.queue.length ? "ready" : "empty"; }
 function hhmm(iso) { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
 function filas(n) { return n === 1 ? "1 na fila" : n + " na fila"; }
@@ -4945,8 +4959,11 @@ function draftCard(account) {
   who.append(el("p", "pz-handle font-display", "@" + account.username),
     el("p", "pz-sub", [account.display_name, account.folder_name].filter(Boolean).join(", pasta ")));
   head.append(who);
-  if (account.posted) head.append(el("span", "pz-chip is-ok", "Postada " + hhmm(account.posted.posted_at)));
-  else if (account.queue.length > 1) head.append(el("span", "pz-chip", filas(account.queue.length)));
+  const chips = el("div", "pz-chips");
+  if (account.today_posted) chips.append(el("span", "pz-chip is-day", account.today_posted + " hoje"));
+  if (account.posted) chips.append(el("span", "pz-chip is-ok", "Postada " + hhmm(account.posted.posted_at)));
+  else if (account.queue.length > 1) chips.append(el("span", "pz-chip", filas(account.queue.length)));
+  head.append(chips);
   card.append(head);
 
   if (account.posted) {
@@ -4958,6 +4975,8 @@ function draftCard(account) {
   const next = account.queue[0];
   if (next) {
     if (account.posted) card.append(el("p", "pz-label", "Próximo da fila"));
+    const guess = viralBadge(draftsData.potential && draftsData.potential[next.fmt]);
+    if (guess) card.append(guess);
     const text = el("p", "pz-text", next.text);
     const actions = el("div", "pz-actions");
     const copy = pzButton("Copiar", "is-post", () => {
@@ -5060,7 +5079,7 @@ document.querySelectorAll("[data-pz-filter]").forEach((button) => button.addEven
 // As campeãs também entram no "Com base nas contas" do Radar. Sem link para o X (o dono usa multilogin).
 let resultsData = null;
 let resultsSeq = 0;
-let pzSort = "views";
+let pzSort = "nota";
 async function loadDraftResults() {
   const seq = ++resultsSeq;
   try {
@@ -5090,15 +5109,20 @@ function paintDraftResults() {
     list.replaceChildren(el("li", "pz-results-empty", "Marque Postei nos textos do lote. Depois que o robô ler as contas, cada frase aparece aqui com views e comentários."));
     return;
   }
-  const key = { views: (r) => r.avg_views ?? -1, replies: (r) => r.avg_replies ?? -1, recent: (r) => Date.parse(r.last_at) }[pzSort];
+  const key = { nota: (r) => (r.rating ? r.rating.score : -1), views: (r) => r.avg_views ?? -1, replies: (r) => r.avg_replies ?? -1,
+    recent: (r) => Date.parse(r.last_at) }[pzSort];
   const rows = resultsData.phrases.slice().sort((a, b) => key(b) - key(a));
   const top = Math.max(1, ...rows.map((r) => (pzSort === "replies" ? r.avg_replies : r.avg_views) || 0));
   list.replaceChildren(...rows.map((row, index) => {
     const li = el("li", "pz-result" + (row.champion ? " is-champ" : "") + (row.matched ? "" : " is-waiting"));
     li.style.setProperty("--i", Math.min(index, 12));
     const value = (pzSort === "replies" ? row.avg_replies : row.avg_views) || 0;
-    li.style.setProperty("--w", row.matched ? Math.max(3, value / top * 100).toFixed(1) + "%" : "0%");
+    const width = pzSort === "nota" || pzSort === "recent" ? (row.rating ? row.rating.score : 0) : value / top * 100;
+    li.style.setProperty("--w", row.matched ? Math.max(3, width).toFixed(1) + "%" : "0%");
+    if (row.rating) li.classList.add("tier-" + row.rating.tier);
     const head = el("div", "pz-result-head");
+    const badge = viralBadge(row.rating);
+    if (badge) head.append(badge);
     head.append(el("span", "radar-cat hot-fmt", row.fmt_label));
     if (row.champion) head.append(el("span", "pz-champ", "Campeã"));
     head.append(el("span", "pz-result-reach", row.matched ? "em " + (row.matched === 1 ? "1 conta" : row.matched + " contas")
