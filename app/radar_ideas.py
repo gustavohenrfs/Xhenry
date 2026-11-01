@@ -459,7 +459,8 @@ def diverse(lines: list[str], key: str, size: int) -> list[str]:
     return out[:size]
 
 
-def ideas(topic: dict[str, Any], kind: str | None = None, heat: str = "leve", seed: int = 0) -> list[str]:
+def ideas(topic: dict[str, Any], kind: str | None = None, heat: str = "leve", seed: int = 0,
+          proven: list[dict[str, Any]] | None = None) -> list[str]:
     """3 a 5 frases prontas para o assunto. kind="data" para datas sazonais; heat leve|quente; seed>0 sorteia
     outra combinação ("Mais ideias"). Leve com seed 0 mantém a ordem fixa de antes. Bloqueado = lista vazia."""
     if topic.get("blocked"):
@@ -496,10 +497,113 @@ def ideas(topic: dict[str, Any], kind: str | None = None, heat: str = "leve", se
     key = f"{norm}|{heat}|{seed}"
     if which in ("person", "data"):
         return diverse(out, key, MAX_IDEAS)  # pessoa real e data só ganham as frases delas
-    # 4 do tipo do assunto + 1 genérica sorteada: mais variedade sem diluir o que é do assunto.
+    # 4 do tipo do assunto + 1 inspirada no que já engajou (ou genérica sorteada, sem comprovados).
     chosen = diverse(out, key, MAX_IDEAS - 1)
+    if hot and proven:
+        inspired = adapt_proven(title, proven, key)
+        if inspired and inspired not in chosen:
+            return chosen + [inspired]
     extra = [line for line in diverse(fill(GENERIC_Q if hot else GENERIC), key, 5) if line not in chosen]
     return chosen + extra[:MAX_IDEAS - len(chosen)]
+
+
+# ---- Variações grátis de um texto que engajou: mantém a ideia, troca abertura, fecho, meta e ordem ----
+MEN_OPENERS = ["Homens,", "Vocês homens,", "Sinceramente, homens:", "Pergunta séria pros homens:", "Me respondam, homens:"]
+SOFT_OPENERS = ["Pergunta séria:", "Sinceramente:", "Me digam uma coisa:", "Confissão rápida:", "Preciso saber:"]
+CLOSERS = ["rs", "👀", "😏", "🔥", "Sinceramente", "Estou curiosa", "Quero ver quem responde com sinceridade"]
+MEN_START = re.compile(r"^(?:homens|voc[eê]s homens|os homens)\b[,:]?\s*", re.IGNORECASE)
+SOFT_START = re.compile(r"^(?:pergunta s[eé]ria|sinceramente|me digam uma coisa|confiss[aã]o r[aá]pida|preciso saber)\s*[:,]\s*", re.IGNORECASE)
+TAIL = re.compile(r"[\s,]*(?:\b(?:rs+|kk+|sinceramente|estou curiosa)\b|[👀😏🔥🤭😈🙈🫣]|\s)*[.!…]*$", re.IGNORECASE)
+GOAL = re.compile(r"\b(\d{2,5})\s+(curtidas|coment[aá]rios|respostas|rts?|reposts|likes)\b", re.IGNORECASE)
+POLL_START = re.compile(r"^([^?,:]{2,30}?) ou ([^?,:]{2,30}?)\?(.*)$")
+GOAL_UNITS = ["comentários", "respostas", "curtidas"]
+GOAL_NUMBERS = (100, 200, 300, 500, 1000)  # tupla: as listas do módulo são só de frases
+
+
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _low(text: str) -> str:
+    return text[:1].lower() + text[1:] if text and not text[:2].isupper() else text
+
+
+def variations(text: str, n: int = 6, seed: int = 0) -> list[str]:
+    """Versões novas de um texto que já engajou, sem API: o miolo fica e mudam a abertura, o fecho, a meta da
+    promessa e a ordem da enquete. Regras para soar natural:
+    - "Homens," só entra se o texto não fala dos homens em 3ª pessoa (senão vira "Homens, os homens…"); se o
+      texto já abria chamando os homens, a chamada é trocada por outra;
+    - aberturas e fechos com palavras ("Sinceramente", "Estou curiosa") só em pergunta; afirmação e promessa
+      ganham só emoji no fim.
+    Nunca devolve o próprio texto; nada com link, venda ou conteúdo proibido."""
+    from app.radar_hot import has_cta, unsafe
+
+    original = " ".join((text or "").split())
+    if not original or has_cta(original) or unsafe(original):
+        return []
+    rng = random.Random(f"var|{src.norm(original)}|{seed}")
+    core = TAIL.sub("", original).strip() or original
+    question = "?" in core
+    address = re.match(r"^(?:homens|voc[eê]s homens)\s*[,:]\s*", core, re.IGNORECASE)  # "Homens, …" chamando
+    soft = SOFT_START.match(core)
+    body = core[(address or soft).end():].strip() if (address or soft) else core
+    talks_about_men = bool(re.search(r"\bhomens?\b", body, re.IGNORECASE))
+    candidates: list[tuple[str, str]] = []
+
+    def add(kind: str, line: str) -> None:
+        line = _cap(" ".join(line.split()))
+        # Texto exato (o norm ignora emoji e acharia "texto 👀" igual ao original).
+        if line and line.casefold() != original.casefold() and len(line) <= 280 and all(line != c for _, c in candidates):
+            candidates.append((kind, line))
+
+    openers = []
+    if address or not talks_about_men:
+        openers += MEN_OPENERS if question else MEN_OPENERS[:2]  # "Me respondam, homens:" só em pergunta
+    if question:
+        openers += SOFT_OPENERS
+    for opener in rng.sample(openers, len(openers)):
+        add("abre", f"{opener} {_low(body)}")
+    goal = GOAL.search(body)
+    if goal:
+        number = int(goal.group(1))
+        for target in rng.sample([g for g in GOAL_NUMBERS if g != number], 3):
+            add("meta", GOAL.sub(f"{target} {rng.choice(GOAL_UNITS)}", core, count=1))
+    poll = POLL_START.match(body)
+    if poll and len(poll.group(1).split()) <= 3 and len(poll.group(2).split()) <= 3:
+        add("enquete", f"{_cap(poll.group(2).strip())} ou {_low(poll.group(1).strip())}?{poll.group(3)}")
+        add("enquete", f"Só pode escolher um: {_low(poll.group(1).strip())} ou {_low(poll.group(2).strip())}?")
+    closers = [c for c in CLOSERS if core.endswith("?") or not c[0].isalpha()]  # palavra só depois de "?"
+    for closer in rng.sample(closers, len(closers)):
+        add("fecho", f"{core} {closer}")
+    rng.shuffle(candidates)
+    picked: list[str] = []
+    for kind in ("abre", "meta", "enquete", "fecho"):  # uma de cada tipo de mudança primeiro
+        hit = next((line for k, line in candidates if k == kind and line not in picked), None)
+        if hit:
+            picked.append(hit)
+    picked += [line for _, line in candidates if line not in picked]
+    return [line for line in picked if not has_cta(line) and not unsafe(line)][:n]
+
+
+# Gancho para levar um texto comprovado (sem assunto) para um assunto em alta.
+PROVEN_HOOKS = ["Todo mundo falando de {topic} e eu aqui com uma dúvida: ", "{topic} em alta e eu só penso nisso: ",
+                "Esquece {topic} um minuto: "]
+PROVEN_FORMATS = ("pergunta", "enquete", "confissao", "desafio")
+
+
+def adapt_proven(topic_title: str, proven: list[dict[str, Any]], key: str) -> str | None:
+    """Um texto que já engajou, levado para o assunto em alta por um gancho (só perguntas, enquetes,
+    confissões e desafios: promessa e lista dependem do próprio assunto)."""
+    pool = [p for p in proven if p.get("fmt") in PROVEN_FORMATS and len(p["text"]) <= 200]
+    if not pool:
+        return None
+    rng = random.Random(f"proven|{key}")
+    item = rng.choice(pool)
+    text = item["text"] if item.get("source") == "sua" else (variations(item["text"], 1, seed=rng.randint(0, 999)) or [None])[0]
+    if not text:
+        return None
+    line = rng.choice(PROVEN_HOOKS).format(topic=topic_title) + _low(text)
+    return line if len(line) <= 280 else None
 
 
 def hot_questions(heat: str = "quente", seed: int = 0, size: int = MAX_IDEAS) -> list[str]:
@@ -530,19 +634,34 @@ def moment_of(now: datetime | None = None) -> str | None:
     return None
 
 
-def question_bank(heat: str = "quente", now: datetime | None = None) -> dict[str, Any]:
-    """O banco inteiro de perguntas sem assunto, com formato e momento; a tela sorteia, filtra e marca as usadas."""
+def question_bank(heat: str = "quente", now: datetime | None = None,
+                  proven: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """O banco inteiro de perguntas sem assunto, com formato e momento; a tela sorteia, filtra e marca as usadas.
+    Com proven: as que já bombaram nas suas contas (iguais, para repostar depois) e variações das do nicho
+    (nunca o texto de outra conta igual), com source "sua" ou "nicho"."""
     from app.radar_hot import LABELS, format_of
 
     hot = heat == "quente"
     moment = moment_of(now)
     items = []
+    for item in proven or []:
+        if item["source"] == "sua":
+            items.append({"text": item["text"], "moment": None, "source": "sua", "views": item["views"], "replies": item["replies"]})
+        else:
+            for line in variations(item["text"], 2):
+                items.append({"text": line, "moment": None, "source": "nicho", "views": item["views"], "replies": item["replies"]})
     for key, (_, quente, leve) in MOMENTS.items():
         items += [{"text": text, "moment": key} for text in (quente if hot else leve)]
     items += [{"text": text, "moment": None} for text in (EVERGREEN_Q if hot else EVERGREEN)]
     for item in items:
         item["fmt"] = format_of(item["text"])
         item["fmt_label"] = LABELS[item["fmt"]][0]
+    seen, unique = set(), []
+    for item in items:
+        if src.norm(item["text"]) not in seen:
+            seen.add(src.norm(item["text"]))
+            unique.append(item)
+    items = unique
     return {"heat": heat, "moment": moment, "moment_label": MOMENTS[moment][0] if moment else None,
             "moments": {key: label for key, (label, _, _) in MOMENTS.items()}, "items": items}
 
@@ -594,8 +713,8 @@ def grok_prompt(topic: dict[str, Any], heat: str = "leve", refs: list[str] | Non
         "Tom dos posts do dono que funcionam: " + " | ".join(f'"{e}"' for e in owner),
     ]
     if refs:
-        lines.append("Textos do nicho que estão engajando agora (referência de tom, não copie): "
-                     + " | ".join(f'"{r}"' for r in refs))
+        lines.append("Textos que já engajaram de verdade (das contas do dono e do nicho, com os números; use como "
+                     "referência do que funciona, não copie): " + " | ".join(r if r.startswith('"') else f'"{r}"' for r in refs))
     lines += [FORMAT_GUIDE, rules(heat),
               "Escreva 8 posts diferentes, um por linha, sem numeração nem aspas, cada um com até 200 caracteres, "
               "todos ligados ao assunto."]
@@ -631,7 +750,8 @@ def hot_prompt(heat: str = "quente", refs: list[str] | None = None, source: dict
         "Mais exemplos no tom certo: " + " | ".join(f'"{e}"' for e in bank_examples(fmt, heat, 6, seed)),
     ]
     if refs:
-        lines.append("Textos do nicho que estão engajando agora (referência, não copie): " + " | ".join(f'"{r}"' for r in refs))
+        lines.append("Textos que já engajaram de verdade (das contas do dono e do nicho, com os números; use como "
+                     "referência do que funciona, não copie): " + " | ".join(r if r.startswith('"') else f'"{r}"' for r in refs))
     lines.append(
         "O que faz viralizar: primeira linha curta que prende; pergunta direta aos homens (\"vocês homens…\", "
         "\"homens,…\"); mexer com o ego masculino (duração, tamanho, pegada, fôlego); escolha entre duas opções; "
@@ -657,6 +777,21 @@ def hot_prompt(heat: str = "quente", refs: list[str] | None = None, source: dict
                      + (", cada um num formato diferente." if not fmt else "."))
     lines += [rules(heat), "Cada post com até 200 caracteres. Não explique nada, só os posts."]
     return "\n".join(lines)
+
+
+def champions_prompt(heat: str, champions: list[str]) -> str:
+    """Pedido ao Grok: variações dos textos que mais bombaram (2 por texto), no mesmo formato e com a mesma
+    ideia, mas palavras e ganchos novos."""
+    owner = OWNER_EXAMPLES_QUENTE if heat == "quente" else OWNER_EXAMPLES_LEVE
+    return "\n".join([
+        "Você é a melhor copywriter de contas de modelos adultas (+18) de texto no X, em português do Brasil, com "
+        "gírias de internet. O público é só de homens. O objetivo é viralizar com respostas e discussão.",
+        "Tom do dono: " + " | ".join(f'"{e}"' for e in owner),
+        "Estes textos bombaram de verdade (com os números): " + " | ".join(champions),
+        "Para cada um, escreva 2 variações: mesmo formato e mesma ideia que fez engajar, com outras palavras, "
+        "outro gancho e outro fecho. Nunca repita a frase original. Um post por linha, sem numeração nem aspas.",
+        rules(heat), "Cada post com até 200 caracteres. Não explique nada, só os posts.",
+    ])
 
 
 def parse_lines(text: str, limit: int = MAX_IDEAS) -> list[str]:

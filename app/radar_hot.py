@@ -354,6 +354,40 @@ def run_in_background(work) -> None:
     threading.Thread(target=work, name="radar-hot-cacar", daemon=True).start()
 
 
+def proven(db: Session, owner_id: int | None, limit: int = 16) -> list[dict[str, Any]]:
+    """Os textos que mais engajaram: os das suas contas (source "sua") e os das contas do nicho que você caça
+    (source "nicho"), já sem link, venda ou conteúdo proibido, com um formato diferente primeiro."""
+    items = []
+    if owner_id:
+        items += [{"text": " ".join(m["text"].split()), "fmt": m["fmt"], "source": "sua", "author": m["author"],
+                   "views": m["views"], "replies": m["replies"], "score": m["score"]} for m in mine(db, owner_id, _now(), limit=30)]
+    items += [{"text": " ".join(row.text.split()), "fmt": row.fmt, "source": "nicho", "author": row.author,
+               "views": row.views, "replies": row.replies, "score": row.score}
+              for row in db.scalars(select(HotText).order_by(HotText.score.desc()).limit(60))]
+    out, used, seen = [], set(), set()
+    for item in items:  # primeiro um de cada formato (variedade), depois por nota
+        key = src.norm(item["text"])
+        if item["fmt"] not in used and key not in seen:
+            used.add(item["fmt"])
+            seen.add(key)
+            out.append(item)
+    for item in sorted(items, key=lambda i: -(i["score"] or 0)):
+        key = src.norm(item["text"])
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out[:limit]
+
+
+def proven_refs(db: Session, owner_id: int | None, n: int = 8) -> list[str]:
+    """Os comprovados com os números, para o Grok saber o que deu certo e onde."""
+    def short(value: int) -> str:
+        return f"{value / 1_000_000:.1f} mi".replace(".", ",") if value >= 1_000_000 else (
+            f"{round(value / 1000)} mil" if value >= 1000 else str(value))
+    return [f'"{item["text"][:220]}" ({short(item["views"] or 0)} views, {short(item["replies"] or 0)} replies, '
+            f'{"sua conta" if item["source"] == "sua" else "conta do nicho"})' for item in proven(db, owner_id, n)]
+
+
 def examples(db: Session, n: int = 6, owner_id: int | None = None) -> list[str]:
     """Os melhores textos (os do próprio usuário primeiro, depois a biblioteca), um por formato primeiro:
     referência de tom para o Grok."""

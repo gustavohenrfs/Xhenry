@@ -397,7 +397,8 @@ def predictions(topics: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out, key=lambda item: -item["heat"])[:8]
 
 
-def board(db: Session, now: datetime | None = None, region: str = "br", heat: str = "leve") -> dict[str, Any]:
+def board(db: Session, now: datetime | None = None, region: str = "br", heat: str = "leve",
+          proven: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     now = now or _now()
     names = REGIONS[region]
     reads = {kind: read for kind, real in names.items() if (read := last_reads(db).get(real)) is not None}
@@ -406,7 +407,7 @@ def board(db: Session, now: datetime | None = None, region: str = "br", heat: st
     ok_times = [_as_utc(r.fetched_at) for r in reads.values() if r.ok]
     public = [{key: t[key] for key in ("norm", "title", "sources", "ranks", "heat", "rank_x", "hours_x", "direction",
                                          "volume", "category", "url", "engage", "blocked", "angle")}
-              | {"news": t["news"][:2], "ideas": radar_ideas.ideas(t, heat=heat)} for t in topics]
+              | {"news": t["news"][:2], "ideas": radar_ideas.ideas(t, heat=heat, proven=proven)} for t in topics]
     return {
         "region": region,
         "heat": heat,
@@ -420,7 +421,8 @@ def board(db: Session, now: datetime | None = None, region: str = "br", heat: st
     }
 
 
-def topic_detail(db: Session, norm: str, region: str = "br", heat: str = "leve", seed: int = 0) -> dict[str, Any] | None:
+def topic_detail(db: Session, norm: str, region: str = "br", heat: str = "leve", seed: int = 0,
+                 proven: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
     topics, _, x_hours = build_topics(db, region)
     key = src.norm(norm)
     topic = next((t for t in topics if t["norm"] == key), None) or next((t for t in topics if _same(t["norm"], key)), None)
@@ -432,7 +434,7 @@ def topic_detail(db: Session, norm: str, region: str = "br", heat: str = "leve",
         history.append({"at": at, "rank": _rank_in(hour, topic["norm"])})
     detail = {key: value for key, value in topic.items() if key != "climb_3h"}
     detail["history_x"] = history
-    detail["ideas"] = radar_ideas.ideas(topic, heat=heat, seed=seed)
+    detail["ideas"] = radar_ideas.ideas(topic, heat=heat, seed=seed, proven=proven)
     return detail
 
 

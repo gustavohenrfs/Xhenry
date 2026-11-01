@@ -2125,3 +2125,8 @@ html:has(#intro:not(.is-out)) { overflow: hidden; }
   .intro.is-out::after { display: none; }
 }
 @keyframes intro-fade-out { to { opacity: 0; } }
+
+/* Frase que já engajou: de onde ela veio (sua conta ou o nicho). */
+.hot-proven { padding: .1rem .55rem; border-radius: 999px; font-size: .66rem; font-weight: 600; white-space: nowrap; }
+.hot-proven.is-sua { color: var(--ok); background: var(--ok-bg); border: 1px solid var(--ok-line); }
+.hot-proven.is-nicho { color: var(--info); background: var(--info-bg); border: 1px solid var(--info-line); }

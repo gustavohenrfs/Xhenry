@@ -3899,14 +3899,16 @@ function dayRank(text) {
 }
 function hotQItems() {
   const items = hotBank ? hotBank.items : [];
+  if (hotQFilter === "proven") return items.filter((item) => item.source);
   if (hotQFilter.startsWith("m:")) return items.filter((item) => item.moment === hotQFilter.slice(2));
+  if (hotQFilter && !HOT_FORMAT_LABELS[hotQFilter]) return items;
   if (hotQFilter) return items.filter((item) => item.fmt === hotQFilter && (!item.moment || item.moment === hotBank.moment));
   return items.filter((item) => !item.moment || item.moment === hotBank.moment);
 }
 function orderHotQuestions() {
   const now = hotBank && hotBank.moment;
   hotQOrder = hotQItems().slice().sort((a, b) =>
-    (hotUsed.has(a.text) - hotUsed.has(b.text)) || ((b.moment === now && !hotQFilter) - (a.moment === now && !hotQFilter)) || (dayRank(a.text) - dayRank(b.text)));
+    (hotUsed.has(a.text) - hotUsed.has(b.text)) || (!!b.source - !!a.source) || ((b.moment === now && !hotQFilter) - (a.moment === now && !hotQFilter)) || (dayRank(a.text) - dayRank(b.text)));
   hotQAt = 0;
 }
 async function loadHotBank() {
@@ -3929,7 +3931,8 @@ function paintHotFilters() {
   const host = document.getElementById("hot-q-filters");
   if (!hotBank) { host.replaceChildren(); return; }
   const formats = [...new Map(hotBank.items.map((item) => [item.fmt, item.fmt_label])).entries()];
-  const options = [["", "Agora"]].concat(formats, Object.entries(hotBank.moments).map(([key, label]) => ["m:" + key, label]));
+  const proven = hotBank.items.some((item) => item.source) ? [["proven", "Comprovadas"]] : [];
+  const options = [["", "Agora"]].concat(proven, formats, Object.entries(hotBank.moments).map(([key, label]) => ["m:" + key, label]));
   host.replaceChildren(...options.map(([key, label]) => {
     const chip = el("button", "chip" + (hotQFilter === key ? " on" : ""), label);
     chip.type = "button";
@@ -3944,6 +3947,28 @@ function paintHotFilters() {
     return chip;
   }));
   paintHotCount();
+}
+function provenTag(item) {
+  if (!item.source) return null;
+  const views = item.views ? " · " + num(item.views) + " views" : "";
+  return el("span", "hot-proven is-" + item.source, item.source === "sua" ? "Já bombou na sua conta" + views : "Inspirada no nicho" + views);
+}
+// Variações grátis de um texto que engajou (troca abertura, fecho, meta e ordem; sem API).
+function freeVariations(text, target) {
+  const button = costButton("Variações", "free", "idea-btn");
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    button.disabled = true;
+    try {
+      const data = await api("/api/radar/hot/variations?text=" + encodeURIComponent(text) + "&seed=" + Math.floor(Math.random() * 1000));
+      const out = target || document.getElementById("hot-grok-out");
+      out.hidden = false;
+      out.replaceChildren(el("p", "text-xs text-mute", "Variações grátis de: “" + text.slice(0, 60) + (text.length > 60 ? "…”" : "”")), grokList(data.ideas, out));
+      if (!target) out.scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth", block: "nearest" });
+    } catch (error) { toast(error.message || "Não montou as variações."); }
+    button.disabled = false;
+  });
+  return button;
 }
 function moreLikeThis(text, target) {
   const button = costButton("Mais como essa", "grok", "idea-btn");
@@ -3960,11 +3985,13 @@ function showHotQuestion() {
   const top = el("div", "radar-hook-top");
   top.append(el("span", "radar-hook-label", item.fmt_label));
   if (item.moment && hotBank.moments[item.moment]) top.append(el("span", "radar-note", hotBank.moments[item.moment]));
+  const tag = provenTag(item);
+  if (tag) top.append(tag);
   if (hotUsed.has(item.text)) top.append(el("span", "hot-used-tag", "já usada"));
   const actions = ideaActions(item.text);
   const next = costButton("Outra", "free", "idea-btn");
   next.addEventListener("click", () => { hotQAt += 1; showHotQuestion(); });
-  actions.append(next, moreLikeThis(item.text));
+  actions.append(next, freeVariations(item.text), moreLikeThis(item.text));
   host.replaceChildren(top, el("p", "hot-question-line font-display", item.text), actions);
 }
 function paintHotList() {
@@ -3973,9 +4000,12 @@ function paintHotList() {
   list.replaceChildren(...hotQOrder.map((item) => {
     const li = el("li", "hot-q-item" + (hotUsed.has(item.text) ? " is-used" : ""));
     const head = el("div", "hot-item-top");
-    head.append(el("span", "radar-cat hot-fmt", item.fmt_label), el("span", "hot-used-tag", hotUsed.has(item.text) ? "já usada" : ""));
+    head.append(el("span", "radar-cat hot-fmt", item.fmt_label));
+    const tag = provenTag(item);
+    if (tag) head.append(tag);
+    head.append(el("span", "hot-used-tag", hotUsed.has(item.text) ? "já usada" : ""));
     const actions = ideaActions(item.text);
-    actions.append(moreLikeThis(item.text));
+    actions.append(freeVariations(item.text), moreLikeThis(item.text));
     li.append(head, el("p", "hot-text", item.text), actions);
     return li;
   }));
@@ -4015,15 +4045,16 @@ async function askHotGrok(button, out, options) {
   const label = button.querySelector(".cost-label").textContent;
   button.disabled = true;
   setCostLabel(button, "Pedindo ao Grok…");
-  const body = { heat: radarHeat, id: opts.id === undefined ? null : opts.id, text: opts.text || null };
-  if (opts.id === undefined && !opts.text) {
+  const body = { heat: radarHeat, id: opts.id === undefined ? null : opts.id, text: opts.text || null, mode: opts.mode || null };
+  if (opts.id === undefined && !opts.text && !opts.mode) {
     body.fmt = hotQFilter && !hotQFilter.startsWith("m:") ? hotQFilter : null;
     body.trend = document.getElementById("hot-grok-trend").checked;
   }
   try {
     const data = await api("/api/radar/hot/grok", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     out.hidden = false;
-    const title = opts.text ? "Mais como: “" + opts.text.slice(0, 60) + (opts.text.length > 60 ? "…”" : "”")
+    const title = opts.mode === "campeoes" ? "Variações dos textos que mais bombaram (seus e do nicho)"
+      : opts.text ? "Mais como: “" + opts.text.slice(0, 60) + (opts.text.length > 60 ? "…”" : "”")
       : opts.id !== undefined ? "Versões novas no mesmo formato" : "Textos novos do Grok";
     out.replaceChildren(el("p", "text-xs text-mute", title), grokList(data.ideas, out));
     if (out.id === "hot-grok-out") out.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -4141,7 +4172,7 @@ function hotRow(item) {
   const out = el("div", "hot-remix");
   out.hidden = true;
   remix.addEventListener("click", () => askHotGrok(remix, out, item.id ? { id: item.id } : { text: item.text }));
-  actions.append(remix);
+  actions.append(freeVariations(item.text, out), remix);
   if (item.url) {
     const open = el("a", "idea-btn", "Abrir no X");
     open.href = item.url;
@@ -4195,6 +4226,10 @@ async function huntHot() {
   grok.append(costBadge("grok"));
   hunt.addEventListener("click", huntHot);
   grok.addEventListener("click", () => askHotGrok(grok, document.getElementById("hot-grok-out")));
+  const champions = document.getElementById("hot-champions");
+  champions.classList.add("cost-btn");
+  champions.append(costBadge("grok"));
+  champions.addEventListener("click", () => askHotGrok(champions, document.getElementById("hot-grok-out"), { mode: "campeoes" }));
   const refresh = document.getElementById("radar-refresh");
   refresh.classList.add("cost-btn");
   refresh.replaceChildren(el("span", "cost-label", "Atualizar"), costBadge("free"));

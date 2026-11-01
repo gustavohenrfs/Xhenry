@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=39">
+  <link rel="stylesheet" href="/static/css/styles.css?v=40">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=55"></script>
+  <script defer src="/static/js/app.js?v=56"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -382,10 +382,11 @@
             <section class="hot-block" aria-labelledby="hot-grok-title">
               <div class="hot-block-head">
                 <h4 id="hot-grok-title" class="text-sm text-white">Textos novos com Grok</h4>
-                <p class="text-[11px] text-mute">10 textos inéditos no formato escolhido acima (ou um de cada).</p>
+                <p class="text-[11px] text-mute">10 textos inéditos no formato escolhido acima (ou um de cada), aprendendo com o que já bombou nas suas contas e no nicho.</p>
               </div>
               <div class="flex flex-wrap items-center gap-3">
                 <button id="hot-grok" type="button" class="hot-btn"><span class="cost-label">Gerar 10 textos</span></button>
+                <button id="hot-champions" type="button" class="hot-btn" title="O Grok escreve variações dos textos que mais bombaram nas suas contas e no nicho"><span class="cost-label">Variações dos campeões</span></button>
                 <label class="radar-switch" title="Alguns textos pegam carona nos assuntos em alta no Brasil">
                   <input id="hot-grok-trend" type="checkbox">
                   <span class="radar-switch-track" aria-hidden="true"><i></i></span>

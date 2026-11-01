@@ -67,7 +67,13 @@ class HotGrokIn(BaseModel):
     text: str | None = Field(default=None, max_length=300)  # ou uma frase qualquer ("Mais como essa")
     fmt: str | None = Field(default=None, pattern="^[a-z]{3,16}$")  # textos novos todos nesse formato
     trend: bool = False  # textos novos podem pegar carona nos assuntos em alta
+    mode: str | None = Field(default=None, pattern="^campeoes$")  # variações dos textos que mais bombaram
     heat: str = Field(default="quente", pattern="^(leve|quente)$")
+
+
+def proven_for(db: Session, user: User, heat: str) -> list[dict[str, Any]] | None:
+    """Os textos que já engajaram (suas contas + contas do nicho): entram nas ideias do nível quente."""
+    return radar_hot.proven(db, user.id) if heat == "quente" else None
 
 
 def with_my_terms(db: Session, user: User, payload: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +85,7 @@ def with_my_terms(db: Session, user: User, payload: dict[str, Any]) -> dict[str,
 @router.get("/api/radar")
 def read_radar(heat: str = HEAT, user: User = Depends(approved_user),
                db: Session = Depends(get_db)) -> dict[str, Any]:
-    payload = with_my_terms(db, user, radar.board(db, heat=heat))
+    payload = with_my_terms(db, user, radar.board(db, heat=heat, proven=proven_for(db, user, heat)))
     updated = payload["updated_at"]
     stale = updated is None or now_utc() - as_utc(radar.parse_iso(updated)) > STALE
     payload["refreshing"] = bool(stale and radar.radar_enabled() and _refresh_in_background())
@@ -91,15 +97,15 @@ def refresh_radar(heat: str = HEAT, user: User = Depends(approved_user),
                   db: Session = Depends(get_db)) -> dict[str, Any]:
     if not radar.refresh_manual(db):
         raise HTTPException(429, "O radar acabou de ser atualizado. Tente de novo em 2 minutos.")
-    payload = with_my_terms(db, user, radar.board(db, heat=heat))
+    payload = with_my_terms(db, user, radar.board(db, heat=heat, proven=proven_for(db, user, heat)))
     payload["refreshing"] = False
     return payload
 
 
 @router.get("/api/radar/topic")
 def read_topic(norm: str = Query(..., min_length=1, max_length=400), heat: str = HEAT,
-               db: Session = Depends(get_db)) -> dict[str, Any]:
-    detail = radar.topic_detail(db, norm, heat=heat)
+               user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    detail = radar.topic_detail(db, norm, heat=heat, proven=proven_for(db, user, heat))
     if detail is None:
         raise HTTPException(404, "Esse assunto saiu do radar.")
     return detail
@@ -164,11 +170,11 @@ def idea_subject(db: Session, norm: str) -> tuple[dict[str, Any], str | None]:
 
 @router.get("/api/radar/ideas")
 def read_ideas(norm: str = Query(..., min_length=1, max_length=400), heat: str = HEAT,
-               seed: int = SEED, db: Session = Depends(get_db)) -> dict[str, Any]:
+               seed: int = SEED, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Ideias de post grátis (modelos por tipo de assunto). seed>0 sorteia outra combinação. Sensível = sem ideias."""
     topic, kind = idea_subject(db, norm)
     return {"norm": topic["norm"], "title": topic["title"], "blocked": bool(topic.get("blocked")),
-            "ideas": radar_ideas.ideas(topic, kind, heat=heat, seed=seed)}
+            "ideas": radar_ideas.ideas(topic, kind, heat=heat, seed=seed, proven=proven_for(db, user, heat))}
 
 
 @router.post("/api/radar/ideas/grok")
@@ -181,7 +187,7 @@ def grok_ideas(payload: IdeasIn, user: User = Depends(approved_user), db: Sessio
     if not key:
         raise HTTPException(400, "Cole a sua chave da xAI em Configurações para pedir ideias ao Grok.")
     try:
-        prompt = radar_ideas.grok_prompt(topic, payload.heat, radar_hot.examples(db, owner_id=user.id))
+        prompt = radar_ideas.grok_prompt(topic, payload.heat, radar_hot.proven_refs(db, user.id))
         lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, prompt), limit=8)
     except ValueError as exc:
         raise HTTPException(502, str(exc)) from exc
@@ -241,9 +247,23 @@ def delete_source(handle: str, user: User = Depends(approved_user), db: Session 
 
 
 @router.get("/api/radar/hot/questions")
-def hot_questions(heat: str = Query("quente", pattern="^(leve|quente)$"), seed: int = SEED) -> dict[str, Any]:
-    """Perguntas quentes sem assunto (grátis): o banco inteiro (formato e momento do dia) e 5 sorteadas."""
-    return radar_ideas.question_bank(heat) | {"seed": seed, "ideas": radar_ideas.hot_questions(heat, seed)}
+def hot_questions(heat: str = Query("quente", pattern="^(leve|quente)$"), seed: int = SEED,
+                  user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Perguntas quentes sem assunto (grátis): o banco inteiro (formato e momento do dia), com as comprovadas
+    (suas e variações das do nicho), e 5 sorteadas."""
+    bank = radar_ideas.question_bank(heat, proven=proven_for(db, user, heat))
+    return bank | {"seed": seed, "ideas": radar_ideas.hot_questions(heat, seed)}
+
+
+@router.get("/api/radar/hot/variations")
+def hot_variations(text: str = Query(..., min_length=3, max_length=600), seed: int = SEED) -> dict[str, Any]:
+    """Variações grátis de um texto que engajou (troca abertura, fecho, meta e ordem; o miolo fica)."""
+    clean = " ".join(text.split())
+    if radar_hot.unsafe(clean) or radar_hot.has_cta(clean):
+        raise HTTPException(400, "Esse texto tem link, venda ou conteúdo proibido: sem variações.")
+    lines = radar_ideas.variations(clean, 6, seed)
+    return {"text": clean, "ideas": [{"text": line, "fmt": radar_hot.format_of(line),
+                                      "fmt_label": radar_hot.LABELS[radar_hot.format_of(line)][0]} for line in lines]}
 
 
 @router.post("/api/radar/hot/grok")
@@ -269,7 +289,13 @@ def hot_grok(payload: HotGrokIn, user: User = Depends(approved_user), db: Sessio
         topics, _, _ = radar.build_topics(db)
         hooks = [t["title"] for t in topics if not t["blocked"] and t["engage"] >= 55][:5]
     fmt = payload.fmt if payload.fmt in radar_hot.LABELS else None
-    prompt = radar_ideas.hot_prompt(payload.heat, radar_hot.examples(db, owner_id=user.id), source, hooks, fmt, uuid4().hex[:6])
+    if payload.mode == "campeoes" and not source:
+        champions = radar_hot.proven_refs(db, user.id, 5)
+        if not champions:
+            raise HTTPException(400, "Ainda não tem texto que bombou: espere o robô ler as suas contas ou cace as contas do nicho.")
+        prompt = radar_ideas.champions_prompt(payload.heat, champions)
+    else:
+        prompt = radar_ideas.hot_prompt(payload.heat, radar_hot.proven_refs(db, user.id), source, hooks, fmt, uuid4().hex[:6])
     try:
         lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, prompt), limit=radar_ideas.HOT_COUNT)
     except ValueError as exc:

@@ -379,3 +379,72 @@ def test_board_carries_heat_and_angle(client):
     assert detail["ideas"] and detail["angle"]
     more = client.get("/api/radar/ideas", params={"norm": norm, "heat": "quente", "seed": 2}, headers=a)
     assert more.status_code == 200
+
+
+# ---- Inteligência com o que já engajou: variações grátis, comprovados nas ideias, no banco e no Grok ----
+
+def test_free_variations_keep_the_idea_and_sound_natural():
+    poll = radar_ideas.variations("Peito ou bunda? Só pode escolher um 😏", 8)
+    assert len(poll) >= 5 and "Bunda ou peito? Só pode escolher um" in poll
+    assert all(v != "Peito ou bunda? Só pode escolher um 😏" for v in poll)
+    third = radar_ideas.variations("Os homens gostam de peluda ou lisa? Estou curiosa", 8)
+    assert third and not any(v.lower().startswith(("homens, os homens", "vocês homens, os homens")) for v in third)
+    promise = radar_ideas.variations("Se esse post bater 500 comentários eu posto sem censura 😏", 8)
+    assert any("300" in v or "1000" in v or "200" in v or "100 " in v for v in promise), "a meta muda"
+    assert not any(v.endswith(("Sinceramente", "Estou curiosa")) for v in promise), "promessa não termina com palavra"
+    assert not any(v.startswith(("Me respondam", "Pergunta séria")) for v in promise), "pergunta só em pergunta"
+    assert radar_ideas.variations("Me chama no privado") == [] and radar_ideas.variations("quem curte novinha?") == []
+    assert radar_ideas.variations("Peito ou bunda? Só pode escolher um 😏", 6, seed=1) != poll[:6]
+
+
+def test_proven_mixes_your_posts_and_the_niche(client):
+    from app.models import Folder, TweetSample, XAccount
+
+    owner_id, _ = user()
+    with SessionLocal() as db:
+        radar_hot.store(db, radar_hot.hot_rows(ITEMS[:4]), None, radar_hot._now())
+        folder = Folder(owner_id=owner_id, name="Minhas")
+        db.add(folder)
+        db.flush()
+        acc = XAccount(folder_id=folder.id, username="minha")
+        db.add(acc)
+        db.flush()
+        db.add(TweetSample(account_id=acc.id, tweet_id="m1", posted_at=radar_hot._now() - timedelta(days=1),
+                           timezone_used="America/Sao_Paulo", hour_local=22, weekday=1, view_count=90_000, reply_count=800,
+                           text_preview="Vocês homens aguentam quanto tempo? Sinceramente"))
+        db.commit()
+        items = radar_hot.proven(db, owner_id)
+        refs = radar_hot.proven_refs(db, owner_id, 3)
+    sources = {i["source"] for i in items}
+    assert sources == {"sua", "nicho"} and items[0]["text"].startswith("Vocês homens aguentam"), "o seu que mais bombou primeiro"
+    assert any("sua conta" in r and "90 mil views" in r for r in refs) and any("conta do nicho" in r for r in refs)
+
+
+def test_ideas_and_bank_use_proven_texts():
+    proven = [{"text": "Peito ou bunda? Só pode escolher um 😏", "fmt": "enquete", "source": "sua", "views": 9000, "replies": 300},
+              {"text": "Vocês homens gozam rápido mesmo?", "fmt": "pergunta", "source": "nicho", "views": 50000, "replies": 900}]
+    lines = radar_ideas.ideas({"title": "UFC 320", "norm": "ufc 320", "category": "Lutas"}, heat="quente", proven=proven)
+    assert len(lines) == 5 and any("UFC 320" in line and ("peito ou bunda" in line or "gozam rápido" in line) for line in lines)
+    person = radar_ideas.ideas({"title": "mariana ximenes", "norm": "mariana ximenes", "category": "Famosos/TV"}, heat="quente", proven=proven)
+    assert not any("peito ou bunda" in line for line in person), "pessoa real nunca ganha frase comprovada junto do nome"
+    bank = radar_ideas.question_bank("quente", proven=proven)
+    mine = [i for i in bank["items"] if i.get("source") == "sua"]
+    niche = [i for i in bank["items"] if i.get("source") == "nicho"]
+    assert [i["text"] for i in mine] == ["Peito ou bunda? Só pode escolher um 😏"], "o seu entra igual, para repostar"
+    assert niche and all(i["text"] != "Vocês homens gozam rápido mesmo?" for i in niche), "do nicho só variação, nunca cópia"
+
+
+def test_variation_route_and_grok_champions(client, monkeypatch):
+    _, h = user(xai="xai-key")
+    body = client.get("/api/radar/hot/variations", params={"text": "Peito ou bunda? Só pode escolher um 😏"}, headers=h).json()
+    assert len(body["ideas"]) >= 5 and body["ideas"][0]["fmt_label"]
+    assert client.get("/api/radar/hot/variations", params={"text": "link na bio amor"}, headers=h).status_code == 400
+    assert client.post("/api/radar/hot/grok", json={"mode": "campeoes"}, headers=h).status_code == 400, "sem comprovado ainda"
+    with SessionLocal() as db:
+        radar_hot.store(db, radar_hot.hot_rows(ITEMS[:4]), None, radar_hot._now())
+        db.commit()
+    prompts = []
+    monkeypatch.setattr(radar_ideas, "ask_grok_lines", lambda key, prompt: prompts.append(prompt) or "Variação nova um\nVariação nova dois")
+    resp = client.post("/api/radar/hot/grok", json={"mode": "campeoes"}, headers=h).json()
+    assert [i["text"] for i in resp["ideas"]] == ["Variação nova um", "Variação nova dois"]
+    assert "bombaram de verdade" in prompts[0] and "views" in prompts[0] and "2 variações" in prompts[0]
