@@ -8,6 +8,7 @@ import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -207,7 +208,9 @@ async def review_post(
         tmp_path.write_bytes(raw)
         image_uri = f"data:image/{suffix};base64,{base64.b64encode(raw).decode()}"
     try:
-        verdict = ask_grok(key, text, image_uri)
+        # Numa thread: a rota é async (lê o arquivo enviado) e o Grok leva dezenas de segundos com foto.
+        # Chamado direto aqui, ele parava o laço do servidor e o painel inteiro ficava esperando.
+        verdict = await run_in_threadpool(ask_grok, key, text, image_uri)
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)

@@ -77,8 +77,13 @@ def cached_json(db: Session, key: Any, build: Callable[[], Any]) -> tuple[bytes,
     return body, etag
 
 
+# Escritas que não mexem em nenhum número do dashboard/métricas: o Radar (que se atualiza sozinho ao abrir a
+# aba) e as ferramentas de texto. Zerar o cache por elas fazia o ao vivo recarregar todas as abas abertas.
+KEEP_ON_WRITE = ("/api/radar/", "/api/posts/")
+
+
 class ForgetOnWrite:
-    """Middleware ASGI: depois de qualquer escrita em /api/ o cache é descartado."""
+    """Middleware ASGI: depois de qualquer escrita em /api/ o cache é descartado (menos KEEP_ON_WRITE)."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -88,5 +93,5 @@ class ForgetOnWrite:
         try:
             await self.app(scope, receive, send)
         finally:
-            if write and scope["path"].startswith("/api/"):
+            if write and scope["path"].startswith("/api/") and not scope["path"].startswith(KEEP_ON_WRITE):
                 forget()
