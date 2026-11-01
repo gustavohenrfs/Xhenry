@@ -250,5 +250,5 @@ def test_radar_tab_markup():
     assert html.count('data-tab="radar"') == 2, "barra lateral e barra de baixo"
     assert 'data-tab="archived" class="more-item"' in html, "Arquivadas foi para o Mais no celular"
     js = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
-    assert 'const MORE_TABS = ["metricas", "archived", "tools", "settings", "algo", "rede", "ia", "suporte"];' in js
+    assert 'const MORE_TABS = ["metricas", "postar", "archived", "tools", "settings", "algo", "rede", "ia", "suporte"];' in js
     assert '["radar", "Radar"]' in js and "innerHTML" not in js.split("// ---------- Radar de trend ----------")[1].split("// ---------- busca rápida")[0]

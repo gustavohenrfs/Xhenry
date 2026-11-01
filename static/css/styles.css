@@ -1486,7 +1486,7 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 }
 .radar-hook .idea-actions { gap: .5rem; }
 .radar-hook .idea-btn { min-height: 2.5rem; padding: 0 1.1rem; font-size: .85rem; }
-/* Botões de ideia: Copiar (contorno) e Postar (cheio, abre o X com o texto). */
+/* Botões de ideia: Copiar (contorno) e Guardar (cheio, põe o texto na fila de uma conta). */
 .idea-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem; flex-shrink: 0; }
 .idea-btn {
   display: inline-flex; align-items: center; justify-content: center; min-height: 2rem; padding: 0 .75rem;
@@ -2130,3 +2130,105 @@ html:has(#intro:not(.is-out)) { overflow: hidden; }
 .hot-proven { padding: .1rem .55rem; border-radius: 999px; font-size: .66rem; font-weight: 600; white-space: nowrap; }
 .hot-proven.is-sua { color: var(--ok); background: var(--ok-bg); border: 1px solid var(--ok-line); }
 .hot-proven.is-nicho { color: var(--info); background: var(--info-bg); border: 1px solid var(--info-line); }
+
+/* ---------- Aba Postar: lote de posts por conta ---------- */
+.pz-page { display: grid; gap: 1rem; }
+.pz-head { display: grid; gap: .9rem; padding: 1.2rem 1.3rem; border-radius: 1.6rem; }
+.pz-count { margin-top: .15rem; font-size: .85rem; color: var(--muted); }
+.pz-tip { font-size: .78rem; color: var(--muted); max-width: 70ch; }
+.pz-tip b { color: var(--fg); font-weight: 600; }
+/* A régua do lote: um risco por conta, aceso quando a conta já postou. */
+.pz-rail { display: flex; flex-wrap: wrap; gap: .3rem; }
+.pz-tick button {
+  display: block; width: .62rem; height: 1.9rem; border-radius: 999px;
+  background: var(--line); border: 1px solid transparent;
+  transition: transform .15s ease, background .25s ease, box-shadow .25s ease;
+}
+.pz-tick.is-ready button { background: rgb(var(--c-neon) / .22); border-color: rgb(var(--c-neon) / .55); }
+.pz-tick.is-done button { background: var(--ok); box-shadow: 0 0 12px -2px var(--ok-line); }
+.pz-tick button:hover, .pz-tick button:focus-visible { transform: scaleY(1.18); outline: none; border-color: var(--accent); }
+.pz-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.pz-tools .acc-search { flex: 1 1 14rem; max-width: 22rem; }
+.pz-grid { display: grid; gap: .9rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr)); align-items: start; }
+.pz-none { grid-column: 1 / -1; padding: 1.5rem; text-align: center; font-size: .9rem; color: var(--muted); }
+.pz-card {
+  display: grid; gap: .7rem; padding: 1rem 1rem 1rem 1.15rem; min-width: 0;
+  border-radius: 1.4rem; box-shadow: inset 3px 0 0 var(--folder, var(--line-strong));
+}
+.pz-card.is-empty { opacity: .72; }
+.pz-card.is-empty:hover, .pz-card.is-empty:focus-within { opacity: 1; }
+.pz-card.is-done { border-color: var(--ok-line); }
+.pz-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; }
+.pz-who { min-width: 0; }
+.pz-handle { font-size: 1.05rem; color: var(--fg); overflow-wrap: anywhere; }
+.pz-sub { font-size: .72rem; color: var(--muted); overflow-wrap: anywhere; }
+.pz-chip { flex-shrink: 0; padding: .2rem .6rem; border-radius: 999px; border: 1px solid var(--line-strong); font-size: .7rem; color: var(--muted); white-space: nowrap; }
+.pz-chip.is-ok { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-line); }
+.pz-text {
+  padding: .75rem .85rem; border-radius: .95rem; background: var(--field); border: 1px solid var(--line);
+  font-size: .93rem; line-height: 1.5; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 13.5rem; overflow-y: auto; scrollbar-width: thin;
+}
+.pz-label { font-size: .72rem; color: var(--muted); margin-bottom: -.35rem; }
+.pz-done { display: flex; align-items: flex-start; gap: .6rem; }
+.pz-done-text {
+  flex: 1; min-width: 0; font-size: .82rem; line-height: 1.45; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.pz-empty { font-size: .85rem; color: var(--muted); }
+.pz-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pz-actions .idea-btn { min-height: 2.35rem; padding: 0 1rem; font-size: .82rem; }
+.idea-btn.is-quiet { color: var(--muted); border-color: var(--line); }
+.idea-btn.is-quiet:hover, .idea-btn.is-quiet:focus-visible { color: var(--fg); }
+/* Depois do Copiar, o Postei da mesma conta acende: é o próximo passo. */
+.pz-card.is-copied .pz-posted-btn { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); box-shadow: 0 0 0 3px var(--ok-bg); }
+.pz-write-btn { justify-self: start; }
+.pz-write { display: grid; gap: .5rem; }
+.pz-write textarea {
+  width: 100%; resize: vertical; min-height: 5.5rem; padding: .7rem .8rem; border-radius: .95rem;
+  border: 1px solid var(--line-strong); background: var(--field); color: var(--fg); font-size: .9rem; line-height: 1.45; outline: none;
+}
+.pz-write textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--c-neon) / .14); }
+.pz-queue summary { cursor: pointer; font-size: .75rem; color: var(--muted); }
+.pz-queue summary:hover, .pz-queue summary:focus-visible { color: var(--fg); }
+.pz-queue-list { display: grid; gap: .4rem; margin-top: .5rem; }
+.pz-queue-list li { display: flex; align-items: flex-start; gap: .5rem; padding: .5rem .6rem; border-radius: .8rem; border: 1px dashed var(--line-strong); }
+.pz-queue-list span { flex: 1; min-width: 0; font-size: .8rem; line-height: 1.4; color: var(--fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Escolher a conta ao guardar (mesmo vidro da busca rápida). */
+.pick-title { padding: 1rem 1.1rem 0; font-size: 1.05rem; color: var(--fg); }
+.pick-text {
+  margin: .4rem 1.1rem .8rem; padding: .55rem .7rem; border-left: 2px solid rgb(var(--c-neon) / .6);
+  font-size: .82rem; line-height: 1.4; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.palette-item.is-free .text-mute { color: var(--accent); }
+
+/* ---------- Métricas → Responder agora ---------- */
+.mx-reply-read { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+.mx-reply-read.is-stale { color: var(--warn); }
+.mx-reply-list { display: grid; gap: .45rem; }
+.mx-reply-empty { padding: .9rem; border-radius: 1rem; border: 1px dashed var(--line-strong); font-size: .85rem; color: var(--muted); text-align: center; }
+.mx-reply-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .4rem 1rem;
+  padding: .6rem .8rem; border-radius: 1rem; background: var(--field); border: 1px solid var(--line);
+}
+.mx-reply-who { display: flex; align-items: baseline; gap: .55rem; min-width: 0; }
+.mx-reply-at { font-size: 1.02rem; color: var(--fg); overflow-wrap: anywhere; text-align: left; }
+.mx-reply-at:hover, .mx-reply-at:focus-visible { color: var(--accent); outline: none; text-decoration: underline; text-underline-offset: 3px; }
+.mx-reply-name { font-size: .75rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mx-reply-count { font-size: .82rem; color: var(--fg); white-space: nowrap; }
+.mx-reply-clock {
+  padding: .25rem .65rem; border-radius: 999px; font-size: .75rem; white-space: nowrap; font-variant-numeric: tabular-nums;
+  color: var(--accent); border: 1px solid rgb(var(--c-neon) / .45); background: rgb(var(--c-neon) / .08);
+}
+.mx-reply-row.is-hot { border-color: var(--bad-line); }
+.mx-reply-row.is-hot .mx-reply-clock { color: var(--bad); border-color: var(--bad-line); background: var(--bad-bg); }
+.mx-reply-row.is-late { opacity: .6; }
+.mx-reply-row.is-late .mx-reply-clock { color: var(--muted); border-color: var(--line); background: transparent; }
+@media (max-width: 640px) {
+  .mx-reply-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .mx-reply-count { grid-row: 2; }
+  .mx-reply-name { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .pz-tick button { transition: none; } }
+.pz-skel { height: 10rem; border-radius: 1.4rem; }

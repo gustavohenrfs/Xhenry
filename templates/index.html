@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=40">
+  <link rel="stylesheet" href="/static/css/styles.css?v=41">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=57"></script>
+  <script defer src="/static/js/app.js?v=58"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -60,6 +60,7 @@
         <button type="button" data-tab="dashboard" class="nav-btn active flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/></svg><b class="tab-badge hidden" data-badge="alerts" aria-label="alertas não vistos"></b><span>Dashboard</span></button>
         <button type="button" data-tab="metricas" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5h3.2l2.3-6 4 12 2.4-6h5.1"/></svg><span>Métricas</span></button>
         <button type="button" data-tab="radar" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 18.2 5.8"/><circle cx="12" cy="12" r="1.3"/></svg><span>Radar</span></button>
+        <button type="button" data-tab="postar" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h10M4 11h7M4 15.5h5"/><path d="m13.2 19.8 6.6-6.6-2.6-2.6-6.6 6.6-.5 3.1Z"/></svg><span>Postar</span></button>
         <button type="button" data-tab="ops" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg><span>Operações</span></button>
         <button type="button" data-tab="archived" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
         <button type="button" data-tab="tools" class="nav-btn flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/></svg><span>Ferramentas</span></button>
@@ -251,6 +252,13 @@
         </section>
         <section id="pane-metricas" class="pane">
           <div class="mx-page">
+            <article id="mx-reply" class="glow mx-card mx-reply" aria-labelledby="mx-reply-title">
+              <div class="mx-card-head mx-top-head">
+                <div><h3 id="mx-reply-title" class="font-display">Responder agora</h3><p>Contas com comentário em post da última hora. Responda antes de o post fazer 30 min.</p></div>
+                <p id="mx-reply-read" class="mx-reply-read"></p>
+              </div>
+              <ul id="mx-reply-list" class="mx-reply-list" aria-live="polite"></ul>
+            </article>
             <header class="mx-hero glow" aria-labelledby="mx-score-label">
               <div class="mx-score">
                 <p id="mx-score-label" class="mx-score-label">Nota do algoritmo</p>
@@ -448,6 +456,31 @@
               <ul id="radar-headlines" class="radar-headlines"></ul>
             </article>
             </div>
+          </div>
+        </section>
+        <section id="pane-postar" class="pane">
+          <div class="pz-page">
+            <header class="pz-head glow">
+              <div class="pz-head-text">
+                <h2 class="font-display text-2xl text-white">Lote de posts</h2>
+                <p id="pz-count" class="pz-count" aria-live="polite">Lendo as contas…</p>
+              </div>
+              <ol id="pz-rail" class="pz-rail" aria-label="Contas do lote: cada risco aceso é uma conta já postada"></ol>
+              <p class="pz-tip">No Radar, toque em <b>Guardar</b> numa ideia e escolha a conta. Aqui você copia, cola no X pela conta certa e marca <b>Postei</b>.</p>
+            </header>
+            <div class="pz-tools">
+              <label class="acc-search">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                <input id="pz-search" type="search" autocomplete="off" placeholder="Buscar conta ou pasta" aria-label="Buscar conta ou pasta">
+              </label>
+              <div id="pz-filter" class="radar-seg" role="radiogroup" aria-label="Mostrar contas">
+                <button type="button" role="radio" data-pz-filter="" aria-checked="true">Todas</button>
+                <button type="button" role="radio" data-pz-filter="ready" aria-checked="false">Para postar</button>
+                <button type="button" role="radio" data-pz-filter="empty" aria-checked="false">Sem texto</button>
+                <button type="button" role="radio" data-pz-filter="done" aria-checked="false">Postadas</button>
+              </div>
+            </div>
+            <div id="pz-grid" class="pz-grid"><div class="skel pz-skel"></div><div class="skel pz-skel"></div><div class="skel pz-skel"></div></div>
           </div>
         </section>
         <section id="pane-archived" class="pane space-y-4">
@@ -973,6 +1006,7 @@
   </nav>
   <div id="more-sheet" class="more-sheet md:hidden" role="menu" aria-label="Outras abas">
     <button type="button" data-tab="metricas" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12.5h3.2l2.3-6 4 12 2.4-6h5.1"/></svg><span>Métricas</span></button>
+    <button type="button" data-tab="postar" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h10M4 11h7M4 15.5h5"/><path d="m13.2 19.8 6.6-6.6-2.6-2.6-6.6 6.6-.5 3.1Z"/></svg><span>Postar</span></button>
     <button type="button" data-tab="archived" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4.5" rx="1.5"/><path d="M5 8.5v9.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5"/><path d="M10 12.5h4"/></svg><span>Arquivadas</span></button>
     <button type="button" data-tab="tools" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/></svg><span>Ferramentas</span></button>
     <button type="button" data-tab="settings" class="more-item" role="menuitem"><svg class="nav-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg><span>Configurações</span></button>
@@ -1001,6 +1035,19 @@
       </label>
       <ul id="palette-list" class="palette-list" role="listbox"></ul>
       <p class="palette-hint"><kbd>↑</kbd><kbd>↓</kbd> escolher <kbd>Enter</kbd> abrir <kbd>Esc</kbd> fechar</p>
+    </div>
+  </div>
+  <!-- Guardar texto numa conta (Radar → Guardar). -->
+  <div id="pick" class="palette" aria-hidden="true">
+    <div class="palette-box" role="dialog" aria-modal="true" aria-labelledby="pick-title">
+      <p id="pick-title" class="pick-title font-display">Guardar em qual conta?</p>
+      <p id="pick-text" class="pick-text"></p>
+      <label class="palette-input">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="pick-input" type="text" autocomplete="off" spellcheck="false" placeholder="Buscar conta ou pasta…" aria-controls="pick-list">
+      </label>
+      <ul id="pick-list" class="palette-list" role="listbox"></ul>
+      <p class="palette-hint"><kbd>↑</kbd><kbd>↓</kbd> escolher <kbd>Enter</kbd> guardar <kbd>Esc</kbd> fechar</p>
     </div>
   </div>
   <!-- Puxar para atualizar (app instalado no celular). -->

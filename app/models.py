@@ -523,3 +523,17 @@ class HotSource(IntPK, Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     handle: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PostDraft(IntPK, Base):
+    """Texto guardado para uma conta postar à mão (aba Postar). Fila por conta; "Postei" grava posted_at e o
+    texto sai da fila. Só texto: o painel nunca posta sozinho."""
+
+    __tablename__ = "post_drafts"
+    __table_args__ = (Index("ix_post_drafts_owner_account", "owner_id", "account_id"),)
+
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    account_id: Mapped[int] = mapped_column(ForeignKey("x_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

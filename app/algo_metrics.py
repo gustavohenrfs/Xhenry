@@ -11,16 +11,16 @@ dividido pelas views: mede a qualidade, não o tamanho da conta.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import DailyMetric, Folder
+from app.models import DailyMetric, Folder, TweetSample, XAccount
 from app.services import (
-    STATUS_LABELS, latest_metrics, load_samples, period_window, selected_accounts, within,
+    STATUS_LABELS, as_utc, latest_metrics, load_samples, now_utc, period_window, selected_accounts, within,
 )
 
 POINTS = {"likes": 0.5, "retweets": 1.0, "quotes": 3.0, "bookmarks": 10.0, "replies": 13.5}
@@ -269,3 +269,43 @@ def algo_metrics(db: Session, owner_id: int, period: str, folder_id: int | None)
         "available": {"dwell": False, "own_replies": now["own_replies"] > 0 or any(
             is_own_reply(row) for _, row, _ in loaded)},
     }
+
+
+# ---------- Responder agora ----------
+REPLY_OPEN_MIN = 30     # responder os comentários antes de o post fazer 30 min
+REPLY_WINDOW_MIN = 60   # posts mais velhos que 1 h saem da lista
+
+
+def reply_watch(db: Session, owner_id: int, folder_id: int | None = None, now: datetime | None = None) -> dict[str, Any]:
+    """Posts da última hora que receberam comentário, para responder antes dos 30 min.
+
+    Só lê `tweet_samples` (o "Atualizar dados" traz o reply_count novo). Replies que a própria conta mandou não
+    contam como post. Abertos primeiro, quem fecha antes no topo; depois os que já passaram dos 30 min."""
+    now = now or now_utc()
+    accounts = {a.id: a for a in selected_accounts(db, owner_id, folder_id)}
+    if not accounts:
+        return {"items": [], "posts": 0, "with_replies": 0, "read_at": None,
+                "open_min": REPLY_OPEN_MIN, "window_min": REPLY_WINDOW_MIN}
+    rows = db.execute(
+        select(TweetSample.account_id, TweetSample.tweet_id, TweetSample.posted_at, TweetSample.reply_count,
+               TweetSample.text_preview, TweetSample.collected_at)
+        .where(TweetSample.account_id.in_(accounts), TweetSample.posted_at >= now - timedelta(minutes=REPLY_WINDOW_MIN))
+    ).all()
+    posts = [row for row in rows if not is_own_reply(row)]
+    items = []
+    for row in posts:
+        if not row.reply_count:
+            continue
+        age = (now - as_utc(row.posted_at)).total_seconds() / 60
+        account = accounts[row.account_id]
+        items.append({
+            "account_id": account.id, "username": account.username, "display_name": account.display_name,
+            "tweet_id": row.tweet_id, "replies": row.reply_count, "text": row.text_preview or "",
+            "posted_at": as_utc(row.posted_at).isoformat(), "age_min": int(age),
+            "left_min": max(0, int(REPLY_OPEN_MIN - age)), "open": age < REPLY_OPEN_MIN,
+        })
+    items.sort(key=lambda item: (not item["open"], item["age_min"] * (-1 if item["open"] else 1)))
+    read = db.scalar(select(func.max(XAccount.collected_at)).where(XAccount.id.in_(accounts)))
+    return {"items": items, "posts": len(posts), "with_replies": len(items),
+            "read_at": as_utc(read).isoformat() if read else None,
+            "open_min": REPLY_OPEN_MIN, "window_min": REPLY_WINDOW_MIN}

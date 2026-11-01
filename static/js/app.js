@@ -1,5 +1,5 @@
 const fmt = new Intl.NumberFormat("pt-BR");
-const titles = { dashboard: "Dashboard", metricas: "Métricas", radar: "Radar de trend", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários",
+const titles = { dashboard: "Dashboard", metricas: "Métricas", radar: "Radar de trend", postar: "Postar", ops: "Operações", tools: "Ferramentas", settings: "Configurações", archived: "Arquivadas", users: "Usuários",
   algo: "Algoritmo do X", rede: "Rede de RT", ia: "Suporte I.A", suporte: "Suporte" };
 const TOKEN_KEY = "access_token";
 const state = {
@@ -361,6 +361,7 @@ function setTab(tab) {
   if (tab === "settings") loadSettings();
   if (tab === "archived") loadArchived();
   if (tab === "radar") loadRadar();
+  if (tab === "postar") loadDrafts();
   if (tab === "users") loadUsers();
   document.querySelectorAll(".nav-divider, .more-divider").forEach((node) => node.classList.toggle("on", INFO_TABS.includes(tab)));
   if (tab === "algo") paintWeights();
@@ -1725,7 +1726,7 @@ document.getElementById("nav").addEventListener("click", (event) => {
   if (button) setTab(button.dataset.tab);
 });
 // Celular: abas embaixo; "Mais" abre as que não cabem (MORE_TABS).
-const MORE_TABS = ["metricas", "archived", "tools", "settings", "algo", "rede", "ia", "suporte"];
+const MORE_TABS = ["metricas", "postar", "archived", "tools", "settings", "algo", "rede", "ia", "suporte"];
 function setMoreOpen(open) {
   document.getElementById("more-sheet").classList.toggle("open", open);
   document.getElementById("more-btn").setAttribute("aria-expanded", String(open));
@@ -3078,6 +3079,7 @@ document.addEventListener("keydown", (event) => {
     setBellOpen(false);
     setMoreOpen(false);
     closePalette();
+    closePick();
     document.getElementById("keep-help").classList.add("off");
     closeDrawer();
     document.getElementById("install-help").classList.add("off");
@@ -3293,6 +3295,7 @@ const ICONS = {
   ia: '<path d="M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H11l-4.5 3.5V16a2 2 0 0 1-2-2Z"/><path d="m12 7.2.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9Z"/>',
   suporte: '<path d="M4.5 13.5V12a7.5 7.5 0 0 1 15 0v1.5"/><rect x="3.5" y="13" width="4" height="6" rx="1.5"/><rect x="16.5" y="13" width="4" height="6" rx="1.5"/><path d="M18.5 19a3 3 0 0 1-3 2.5H13"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L4 17l3 3 5.4-5.4a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5Z"/>',
+  postar: '<path d="M4 6.5h10M4 11h7M4 15.5h5"/><path d="m13.2 19.8 6.6-6.6-2.6-2.6-6.6 6.6-.5 3.1Z"/>',
   radar: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12 18.2 5.8"/><circle cx="12" cy="12" r="1.3"/>',
   dashboard: '<rect x="3.5" y="3.5" width="7" height="9" rx="2"/><rect x="13.5" y="3.5" width="7" height="5" rx="2"/><rect x="13.5" y="11.5" width="7" height="9" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
   ops: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/>',
@@ -3638,8 +3641,8 @@ function radarUpcomingCard(item) {
   card.append(el("span", "radar-when", radarWhen(item)), el("span", "radar-name font-display", item.name), el("span", "radar-tip", item.tip || ""));
   return card;
 }
-// Copiar e Postar: o texto vai para a área de transferência ou para a tela de post do X, já escrito.
-async function copyIdea(text) {
+// Copiar leva o texto para a área de transferência; Guardar põe o texto na fila de uma conta (aba Postar).
+async function copyIdea(text, message) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -3650,20 +3653,18 @@ async function copyIdea(text) {
     document.execCommand("copy");
     area.remove();
   }
-  toast("Copiado. Cole no X.", "ok");
+  toast(message || "Copiado. Cole no X.", "ok");
 }
 function ideaActions(text) {
   const box = el("span", "idea-actions");
   const copy = el("button", "idea-btn", "Copiar");
   copy.type = "button";
   copy.addEventListener("click", (event) => { event.stopPropagation(); copyIdea(text); markHotUsed(text); });
-  const post = el("a", "idea-btn is-post", "Postar");
-  post.href = "https://x.com/intent/post?text=" + encodeURIComponent(text);
-  post.target = "_blank";
-  post.rel = "noopener noreferrer";
-  post.title = "Abre o X com o texto pronto";
-  post.addEventListener("click", (event) => { event.stopPropagation(); markHotUsed(text); });
-  box.append(copy, post);
+  const save = el("button", "idea-btn is-post", "Guardar");
+  save.type = "button";
+  save.title = "Guardar o texto numa conta para o lote (aba Postar)";
+  save.addEventListener("click", (event) => { event.stopPropagation(); openPick(text, event.currentTarget); });
+  box.append(copy, save);
   return box;
 }
 function engageable(topic) { return !topic.blocked && topic.engage >= ENGAGE_MIN; }
@@ -4455,7 +4456,7 @@ document.querySelectorAll("[data-tool]").forEach((button) => button.addEventList
 try { setTool(localStorage.getItem("tool_tab") || "post"); } catch { setTool("post"); }
 
 // ---------- busca rápida (Ctrl+K ou /) ----------
-const TAB_LIST = [["dashboard", "Dashboard"], ["metricas", "Métricas"], ["radar", "Radar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"],
+const TAB_LIST = [["dashboard", "Dashboard"], ["metricas", "Métricas"], ["radar", "Radar"], ["postar", "Postar"], ["ops", "Operações"], ["archived", "Arquivadas"], ["tools", "Ferramentas"], ["users", "Usuários"], ["settings", "Configurações"],
   ["algo", "Algoritmo do X"], ["rede", "Rede de RT"], ["ia", "Suporte I.A"], ["suporte", "Suporte (WhatsApp)"]];
 function visibleTabs() { return TAB_LIST.filter(([tab]) => isAdmin() || !ADMIN_TABS.includes(tab)); }
 let paletteItems = [];
@@ -4602,6 +4603,371 @@ if (isStandalone() && "ontouchstart" in window) {
     try { await refreshCurrentTab(); } finally { reset(); }
   });
 }
+
+// ---------- Postar: textos guardados por conta (lote manual) ----------
+// O Radar guarda o texto numa conta ("Guardar"); aqui cada conta ativa é um cartão com o próximo texto,
+// Copiar e Postei. O painel nunca posta: o texto vai para a área de transferência e o usuário cola no X.
+let draftsData = null;
+let draftsSeq = 0;
+let pzFilter = "";
+let pzCopied = null;     // conta cujo texto acabou de ser copiado: o Postei dela acende
+const pzOpenQueue = new Set();
+let pzWriting = null;    // conta com a caixa de escrever aberta
+async function loadDrafts({ silent = false } = {}) {
+  const seq = ++draftsSeq;
+  try {
+    const data = await api("/api/drafts");
+    if (seq !== draftsSeq) return draftsData;
+    draftsData = data;
+    paintDrafts();
+    if (pickOpen()) paintPick();
+  } catch (error) {
+    if (!silent && error.message !== PENDING && error.message !== SESSION_EXPIRED) toast(error.message || "Não leu os textos guardados.");
+  }
+  return draftsData;
+}
+function pzStateOf(account) { return account.posted ? "done" : account.queue.length ? "ready" : "empty"; }
+function hhmm(iso) { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
+function filas(n) { return n === 1 ? "1 na fila" : n + " na fila"; }
+function paintDrafts() {
+  if (!draftsData) return;
+  const { accounts, batch } = draftsData;
+  const ready = accounts.filter((a) => pzStateOf(a) === "ready").length;
+  document.getElementById("pz-count").textContent = !batch.total ? "Nenhuma conta ativa ainda."
+    : batch.done + " de " + batch.total + " contas postadas nas últimas " + batch.hours + " h. "
+      + (ready ? (ready === 1 ? "1 conta com texto esperando." : ready + " contas com texto esperando.") : "Nenhum texto esperando.");
+  const rail = document.getElementById("pz-rail");
+  rail.replaceChildren(...accounts.map((account) => {
+    const status = pzStateOf(account);
+    const li = el("li", "pz-tick is-" + status);
+    const button = el("button", "");
+    button.type = "button";
+    const label = { done: "postada às " + (account.posted ? hhmm(account.posted.posted_at) : ""), ready: "texto esperando", empty: "sem texto" }[status];
+    button.title = "@" + account.username + ": " + label;
+    button.setAttribute("aria-label", button.title);
+    button.addEventListener("click", () => pzFocusCard(account.id));
+    li.append(button);
+    return li;
+  }));
+  paintDraftGrid();
+}
+function pzFocusCard(accountId, retried) {
+  const card = document.querySelector('.pz-card[data-acc="' + accountId + '"]');
+  if (!card) {
+    if (retried) return;
+    pzFilter = "";
+    paintPzFilter();
+    document.getElementById("pz-search").value = "";
+    paintDraftGrid();
+    pzFocusCard(accountId, true);
+    return;
+  }
+  card.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  const target = card.querySelector("[data-pz-copy]") || card.querySelector("button");
+  if (target) target.focus({ preventScroll: true });
+}
+function paintPzFilter() {
+  document.querySelectorAll("[data-pz-filter]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.pzFilter === pzFilter)));
+}
+function paintDraftGrid() {
+  const host = document.getElementById("pz-grid");
+  if (!draftsData) return;
+  const accounts = draftsData.accounts;
+  if (!accounts.length) {
+    host.replaceChildren(emptyState("ops", "Nenhuma conta ainda", "Crie uma pasta em Operações e adicione as contas. Cada uma vira um cartão aqui.", "Abrir Operações", () => setTab("ops")));
+    return;
+  }
+  const terms = plain(document.getElementById("pz-search").value.trim()).split(/\s+/).filter(Boolean);
+  const list = accounts.filter((a) => (!pzFilter || pzStateOf(a) === pzFilter)
+    && terms.every((t) => plain(a.username + " " + (a.display_name || "") + " " + a.folder_name).includes(t)));
+  if (!list.length) {
+    const empty = { ready: "Nenhuma conta com texto esperando. Guarde textos pelo Radar.", empty: "Todas as contas têm texto guardado.", done: "Nenhuma conta marcada como postada nas últimas horas." }[pzFilter];
+    host.replaceChildren(el("p", "pz-none", terms.length ? "Nenhuma conta com esse nome." : empty || "Nada por aqui."));
+    return;
+  }
+  host.replaceChildren(...list.map(draftCard));
+}
+function pzButton(label, className, onClick) {
+  const button = el("button", "idea-btn" + (className ? " " + className : ""), label);
+  button.type = "button";
+  button.addEventListener("click", onClick);
+  return button;
+}
+async function pzAct(promise, message) {
+  try {
+    await promise;
+    if (message) toast(message, "ok");
+  } catch (error) {
+    toast(error.message || "Não deu certo. Tente de novo.", "error");
+  }
+  await loadDrafts({ silent: true });
+}
+function draftCard(account) {
+  const status = pzStateOf(account);
+  const card = el("article", "pz-card glow is-" + status + (pzCopied === account.id ? " is-copied" : ""));
+  card.dataset.acc = account.id;
+  if (/^#[0-9a-f]{3,8}$/i.test(account.folder_color || "")) card.style.setProperty("--folder", account.folder_color);
+  const head = el("header", "pz-card-head");
+  const who = el("div", "pz-who");
+  who.append(el("p", "pz-handle font-display", "@" + account.username),
+    el("p", "pz-sub", [account.display_name, account.folder_name].filter(Boolean).join(", pasta ")));
+  head.append(who);
+  if (account.posted) head.append(el("span", "pz-chip is-ok", "Postada " + hhmm(account.posted.posted_at)));
+  else if (account.queue.length > 1) head.append(el("span", "pz-chip", filas(account.queue.length)));
+  card.append(head);
+
+  if (account.posted) {
+    const done = el("div", "pz-done");
+    done.append(el("p", "pz-done-text", account.posted.text));
+    done.append(pzButton("Desfazer", "is-quiet", () => pzAct(api("/api/drafts/" + account.posted.id, { method: "PATCH", body: JSON.stringify({ posted: false }) }), "Voltou para a fila de @" + account.username + ".")));
+    card.append(done);
+  }
+  const next = account.queue[0];
+  if (next) {
+    if (account.posted) card.append(el("p", "pz-label", "Próximo da fila"));
+    const text = el("p", "pz-text", next.text);
+    const actions = el("div", "pz-actions");
+    const copy = pzButton("Copiar", "is-post", () => {
+      copyIdea(next.text, "Copiado. Cole na @" + account.username + " e marque Postei.");
+      pzCopied = account.id;
+      document.querySelectorAll(".pz-card.is-copied").forEach((node) => node.classList.remove("is-copied"));
+      card.classList.add("is-copied");
+    });
+    copy.dataset.pzCopy = "";
+    const posted = pzButton("Postei", "pz-posted-btn", async () => {
+      pzCopied = null;
+      await pzAct(api("/api/drafts/" + next.id, { method: "PATCH", body: JSON.stringify({ posted: true }) }));
+      pzFocusNext(account.id);
+    });
+    const drop = pzButton("Apagar", "is-quiet", () => pzAct(api("/api/drafts/" + next.id, { method: "DELETE" }), "Texto apagado de @" + account.username + "."));
+    drop.title = "Apagar este texto da fila";
+    actions.append(copy, posted, drop);
+    card.append(text, actions);
+    if (account.queue.length > 1) {
+      const more = el("details", "pz-queue");
+      more.open = pzOpenQueue.has(account.id);
+      more.addEventListener("toggle", () => { if (more.open) pzOpenQueue.add(account.id); else pzOpenQueue.delete(account.id); });
+      more.append(el("summary", "", "Ver a fila (" + (account.queue.length - 1) + " depois deste)"));
+      const ol = el("ol", "pz-queue-list");
+      account.queue.slice(1).forEach((item) => {
+        const li = el("li", "");
+        li.append(el("span", "", item.text),
+          pzButton("Apagar", "is-quiet", () => pzAct(api("/api/drafts/" + item.id, { method: "DELETE" }), "Texto apagado de @" + account.username + ".")));
+        ol.append(li);
+      });
+      more.append(ol);
+      card.append(more);
+    }
+  } else if (!account.posted) {
+    card.append(el("p", "pz-empty", "Nada guardado para esta conta."));
+  }
+  card.append(pzWriter(account));
+  return card;
+}
+function pzWriter(account) {
+  if (pzWriting !== account.id) {
+    return pzButton(account.queue.length || account.posted ? "Escrever outro texto" : "Escrever texto", "is-quiet pz-write-btn", () => {
+      pzWriting = account.id;
+      paintDraftGrid();
+      const area = document.querySelector('.pz-card[data-acc="' + account.id + '"] textarea');
+      if (area) area.focus();
+    });
+  }
+  const form = el("form", "pz-write");
+  const area = el("textarea", "");
+  area.rows = 3;
+  area.maxLength = 4000;
+  area.placeholder = "Texto para @" + account.username;
+  area.setAttribute("aria-label", "Texto para @" + account.username);
+  area.setAttribute("autocomplete", "off");
+  const row = el("div", "pz-actions");
+  const save = el("button", "idea-btn is-post", "Guardar");
+  save.type = "submit";
+  row.append(save, pzButton("Cancelar", "is-quiet", () => { pzWriting = null; paintDraftGrid(); }));
+  form.append(area, row);
+  area.addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) form.requestSubmit(); });
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!area.value.trim()) { area.focus(); return; }
+    if (await saveDraft(account.id, area.value)) { pzWriting = null; paintDraftGrid(); }
+  });
+  return form;
+}
+async function saveDraft(accountId, text) {
+  try {
+    const saved = await api("/api/drafts", { method: "POST", body: JSON.stringify({ account_id: accountId, text }) });
+    const where = "@" + saved.username + (saved.position > 1 ? " (" + saved.position + "º na fila)" : "");
+    if (saved.elsewhere && saved.elsewhere.length) {
+      toast("Guardado em " + where + ". Atenção: o mesmo texto também está em @" + saved.elsewhere.join(", @") + ".", "info");
+    } else {
+      toast("Guardado em " + where + ".", "ok");
+    }
+    await loadDrafts({ silent: true });
+    return true;
+  } catch (error) {
+    toast(error.message || "Não guardou o texto.", "error");
+    return false;
+  }
+}
+function pzFocusNext(fromId) {
+  if (!draftsData) return;
+  const list = draftsData.accounts;
+  const start = Math.max(0, list.findIndex((a) => a.id === fromId));
+  const next = list.slice(start + 1).concat(list.slice(0, start + 1)).find((a) => pzStateOf(a) === "ready");
+  if (next && document.querySelector('.pz-card[data-acc="' + next.id + '"]')) pzFocusCard(next.id);
+}
+document.getElementById("pz-search").addEventListener("input", paintDraftGrid);
+document.querySelectorAll("[data-pz-filter]").forEach((button) => button.addEventListener("click", () => {
+  pzFilter = button.dataset.pzFilter;
+  paintPzFilter();
+  paintDraftGrid();
+}));
+
+// Guardar (Radar): escolhe a conta numa lista com busca, igual à busca rápida.
+let pickText = "";
+let pickItems = [];
+let pickIndex = 0;
+let pickReturn = null;
+let pickBusy = false;
+function pickOpen() { return document.getElementById("pick").classList.contains("open"); }
+async function openPick(text, origin) {
+  if (!token()) return;
+  pickText = text;
+  pickReturn = origin || null;
+  pickIndex = 0;
+  const box = document.getElementById("pick");
+  box.classList.add("open");
+  box.setAttribute("aria-hidden", "false");
+  document.getElementById("pick-text").textContent = text;
+  const input = document.getElementById("pick-input");
+  input.value = "";
+  paintPick();
+  input.focus();
+  await loadDrafts({ silent: true });
+}
+function closePick() {
+  const box = document.getElementById("pick");
+  if (!box.classList.contains("open")) return;
+  box.classList.remove("open");
+  box.setAttribute("aria-hidden", "true");
+  if (pickReturn && document.contains(pickReturn)) pickReturn.focus();
+  pickReturn = null;
+}
+function pickHint(account) {
+  const parts = [account.folder_name, account.queue.length ? filas(account.queue.length) : "vazia"];
+  if (account.posted) parts.push("postada " + hhmm(account.posted.posted_at));
+  return parts.join(", ");
+}
+function paintPick() {
+  const list = document.getElementById("pick-list");
+  if (!draftsData) { list.replaceChildren(el("li", "palette-empty", "Lendo as contas…")); return; }
+  const terms = plain(document.getElementById("pick-input").value.trim()).split(/\s+/).filter(Boolean);
+  pickItems = draftsData.accounts.filter((a) => terms.every((t) => plain(a.username + " " + (a.display_name || "") + " " + a.folder_name).includes(t)));
+  pickIndex = Math.min(pickIndex, Math.max(0, pickItems.length - 1));
+  if (!pickItems.length) {
+    list.replaceChildren(el("li", "palette-empty", draftsData.accounts.length ? "Nenhuma conta com esse nome." : "Nenhuma conta ativa. Adicione contas em Operações."));
+    return;
+  }
+  list.replaceChildren(...pickItems.map((account, index) => {
+    const li = el("li", "palette-item" + (index === pickIndex ? " on" : "") + (account.queue.length ? "" : " is-free"));
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(index === pickIndex));
+    const text = el("span", "min-w-0 flex-1");
+    text.append(el("span", "block truncate text-sm text-white", "@" + account.username + (account.display_name ? "  " + account.display_name : "")),
+      el("span", "block truncate text-[11px] text-mute", pickHint(account)));
+    li.append(icon("account"), text);
+    li.addEventListener("mousemove", () => { if (pickIndex !== index) { pickIndex = index; paintPick(); } });
+    li.addEventListener("click", () => runPick(index));
+    return li;
+  }));
+  const active = list.children[pickIndex];
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+async function runPick(index) {
+  const account = pickItems[index];
+  if (!account || pickBusy) return;
+  pickBusy = true;
+  const ok = await saveDraft(account.id, pickText);
+  pickBusy = false;
+  if (ok) { markHotUsed(pickText); closePick(); }
+}
+document.getElementById("pick-input").addEventListener("input", () => { pickIndex = 0; paintPick(); });
+document.getElementById("pick-input").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (!pickItems.length) return;
+    pickIndex = (pickIndex + (event.key === "ArrowDown" ? 1 : -1) + pickItems.length) % pickItems.length;
+    paintPick();
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    runPick(pickIndex);
+  }
+});
+document.getElementById("pick").addEventListener("click", (event) => { if (event.target.id === "pick") closePick(); });
+
+// ---------- Métricas → Responder agora ----------
+// Posts da última hora com comentário, agrupados por conta: o @ para achar no multilogin e quanto falta
+// para o post fazer 30 min. O relógio anda sozinho; os números novos vêm do "Atualizar dados".
+let replyData = null;
+let replySeq = 0;
+async function loadReplies() {
+  const seq = ++replySeq;
+  try {
+    const data = await api("/api/metrics/replies" + (state.folderId ? "?folder_id=" + state.folderId : ""));
+    if (seq !== replySeq) return;
+    replyData = data;
+    paintReplies();
+  } catch { /* o resto das Métricas já avisa do erro */ }
+}
+function replyGroups() {
+  const now = Date.now();
+  const open = replyData.open_min;
+  const byAccount = new Map();
+  replyData.items.forEach((item) => {
+    const age = (now - new Date(item.posted_at).getTime()) / 60000;
+    if (age > replyData.window_min) return;
+    const group = byAccount.get(item.account_id) || { username: item.username, display_name: item.display_name, replies: 0, posts: 0, left: null, age: 0 };
+    group.replies += item.replies;
+    group.posts += 1;
+    group.age = Math.max(group.age, age);
+    if (age < open) group.left = Math.min(group.left === null ? open : group.left, open - age);
+    byAccount.set(item.account_id, group);
+  });
+  return [...byAccount.values()].sort((a, b) => (a.left === null) - (b.left === null)
+    || (a.left !== null ? a.left - b.left : a.age - b.age));
+}
+function paintReplies() {
+  if (!replyData) return;
+  const read = document.getElementById("mx-reply-read");
+  const readMin = replyData.read_at ? (Date.now() - new Date(replyData.read_at).getTime()) / 60000 : null;
+  read.textContent = readMin === null ? "Nenhuma leitura ainda." : "Última leitura " + agoText(replyData.read_at) + (readMin >= 15 ? ". Hora de atualizar." : ".");
+  read.classList.toggle("is-stale", readMin !== null && readMin >= 15);
+  const list = document.getElementById("mx-reply-list");
+  const groups = replyGroups();
+  if (!groups.length) {
+    list.replaceChildren(el("li", "mx-reply-empty", replyData.posts
+      ? (replyData.posts === 1 ? "1 post" : replyData.posts + " posts") + " na última hora, nenhum com comentário ainda."
+      : "Nenhum post na última hora. Depois do lote, toque em Atualizar dados a cada 15 min."));
+    return;
+  }
+  list.replaceChildren(...groups.map((group) => {
+    const late = group.left === null;
+    const li = el("li", "mx-reply-row" + (late ? " is-late" : group.left <= 10 ? " is-hot" : ""));
+    const who = el("div", "mx-reply-who");
+    const at = el("button", "mx-reply-at font-display", "@" + group.username);
+    at.type = "button";
+    at.title = "Copiar o @";
+    at.addEventListener("click", () => copyIdea("@" + group.username, "@" + group.username + " copiado."));
+    who.append(at);
+    if (group.display_name) who.append(el("span", "mx-reply-name", group.display_name));
+    const count = el("span", "mx-reply-count", group.replies + (group.replies === 1 ? " comentário" : " comentários")
+      + (group.posts > 1 ? " em " + group.posts + " posts" : ""));
+    const clock = el("span", "mx-reply-clock", late ? "Passou dos 30 min" : "Faltam " + Math.max(1, Math.ceil(group.left)) + " min");
+    li.append(who, count, clock);
+    return li;
+  }));
+}
+setInterval(() => { if (state.tab === "metricas" && replyData) paintReplies(); }, 30000);
 
 boot();
 
@@ -4986,6 +5352,7 @@ function dec(value, digits) {
 function metricsQuery() { return "/api/metrics?period=" + state.period + (state.folderId ? "&folder_id=" + state.folderId : ""); }
 async function loadMetrics({ silent = false } = {}) {
   const seq = ++metricsSeq;
+  loadReplies();
   try {
     const data = await api(metricsQuery());
     if (seq !== metricsSeq) return;

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.cache import cached_json
-from app.algo_metrics import algo_metrics
+from app.algo_metrics import algo_metrics, reply_watch
 from app.database import get_db
 from app.models import DEFAULT_TZ, Folder, FolderKind, User, XAccount
 from app.routers.auth import approved_user
@@ -248,6 +248,16 @@ def get_metrics(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     return Response(body, media_type="application/json", headers=headers)
+
+
+@router.get("/api/metrics/replies")
+def get_reply_watch(
+    folder_id: int | None = Query(default=None),
+    user: User = Depends(approved_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Métricas → Responder agora: posts da última hora com comentário (sem cache: o relógio importa)."""
+    return reply_watch(db, user.id, folder_id)
 
 
 @router.get("/api/accounts/{account_id}/detail")
