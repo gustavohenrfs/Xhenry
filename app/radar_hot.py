@@ -356,11 +356,16 @@ def run_in_background(work) -> None:
 
 # "Viralizou de verdade": só esses ensinam o gerador e o Grok. Post fraco ou sem formato (bom dia, foto sem
 # texto, "oi amores") nunca entra, mesmo sendo o melhor de um formato.
-VIRAL_VIEWS = 20_000      # nicho: views mínimas
-VIRAL_REPLIES = 100       # ...ou respostas (o que o X mais premia)
-OWN_VIRAL_VIEWS = 5_000   # suas contas são menores: a régua é mais baixa
-OWN_VIRAL_REPLIES = 50
-OWN_LIFT = 3              # e precisa ter feito pelo menos 3x a mediana das suas views
+VIRAL_VIEWS = 10_000      # nicho: views mínimas
+VIRAL_REPLIES = 50        # ...ou respostas (o que o X mais premia)
+OWN_VIRAL_VIEWS = 3_000   # suas contas são menores: a régua é mais baixa
+OWN_VIRAL_REPLIES = 30
+OWN_LIFT = 2              # e precisa ter feito pelo menos 2x a mediana das suas views
+
+
+VIRAL_RULE = (f"Entra só o que viralizou: do nicho, {VIRAL_VIEWS // 1000} mil views ou {VIRAL_REPLIES} respostas e acima "
+              f"da média da biblioteca; das suas contas, {OWN_VIRAL_VIEWS // 1000} mil views e {OWN_LIFT}x as suas views "
+              f"normais, ou {OWN_VIRAL_REPLIES} respostas. Texto sem formato de engajamento fica de fora.")
 
 
 def good_text(text: str) -> bool:

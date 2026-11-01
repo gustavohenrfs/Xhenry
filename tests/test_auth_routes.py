@@ -28,6 +28,7 @@ PROTECTED = [
     ("get", "/api/accounts/1/detail?period=7d", None),
     ("get", "/api/metrics?period=7d", None),
     ("get", "/api/metrics/replies", None),
+    ("post", "/api/posts/ideas", {"caption": "oi"}),
     ("get", "/api/drafts", None),
     ("post", "/api/drafts", {"account_id": 1, "text": "oi"}),
     ("patch", "/api/drafts/1", {"posted": True}),

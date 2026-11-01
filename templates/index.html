@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=42">
+  <link rel="stylesheet" href="/static/css/styles.css?v=43">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=59"></script>
+  <script defer src="/static/js/app.js?v=60"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -90,6 +90,10 @@
           </div>
           <img src="/static/img/logo-128.webp" width="128" height="128" decoding="async" alt="XHenry" class="top-logo brand-logo h-11 w-11 md:hidden">
           <h1 id="heading" class="top-title font-display text-3xl text-white">Dashboard</h1>
+          <label id="folder-wrap" class="folder-pick" title="Mostrar só uma pasta (cada pasta pode ser uma operação)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></svg>
+            <select id="folder-pick" aria-label="Pasta"><option value="">Todas as pastas</option></select>
+          </label>
           <div id="dashboard-controls" class="top-controls flex min-w-0 max-w-full items-center gap-2 md:gap-3">
             <button id="refresh-all" type="button" class="shrink-0 rounded-full bg-neon px-4 py-1.5 text-sm font-medium text-ink hover:bg-white active:scale-[0.985]">Atualizar dados</button>
             <div id="period-wrap" class="flex min-w-0 max-w-full overflow-x-auto rounded-full border border-neon/30 p-1 text-sm">
@@ -388,6 +392,7 @@
                   <span>Com base nas contas</span>
                 </label>
               </div>
+              <p id="hot-accounts-info" class="hot-accounts-info" role="status" hidden></p>
               <div class="mt-2 flex flex-wrap items-center gap-3">
                 <button id="hot-q-toggle" type="button" class="idea-btn" aria-expanded="false" aria-controls="hot-q-list">Ver todas</button>
                 <button id="hot-q-reset" type="button" class="text-[11px] text-mute underline underline-offset-2">Zerar as usadas</button>
@@ -533,6 +538,18 @@
             <input id="post-media" type="file" accept="image/jpeg,image/png" class="block w-full text-sm text-mute file:mr-3 file:rounded-full file:border-0 file:bg-neon file:px-4 file:py-2 file:text-sm file:text-ink">
             <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Verificar post</button>
             <article id="verdict" class="hidden rounded-2xl border border-neon/20 bg-ink p-4 text-sm leading-6"></article>
+            <section id="post-ideas" class="post-ideas" aria-labelledby="post-ideas-title" hidden>
+              <h3 id="post-ideas-title" class="font-display text-lg text-white">Versão com mais chance de viralizar</h3>
+              <p class="text-xs text-mute">A mesma ideia da sua legenda com ganchos que fazem os homens responderem. Se a verificação apontou risco, a legenda provoca pela pergunta, sem descrever a foto.</p>
+              <div id="post-ideas-actions" class="flex flex-wrap items-center gap-2">
+                <label class="radar-switch" title="Uma das ideias pega carona num assunto em alta do Radar">
+                  <input id="post-ideas-trend" type="checkbox">
+                  <span class="radar-switch-track" aria-hidden="true"><i></i></span>
+                  <span>Usar assunto do Radar</span>
+                </label>
+              </div>
+              <div id="post-ideas-out"></div>
+            </section>
           </form>
           </div>
           <div id="tool-cloaker" hidden>

@@ -254,8 +254,13 @@ def hot_questions(heat: str = Query("quente", pattern="^(leve|quente)$"), seed: 
     """Perguntas quentes sem assunto (grátis): o banco inteiro (formato e momento do dia) mais as frases montadas
     pelo gerador (mix = semente de "Misturar novas"), e 5 sorteadas. Com accounts=1 ("Com base nas contas")
     entram as que viralizaram de verdade (suas e variações das do nicho)."""
-    bank = radar_ideas.question_bank(heat, proven=proven_for(db, user, heat) if accounts else None, mix=mix)
-    return bank | {"seed": seed, "accounts": accounts, "ideas": radar_ideas.hot_questions(heat, seed)}
+    proven = radar_hot.proven(db, user.id, limit=40) if accounts else None
+    info = None
+    if proven is not None:  # a tela mostra o que entrou (ou por que nada entrou)
+        info = {"sua": sum(1 for p in proven if p["source"] == "sua"), "nicho": sum(1 for p in proven if p["source"] == "nicho"),
+                "rule": radar_hot.VIRAL_RULE}
+    bank = radar_ideas.question_bank(heat, proven=proven if heat == "quente" else None, mix=mix)
+    return bank | {"seed": seed, "accounts": accounts, "accounts_info": info, "ideas": radar_ideas.hot_questions(heat, seed)}
 
 
 @router.get("/api/radar/hot/variations")

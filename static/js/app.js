@@ -355,6 +355,8 @@ function setTab(tab) {
   document.getElementById("heading").textContent = titles[tab];
   const controls = document.getElementById("dashboard-controls");
   if (controls) controls.classList.toggle("hidden", tab !== "dashboard" && tab !== "metricas");  // Métricas usa o mesmo período e o mesmo Atualizar
+  const folderWrap = document.getElementById("folder-wrap");
+  if (folderWrap) folderWrap.hidden = !FOLDER_TABS.includes(tab);
   if (tab === "dashboard" && dashboardDirty) { dashboardDirty = false; load({ silent: true }); }
   if (tab === "metricas" && (metricsStale || !metricsData)) loadMetrics();
   if (tab === "ops") closeOpsFolder();
@@ -1552,7 +1554,41 @@ function dashQuery(period, folderId) {
   if (folderId) query.set("folder_id", String(folderId));
   return "/api/dashboard?" + query.toString();
 }
+// Filtro de pasta: cada pasta pode ser uma operação diferente. Vale para Dashboard, Métricas (com o
+// Responder agora), Postar e Rede de RT; a escolha fica lembrada neste navegador.
+const FOLDER_TABS = ["dashboard", "metricas", "postar", "rede"];
+try { const saved = Number(localStorage.getItem("folder_id")); if (saved > 0) state.folderId = saved; } catch { /* sem storage */ }
+function paintFolderPick(folders) {
+  const select = document.getElementById("folder-pick");
+  if (!select || !folders) return;
+  if (state.folderId && !folders.some((f) => f.id === state.folderId)) { setFolder(null); return; }  // pasta apagada
+  const options = [["", "Todas as pastas"]].concat(folders.map((f) => [String(f.id), f.name + " (" + f.accounts + ")"]));
+  const sig = JSON.stringify(options) + "|" + (state.folderId || "");
+  if (select.dataset.sig === sig) return;
+  select.dataset.sig = sig;
+  select.replaceChildren(...options.map(([value, label]) => {
+    const option = el("option", "", label);
+    option.value = value;
+    return option;
+  }));
+  select.value = state.folderId ? String(state.folderId) : "";
+  const color = state.folderId ? folderColor(state.folderId) : null;
+  select.parentElement.style.setProperty("--folder", color || "transparent");
+  select.parentElement.classList.toggle("is-on", !!state.folderId);
+}
+function setFolder(id) {
+  state.folderId = id || null;
+  try { if (state.folderId) localStorage.setItem("folder_id", String(state.folderId)); else localStorage.removeItem("folder_id"); } catch { /* sem storage */ }
+  if (state.data) paintFolderPick(state.data.folders);
+  metricsStale = true;
+  load().then(() => { if (state.tab === "rede") paintRede(); });
+  if (state.tab === "metricas") loadMetrics();
+  paintDrafts();
+  paintDraftGrid();
+}
+document.getElementById("folder-pick").addEventListener("change", (event) => setFolder(Number(event.target.value) || null));
 function renderDashboard(data, sig, swap, live) {
+  paintFolderPick(data.folders);
   if (sig === lastSig) return;              // nada mudou: não mexe no DOM (zero flicker)
   lastSig = sig;
   const before = state.data;
@@ -1800,12 +1836,8 @@ document.getElementById("post-form").addEventListener("submit", async (event) =>
   try {
     const result = await api("/api/posts/review", { method: "POST", body });
     verdict.textContent = result.verdict;
-    // Auto-reset após 1 minuto
-    setTimeout(() => {
-      document.getElementById("post-caption").value = "";
-      document.getElementById("post-media").value = "";
-      verdict.classList.add("hidden");
-    }, 60000);
+    postVerdict = result.verdict;
+    postIdeas("free");  // já sugere a versão grátis; o Grok fica no botão
   } catch (error) {
     verdict.textContent = error.message || "Não foi possível analisar o post.";
   }
@@ -1820,7 +1852,37 @@ clearBtn.onclick = () => {
   document.getElementById("post-caption").value = "";
   document.getElementById("post-media").value = "";
   document.getElementById("verdict").classList.add("hidden");
+  document.getElementById("post-ideas").hidden = true;
+  postVerdict = null;
 };
+// Depois do veredito: a mesma legenda reescrita para viralizar. Grátis usa o gerador do Radar; o Grok é melhor.
+let postVerdict = null;
+let postSeed = 0;
+async function postIdeas(mode, button) {
+  const caption = document.getElementById("post-caption").value.trim();
+  if (!caption) { toast("Escreva a legenda primeiro."); return; }
+  const box = document.getElementById("post-ideas");
+  const out = document.getElementById("post-ideas-out");
+  box.hidden = false;
+  const label = button ? button.querySelector(".cost-label").textContent : "";
+  if (button) { button.disabled = true; setCostLabel(button, mode === "grok" ? "Pedindo ao Grok…" : "Montando…"); }
+  if (mode === "free") postSeed += 1;
+  try {
+    const data = await api("/api/posts/ideas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      caption, verdict: postVerdict, mode, heat: radarHeat, trend: document.getElementById("post-ideas-trend").checked, seed: postSeed
+    }) });
+    out.replaceChildren(el("p", "text-xs text-mute", mode === "grok" ? "Do Grok, no mesmo contexto da sua legenda" : "Grátis, no mesmo contexto da sua legenda"),
+      grokList(data.ideas, out));
+  } catch (error) { toast(error.message || "Não montou as ideias.", "error"); }
+  if (button) { setCostLabel(button, label); button.disabled = false; }
+}
+{
+  const free = costButton("Outras ideias grátis", "free", "idea-btn");
+  free.addEventListener("click", () => postIdeas("free", free));
+  const grok = costButton("Ideias do Grok (melhor)", "grok", "idea-btn is-post");
+  grok.addEventListener("click", () => postIdeas("grok", grok));
+  document.getElementById("post-ideas-actions").prepend(free, grok);
+}
 document.getElementById("post-form").appendChild(clearBtn);
 
 // Nota sobre fotos
@@ -3925,6 +3987,7 @@ function orderHotQuestions() {
   hotQOrder = hotQItems().slice().sort((a, b) =>
     (hotUsed.has(a.text) - hotUsed.has(b.text)) || (!!b.source - !!a.source) || ((b.moment === now && !hotQFilter) - (a.moment === now && !hotQFilter)) || (dayRank(a.text) - dayRank(b.text)));
   hotQAt = 0;
+  hotShown = HOT_PAGE;
 }
 async function loadHotBank() {
   try {
@@ -3934,6 +3997,20 @@ async function loadHotBank() {
   paintHotFilters();
   showHotQuestion();
   paintHotList();
+  paintAccountsInfo();
+}
+// "Com base nas contas": diz o que entrou (ou por que nada entrou), para o botão nunca parecer morto.
+function paintAccountsInfo() {
+  const node = document.getElementById("hot-accounts-info");
+  const info = hotBank && hotBank.accounts_info;
+  node.hidden = !hotAccounts || !info;
+  if (node.hidden) return;
+  const total = info.sua + info.nicho;
+  node.classList.toggle("is-empty", !total);
+  node.textContent = total
+    ? "Entraram " + info.sua + (info.sua === 1 ? " frase das suas contas" : " frases das suas contas") + " e " + info.nicho
+      + " do nicho. Elas aparecem primeiro, com a marca de onde vieram."
+    : "Nenhum post passou no filtro de viral ainda. " + info.rule;
 }
 const paintHotQuestion = loadHotBank;  // nome usado quando o nível (Leve/Quente) muda
 function paintHotCount() {
@@ -4009,10 +4086,12 @@ function showHotQuestion() {
   actions.append(next, freeVariations(item.text), moreLikeThis(item.text));
   host.replaceChildren(top, el("p", "hot-question-line font-display", item.text), actions);
 }
+const HOT_PAGE = 60;  // o banco passa de mil frases: a lista mostra de 60 em 60
+let hotShown = HOT_PAGE;
 function paintHotList() {
   const list = document.getElementById("hot-q-list");
   if (list.hidden) return;
-  list.replaceChildren(...hotQOrder.map((item) => {
+  const items = hotQOrder.slice(0, hotShown).map((item) => {
     const li = el("li", "hot-q-item" + (hotUsed.has(item.text) ? " is-used" : ""));
     const head = el("div", "hot-item-top");
     head.append(el("span", "radar-cat hot-fmt", item.fmt_label));
@@ -4023,7 +4102,16 @@ function paintHotList() {
     actions.append(freeVariations(item.text), moreLikeThis(item.text));
     li.append(head, el("p", "hot-text", item.text), actions);
     return li;
-  }));
+  });
+  if (hotQOrder.length > hotShown) {
+    const li = el("li", "hot-q-more");
+    const more = el("button", "idea-btn", "Mostrar mais " + Math.min(HOT_PAGE, hotQOrder.length - hotShown) + " de " + (hotQOrder.length - hotShown));
+    more.type = "button";
+    more.addEventListener("click", () => { hotShown += HOT_PAGE; paintHotList(); });
+    li.append(more);
+    items.push(li);
+  }
+  list.replaceChildren(...items);
 }
 document.getElementById("hot-q-toggle").addEventListener("click", (event) => {
   const list = document.getElementById("hot-q-list");
@@ -4662,9 +4750,11 @@ async function loadDrafts({ silent = false } = {}) {
 function pzStateOf(account) { return account.posted ? "done" : account.queue.length ? "ready" : "empty"; }
 function hhmm(iso) { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
 function filas(n) { return n === 1 ? "1 na fila" : n + " na fila"; }
+function pzInFolder(account) { return !state.folderId || account.folder_id === state.folderId; }
 function paintDrafts() {
   if (!draftsData) return;
-  const { accounts, batch } = draftsData;
+  const accounts = draftsData.accounts.filter(pzInFolder);
+  const batch = { done: accounts.filter((a) => a.posted).length, total: accounts.length, hours: draftsData.batch.hours };
   const ready = accounts.filter((a) => pzStateOf(a) === "ready").length;
   document.getElementById("pz-count").textContent = !batch.total ? "Nenhuma conta ativa ainda."
     : batch.done + " de " + batch.total + " contas postadas nas últimas " + batch.hours + " h. "
@@ -4705,8 +4795,9 @@ function paintPzFilter() {
 function paintDraftGrid() {
   const host = document.getElementById("pz-grid");
   if (!draftsData) return;
-  const accounts = draftsData.accounts;
+  const accounts = draftsData.accounts.filter((a) => !state.folderId || a.folder_id === state.folderId);
   if (!accounts.length) {
+    if (state.folderId && draftsData.accounts.length) { host.replaceChildren(el("p", "pz-none", "Nenhuma conta ativa nesta pasta.")); return; }
     host.replaceChildren(emptyState("ops", "Nenhuma conta ainda", "Crie uma pasta em Operações e adicione as contas. Cada uma vira um cartão aqui.", "Abrir Operações", () => setTab("ops")));
     return;
   }
@@ -4844,7 +4935,7 @@ async function saveDraft(accountId, text) {
 }
 function pzFocusNext(fromId) {
   if (!draftsData) return;
-  const list = draftsData.accounts;
+  const list = draftsData.accounts.filter(pzInFolder);
   const start = Math.max(0, list.findIndex((a) => a.id === fromId));
   const next = list.slice(start + 1).concat(list.slice(0, start + 1)).find((a) => pzStateOf(a) === "ready");
   if (next && document.querySelector('.pz-card[data-acc="' + next.id + '"]')) pzFocusCard(next.id);

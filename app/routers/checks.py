@@ -212,3 +212,44 @@ async def review_post(
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
     return {"verdict": verdict}
+
+
+class CaptionIdeasIn(BaseModel):
+    caption: str = Field(min_length=1, max_length=2000)
+    verdict: str | None = Field(default=None, max_length=2000)
+    mode: str = Field(default="free", pattern="^(free|grok)$")
+    heat: str = Field(default="quente", pattern="^(leve|quente)$")
+    trend: bool = False  # usar o assunto em alta do Radar
+    seed: int = Field(default=0, ge=0, le=1_000_000)
+
+
+@router.post("/api/posts/ideas")
+def caption_ideas(payload: CaptionIdeasIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Verificar post → ideias no mesmo contexto com mais chance de viralizar: grátis (gerador do Radar) ou Grok."""
+    from app import radar, radar_hot, radar_ideas
+
+    caption = " ".join(payload.caption.split())
+    if radar_hot.unsafe(caption):
+        raise HTTPException(400, "Essa legenda tem conteúdo proibido (menor, sem consentimento ou parente): sem ideias.")
+    hooks: list[str] = []
+    if payload.trend:
+        topics, _, _ = radar.build_topics(db)
+        hooks = [t["title"] for t in topics if not t["blocked"] and t["engage"] >= 55
+                 and not radar_ideas.is_person(t["norm"], t["category"])][:5]
+    if payload.mode == "grok":
+        key = xai_key(db, user)
+        if not key:
+            raise HTTPException(400, "Cole a sua chave da xAI em Configurações para pedir ao Grok.")
+        prompt = radar_ideas.caption_prompt(radar_ideas.clean_caption(caption) or caption, payload.verdict, payload.heat, hooks)
+        try:
+            lines = radar_ideas.parse_lines(radar_ideas.ask_grok_lines(key, prompt), limit=radar_ideas.CAPTION_IDEAS)
+        except ValueError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        lines = [line for line in lines if radar_ideas.fits_day(line)]
+        if not lines:
+            raise HTTPException(502, "O Grok não devolveu ideias. Tente de novo.")
+    else:
+        lines = radar_ideas.caption_ideas(caption, hooks[0] if hooks else None, payload.seed)
+    return {"mode": payload.mode, "ideas": [
+        {"text": line, "fmt": radar_hot.format_of(line), "fmt_label": radar_hot.LABELS[radar_hot.format_of(line)][0]}
+        for line in lines]}

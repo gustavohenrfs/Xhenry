@@ -17,6 +17,7 @@ import os
 import random
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -557,7 +558,8 @@ def variations(text: str, n: int = 6, seed: int = 0) -> list[str]:
             candidates.append((kind, line))
 
     openers = []
-    if address or not talks_about_men:
+    already_you = re.match(r"^voc[eê]s\b", body, re.IGNORECASE)
+    if (address or not talks_about_men) and not already_you:
         openers += MEN_OPENERS if question else MEN_OPENERS[:2]  # "Me respondam, homens:" só em pergunta
     if question:
         openers += SOFT_OPENERS
@@ -569,7 +571,8 @@ def variations(text: str, n: int = 6, seed: int = 0) -> list[str]:
         for target in rng.sample([g for g in GOAL_NUMBERS if g != number], 3):
             add("meta", GOAL.sub(f"{target} {rng.choice(GOAL_UNITS)}", core, count=1))
     poll = POLL_START.match(body)
-    if poll and len(poll.group(1).split()) <= 3 and len(poll.group(2).split()) <= 3:
+    if (poll and len(poll.group(1).split()) <= 3 and len(poll.group(2).split()) <= 3
+            and not re.match(r"^(?:voc[eê]s|os homens|homens)\b", poll.group(1), re.IGNORECASE)):
         add("enquete", f"{_cap(poll.group(2).strip())} ou {_low(poll.group(1).strip())}?{poll.group(3)}")
         add("enquete", f"Só pode escolher um: {_low(poll.group(1).strip())} ou {_low(poll.group(2).strip())}?")
     closers = [c for c in CLOSERS if core.endswith("?") or not c[0].isalpha()]  # palavra só depois de "?"
@@ -653,7 +656,7 @@ def today_line(now: datetime | None = None) -> str:
 # Persona: mulher adulta provocando o público masculino. Pesado e direto no vocabulário, sempre em tom de
 # pergunta, enquete, desafio, promessa, lista, confissão ou duplo sentido; nunca menor, sem consentimento ou
 # parente (o filtro unsafe confere tudo no fim), nunca link/venda.
-MIX_SIZE = 60
+MIX_SIZE = 1200  # frases montadas por mistura: o estoque passa de mil prontas
 POLL_PAIRS = (
     ("de quatro", "por cima"), ("peito", "bunda"), ("chupar", "ser chupado"), ("puxão de cabelo", "tapa na bunda"),
     ("gemido alto", "sussurro no ouvido"), ("lisinha", "peludinha"), ("na cama", "no chuveiro"),
@@ -665,13 +668,30 @@ POLL_PAIRS = (
     ("calcinha de renda", "sem calcinha"), ("ela pedindo mais", "ela pedindo pra parar de tanto gozar"),
     ("dedada", "língua"), ("espelho", "câmera ligada"), ("no carro", "no motel"), ("cavalgada", "papai e mamãe bem feito"),
     ("conversa safada antes", "ir direto ao ponto"), ("mulher que manda", "mulher que obedece"),
+    ("morena", "loira"), ("ruiva", "morena"), ("baixinha", "alta"), ("magrinha", "gostosa com carne"),
+    ("coxa grossa", "cintura fina"), ("tatuada", "sem tatuagem"), ("de óculos", "sem óculos"),
+    ("mulher mais velha", "mulher da sua idade"), ("salto alto", "meia arrastão"), ("pijama de seda", "camiseta dele"),
+    ("banho de espuma", "banho gelado juntos"), ("massagem com óleo", "massagem com a boca"),
+    ("beijo demorado", "pegada forte"), ("ser amarrado", "amarrar ela"), ("venda nos olhos", "algema"),
+    ("gemer o nome dele", "ficar em silêncio mordendo a boca"), ("transar ouvindo música", "transar ouvindo só os gemidos"),
+    ("motel com hidro", "barraca na praia"), ("áudio gemendo", "foto no espelho"), ("vídeo de 10 segundos", "foto sem censura"),
+    ("ela de saia", "ela de shortinho"), ("ela de legging", "ela de vestido colado"), ("cabelo preso", "cabelo solto"),
+    ("tapinha", "carinho"), ("uma vez caprichada", "três vezes seguidas"), ("ela sentando", "ele no controle"),
+    ("primeira vez no carro", "primeira vez na praia"), ("calcinha fio dental", "calcinha de algodão"),
+    ("mensagem safada no trabalho", "nude na hora do almoço"), ("sexo no escuro", "sexo no espelho"),
+    ("mulher que pede", "mulher que pega"), ("beijo de língua", "mordidinha no queixo"),
+    ("cheiro de perfume", "cheiro de pele depois do banho"), ("de ladinho", "de frente olhando no olho"),
+    ("gozar na primeira", "segurar até ela pedir"), ("depois do treino", "antes de dormir"),
+    ("mulher bêbada de vinho", "mulher sóbria e safada"), ("ela de joelhos", "ela por cima mandando"),
 )
-POLL_FRAMES = [
+POLL_FRAMES = (
     "{A} ou {b}? {close}", "Pergunta séria pros homens: {a} ou {b}?", "Só pode escolher um: {a} ou {b}? {emoji}",
     "{A} ou {b}? Responde sem pensar e sem mentir rs", "Homens, {a} ou {b}? Quero ver quem tem coragem de responder",
     "Vou fazer o que ganhar nos comentários: {a} ou {b}? 😈", "{A} ou {b}? Defende a sua nos comentários {emoji}",
-]
-QUESTIONS = [
+    "Sem pensar muito: {a} ou {b}? {emoji}", "Enquete safada do dia: {a} ou {b}?", "{A} ou {b}? Um só, valendo {emoji}",
+    "Me ajuda a decidir a noite: {a} ou {b}? {emoji}", "Desempata aqui: {a} ou {b}? {close}",
+)
+QUESTIONS = (
     "vocês aguentam quantos minutos sem gozar", "por que homem goza e vira pro lado pra dormir",
     "vocês sabem mesmo achar o clitóris ou é sorte", "vocês preferem chupar ou ser chupados",
     "por que todo homem jura que é bom de cama e quase nenhum é", "vocês já broxaram na hora H",
@@ -684,54 +704,103 @@ QUESTIONS = [
     "vocês preferem mulher que pede ou mulher que manda", "por que homem ama tanto uma mulher de quatro",
     "vocês aguentam a segunda logo depois da primeira", "qual foi o lugar mais arriscado que vocês já transaram",
     "vocês deixariam eu mandar em vocês por uma noite inteira", "o que vocês pensam quando veem uma mulher de legging",
-]
-Q_OPENERS = ["Homens,", "Vocês homens,", "Sinceramente, homens:", "Pergunta séria:", "Me respondam uma coisa:", "Preciso saber:", ""]
-Q_CLOSERS = ["Sinceramente", "Estou curiosa", "rs", "😏", "👀", "Sem mentir", "Ninguém tá olhando rs", "Quero ver quem é sincero"]
-DARES = [
+    "qual a primeira coisa que vocês fariam comigo numa noite sozinhos", "vocês gostam quando a mulher geme alto ou ficam com vergonha",
+    "vocês já transaram com alguém que conheceram aqui no X", "quanto tempo vocês aguentam me olhando sem me tocar",
+    "qual foi a melhor transa da vida de vocês e por quê", "vocês preferem mulher depilada ou natural",
+    "o que vocês acham que eu tô vestindo agora", "vocês já mandaram nude pra mulher errada",
+    "qual a fantasia que vocês têm vergonha de contar", "vocês sabem fazer uma mulher gozar só com a boca",
+    "por que homem acha que preliminar é perda de tempo", "vocês preferem ver ou participar",
+    "quantas mulheres vocês já fizeram gozar de verdade", "vocês aguentariam uma semana inteira sem gozar",
+    "o que vocês fazem quando a mulher pede mais e vocês já gozaram", "vocês gostam de mulher que manda áudio safado",
+    "qual parte do corpo feminino deixa vocês sem reação", "vocês já ficaram duros no lugar mais errado possível",
+    "o que vocês responderiam se eu mandasse 'tô sem calcinha' agora", "vocês preferem a primeira transa ou a de reconciliação",
+    "vocês dariam conta de mim numa sexta à noite", "qual a palavra mais safada que vocês gostam de ouvir",
+    "vocês já se tocaram pensando em alguém daqui", "qual é o limite de vocês na cama",
+    "por que homem fica tão bobo quando a mulher senta", "vocês preferem mulher experiente ou que vocês ensinam",
+    "vocês já transaram tão forte que quebrou alguma coisa", "o que vocês acham de mulher que toma a iniciativa no primeiro encontro",
+)
+Q_OPENERS = ("Homens,", "Vocês homens,", "Sinceramente, homens:", "Pergunta séria:", "Me respondam uma coisa:", "Preciso saber:",
+             "Curiosidade do dia:", "Sem vergonha nenhuma:", "")
+Q_CLOSERS = ("Sinceramente", "Estou curiosa", "rs", "😏", "👀", "Sem mentir", "Ninguém tá olhando rs", "Quero ver quem é sincero",
+             "Responde que eu leio tudo 😈", "Mentir é proibido", "🔥", "Pode falar, eu aguento rs")
+DARES = (
     "Duvido um homem aguentar {n} minutos comigo sem gozar", "Duvido você ler isso até o fim sem ficar duro",
     "Aposto que nenhum homem aqui aguenta eu sentando sem parar", "Duvido um homem me deixar sem fôlego",
     "Duvido alguém aqui me fazer gozar duas vezes na mesma noite", "Aposto que você não saberia o que fazer comigo molhadinha",
     "Duvido você comentar o que faria comigo sem ficar com vergonha", "Aposto que metade dos homens daqui nunca fez uma mulher tremer",
     "Duvido um homem me descrever em 3 palavras sem ser safado", "Aposto que você já imaginou eu de quatro e nem disfarça",
     "Duvido você aguentar uma noite inteira no meu ritmo", "Aposto que você abriu esse post achando que ia ter nude",
-]
-DARE_CLOSERS = ["😏", "rs", "Prova nos comentários", "Quero ver quem é homem de verdade aqui 😈", "🔥", "Comenta se tiver coragem"]
-GOALS = ((100, "comentários"), (200, "comentários"), (300, "respostas"), (500, "curtidas"), (1000, "curtidas"), (200, "RT"))
-REWARDS = [
+    "Duvido um homem aqui aguentar {n} minutos de boquete sem gozar", "Aposto que nenhum de vocês aguenta meu gemido no ouvido",
+    "Duvido você olhar minha foto por {n} segundos sem pensar besteira", "Aposto que você não dura nem {n} minutos comigo por cima",
+    "Duvido alguém aqui saber me pegar do jeito certo", "Duvido um homem me fazer esquecer o celular a noite inteira",
+    "Aposto que você vai comentar e depois apagar de vergonha", "Duvido você contar aqui o que pensou quando viu minha foto",
+    "Aposto que você tá lendo isso deitado e com a mão onde não devia", "Duvido algum homem aguentar três rodadas comigo",
+    "Duvido você me mandar uma mensagem safada agora sem travar", "Aposto que você salvou minha última foto e não conta pra ninguém",
+)
+DARE_CLOSERS = ("😏", "rs", "Prova nos comentários", "Quero ver quem é homem de verdade aqui 😈", "🔥", "Comenta se tiver coragem",
+                "Fala aí que eu leio tudo", "👀", "Só os corajosos respondem")
+GOALS = ((100, "comentários"), (200, "comentários"), (300, "respostas"), (500, "curtidas"), (1000, "curtidas"), (200, "RT"),
+         (150, "respostas"), (2000, "curtidas"), (50, "RT"), (400, "comentários"))
+REWARDS = (
     "posto um nude sem censura", "posto aquela foto de quatro", "conto com detalhes a minha última transa",
     "posto uma foto só de calcinha", "gravo um áudio gemendo", "conto a minha fantasia mais suja",
     "posto a foto do espelho sem nada", "respondo todo mundo do jeito mais safado possível",
     "conto o lugar mais louco onde eu já transei", "posto a foto que eu nunca tive coragem",
-]
-PROMISE_FRAMES = [
+    "posto uma foto no banho", "conto o que eu faço quando fico sozinha em casa", "posto de lingerie vermelha",
+    "mostro a marca do biquíni", "conto quantas vezes eu gozei ontem", "posto a foto que eu mandei pro meu ex",
+    "respondo a pergunta mais safada dos comentários", "posto um vídeo de 10 segundos", "conto minha pior transa",
+    "posto de costas sem nada", "faço o que o comentário mais curtido pedir", "conto como eu gosto de ser pega",
+)
+PROMISE_FRAMES = (
     "Se esse post bater {n} {unit} eu {reward} {emoji}", "{n} {unit} e eu {reward}. Combinado? 😈",
     "Bateu {n} {unit}, eu {reward}. Valendo {emoji}", "Prometo: se chegar em {n} {unit} eu {reward} {emoji}",
-]
-LISTS = [
+    "Meta de hoje: {n} {unit}. Bateu, eu {reward} {emoji}", "Vocês querem? Então {n} {unit} e eu {reward} 😏",
+)
+LISTS = (
     "Coisas que eu faria com você numa noite sem limite. A primeira é…", "Lugares onde eu já transei e ninguém sabe. O primeiro é…",
     "Posições que toda mulher ama e homem nunca oferece. A primeira é…",
     "Coisas que um homem faz na cama que me deixam molhada na hora. A primeira é…",
     "Fantasias que eu nunca tive coragem de realizar. A primeira é…", "Sinais de que ele vai ser bom de cama. O primeiro é…",
     "Erros que fazem uma mulher fingir o orgasmo. O primeiro é…", "Coisas que eu amo ouvir no meio da transa. A primeira é…",
     "Motivos pra nunca mais transar com um homem. O primeiro é…", "Coisas que toda mulher faz sozinha e não conta. A primeira é…",
-]
-CONFESSIONS = [
+    "Coisas que eu faço quando tô com tesão e ninguém sabe. A primeira é…", "Tipos de homem que eu nunca levaria pra cama. O primeiro é…",
+    "Coisas que um homem fala que me deixam louca. A primeira é…", "Regras pra transar comigo. A primeira é…",
+    "Coisas que eu peço na cama e homem nenhum faz direito. A primeira é…", "Lugares do meu corpo que me arrepiam. O primeiro é…",
+    "Sinais de que eu tô querendo e você não percebeu. O primeiro é…", "Coisas que eu nunca fiz na cama mas morro de vontade. A primeira é…",
+    "Coisas que separam um homem bom de cama de um homem comum. A primeira é…", "Fantasias que toda mulher tem e não fala. A primeira é…",
+    "Coisas que eu faria se você estivesse aqui agora. A primeira é…", "Erros que todo homem comete no primeiro nude. O primeiro é…",
+)
+CONFESSIONS = (
     "fico molhadinha lendo os comentários de vocês", "já transei no carro no estacionamento do shopping",
     "durmo sem calcinha todo dia", "já me toquei pensando num seguidor daqui", "amo quando puxam meu cabelo na hora",
     "já fingi orgasmo pra acabar logo", "mandei nude pro contatinho errado", "gemo tão alto que o vizinho já reclamou",
     "o que mais me excita é homem que manda em mim na cama", "já gozei só com beijo no pescoço",
     "tenho uma pasta de fotos que ninguém nunca viu", "fico com vontade toda vez que leio um comentário safado",
-]
-CONF_FRAMES = ["Confesso: eu {c}. {follow}", "Confissão de hoje: eu {c} 🙈 {follow}", "Admito que eu {c}. {follow}",
-               "Ninguém sabe disso, mas eu {c} 🤭 {follow}", "Estou curiosa: vocês acreditam que eu {c}?"]
-CONF_FOLLOW = ["Isso é errado?", "Quem mais?", "Vocês me julgam?", "E vocês, já?", "Me conta o seu agora", ""]
-DOUBLE = [
+    "já transei no provador de loja", "gosto mais de mandar nude do que de receber", "já fiz um homem gozar só com a mão no cinema",
+    "fico louca quando o homem fala baixinho no meu ouvido", "já transei com a porta aberta", "adoro quando me pegam de surpresa por trás",
+    "já sentei tanto que ele pediu pra parar", "nunca gozei com um homem que tinha pressa", "uso lingerie até pra ir no mercado",
+    "já deixei um homem me amarrar e amei", "fico olhando a mão de homem e imaginando coisa", "já me arrumei inteira só pra tirar tudo",
+    "acordo com vontade quase todo dia", "fico com ciúme dos comentários de outras mulheres aqui",
+)
+CONF_FRAMES = ("Confesso: eu {c}. {follow}", "Confissão de hoje: eu {c} 🙈 {follow}", "Admito que eu {c}. {follow}",
+               "Ninguém sabe disso, mas eu {c} 🤭 {follow}", "Estou curiosa: vocês acreditam que eu {c}?",
+               "Vou falar uma coisa e vocês não contam pra ninguém: eu {c}. {follow}", "Sendo bem sincera: eu {c} 😈 {follow}")
+CONF_FOLLOW = ("Isso é errado?", "Quem mais?", "Vocês me julgam?", "E vocês, já?", "Me conta o seu agora", "", "Normal, né?",
+               "Vocês aguentariam?", "Comenta a sua que eu leio")
+DOUBLE = (
     "Hoje tô com uma vontade de sentar que nem cadeira resolve rs", "Procuro homem que saiba usar a língua… pra conversar, claro 😏",
     "Quero alguém pra me dar uma mão… e o resto também rs", "Tô tão carente que até o chuveiro tá recebendo atenção 👀",
     "Minha especialidade é engolir… sapo, na vida. Claro rs", "Tô precisando de alguém que me pegue de jeito… no abraço, óbvio 😈",
     "Sou ótima em montar… móvel, gente. Que mente suja rs", "Hoje eu só queria alguém pra me deixar sem voz… cantando, claro 😏",
-]
-EMOJI = ["🔥", "😏", "😈", "👀"]
+    "Adoro um homem que come bem… no restaurante, gente rs", "Tô procurando alguém pra me ajudar a gastar energia… na academia 😈",
+    "Gosto de coisa grande… tipo apartamento. Pensou no quê? rs", "Hoje eu acordei querendo levar… um susto. Mentira rs",
+    "Preciso de alguém pra apertar… meu parafuso solto rs", "Tô com uma fome que só uma coisa resolve… pizza, óbvio 😏",
+    "Ajoelhou tem que rezar, né? 😈", "Me chama de bicicleta e me leva pra dar uma volta… no parque rs",
+    "Sou igual café: quente, forte e de manhã é melhor 😈", "Hoje só quero alguém que me faça suar… dançando, claro rs",
+    "Tô precisando de alguém pra me dar uma lição… de matemática 😏", "Adoro quando o homem sabe a hora de meter… o pé no freio rs",
+    "Quem me empresta um ombro? E o resto que vier junto rs", "Tô procurando um homem que aguente… minhas indiretas 😈",
+)
+EMOJI = ("🔥", "😏", "😈", "👀")
 
 
 def _poll(rng: random.Random) -> str:
@@ -770,15 +839,21 @@ MAKERS = (_poll, _question, _dare, _promise, _confession, _poll, _question,
 
 def compose(heat: str = "quente", seed: int = 0, size: int = MIX_SIZE, now: datetime | None = None) -> list[str]:
     """Frases quentes novas montadas por peças (abertura, miolo, fecho, meta, prêmio). A semente muda a mistura;
-    só o nível quente (o leve fica no banco fixo, sugestivo)."""
-    from app.radar_hot import has_cta, unsafe
-
+    só o nível quente (o leve fica no banco fixo, sugestivo). Guardado por semente e dia (o filtro do dia muda)."""
     if heat != "quente":
         return []
+    day = (now or now_sp()).weekday()
+    return list(_compose(seed, size, day, now))
+
+
+@lru_cache(maxsize=32)
+def _compose(seed: int, size: int, day: int, now: datetime | None) -> tuple[str, ...]:
+    from app.radar_hot import has_cta, unsafe
+
     rng = random.Random(f"mix|{seed}")
     out: list[str] = []
     seen: set[str] = set()
-    for _ in range(size * 6):
+    for _ in range(size * 8):
         if len(out) >= size:
             break
         line = " ".join(rng.choice(MAKERS)(rng).split())
@@ -787,7 +862,7 @@ def compose(heat: str = "quente", seed: int = 0, size: int = MIX_SIZE, now: date
             continue
         seen.add(key)
         out.append(line)
-    return out
+    return tuple(out)
 
 
 def hot_questions(heat: str = "quente", seed: int = 0, size: int = MAX_IDEAS, now: datetime | None = None) -> list[str]:
@@ -1001,23 +1076,127 @@ def parse_lines(text: str, limit: int = MAX_IDEAS) -> list[str]:
     return out[:limit]
 
 
+GROK_TIMEOUT = 170.0
+
+
 def ask_grok_lines(key: str, prompt: str) -> str:
     """Texto do Grok para o pedido (chat completions da xAI). Erro vira ValueError com mensagem legível."""
     from app.services import grok_text
 
     model = os.getenv("XAI_MODEL", "grok-4.6")
     try:
-        with httpx.Client(timeout=60.0, follow_redirects=False) as client:
+        # Vários textos de um modelo que pensa passam de 60 s (era o "Sem resposta da xAI"); o nginx da VPS
+        # espera bem mais que isso (proxy_read_timeout do Cloaker).
+        with httpx.Client(timeout=GROK_TIMEOUT, follow_redirects=False) as client:
             response = client.post(
                 "https://api.x.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json={"model": model, "temperature": 1.0, "messages": [{"role": "user", "content": prompt}]},
             )
+    except httpx.TimeoutException as exc:
+        raise ValueError(f"O Grok demorou mais de {int(GROK_TIMEOUT)} s para responder. Tente de novo.") from exc
     except httpx.HTTPError as exc:
-        raise ValueError("Sem resposta da xAI. Tente de novo.") from exc
+        raise ValueError("Sem conexão com a xAI. Tente de novo.") from exc
     if response.status_code >= 400:
         raise ValueError("A xAI recusou o pedido. Confira a chave e o modelo em Configurações.")
     try:
         return grok_text(response.json())
     except ValueError as exc:
         raise ValueError("A xAI não devolveu texto legível.") from exc
+
+
+# ---- Verificar post → ideias no mesmo contexto, com mais chance de viralizar ----
+CAPTION_IDEAS = 8
+SENTENCE_RE = re.compile(r"(?<=[.!?…\n,;])\s+")
+# A legenda inteira dentro de um gancho que faz responder: o contexto (a foto, a ideia) fica.
+CONTEXT_WRAPS = (
+    "{base}. O que vocês fariam se eu aparecesse assim na frente de vocês? 😏",
+    "{base}… nota de 0 a 10? Sejam sinceros 👀",
+    "{base}. Se esse post bater 300 comentários eu posto a próxima 🔥",
+    "{base}. Duvido você não olhar duas vezes rs",
+    "{base}. Confesso que pensei em alguém daqui quando fiz 🙈",
+    "Homens, sejam sinceros: {low}… aprovado ou não? 😈",
+    "{base}. Vocês preferem assim ou sem nada? 👀",
+    "{base}. Quem chegar primeiro nos comentários ganha uma resposta safada rs",
+)
+STOP = {"essa", "esse", "isso", "aqui", "hoje", "agora", "voces", "minha", "minhas", "nova", "novo", "pra", "para", "quem",
+        "mais", "como", "muito", "porque", "sobre", "depois", "antes"}
+
+
+def clean_caption(caption: str) -> str:
+    """A legenda sem as partes que chamam para fora (link, bio, privado…): o resto é o contexto do post."""
+    from app.radar_hot import has_cta
+
+    parts = [part.strip() for part in SENTENCE_RE.split(" ".join((caption or "").split(" ")).strip()) if part.strip()]
+    kept = " ".join(part for part in parts if not has_cta(part)).strip()
+    return re.sub(r"[\s,;:–-]+$", "", kept).strip()
+
+
+def caption_ideas(caption: str, hook: str | None = None, seed: int = 0, size: int = CAPTION_IDEAS) -> list[str]:
+    """Grátis: variações da própria legenda (abertura, fecho, meta, enquete), frases do gerador no mesmo formato e,
+    com hook (assunto em alta do Radar), a legenda pegando carona nele. Nunca a legenda igual, nunca link/venda."""
+    from app.radar_hot import format_of, has_cta, unsafe
+
+    base = clean_caption(caption)
+    original = src.norm(caption)
+    out: list[str] = []
+
+    def add(line: str | None) -> None:
+        if not line:
+            return
+        line = " ".join(line.split())
+        key = src.norm(line)
+        if (key and key != original and len(line) <= 280 and not has_cta(line) and not unsafe(line) and fits_day(line)
+                and all(src.norm(x) != key for x in out)):
+            out.append(line)
+
+    rng = random.Random(f"cap|{seed}|{base}")
+    if base:
+        core = TAIL.sub("", base).strip() or base
+        asks = "?" in core or GOAL.search(core)  # pergunta, enquete ou promessa: variar a própria frase rende
+        if asks:
+            for line in variations(base, 4, seed=seed):
+                add(line)
+        elif len(core) <= 140:  # afirmação ("foto nova de lingerie"): vira gancho que faz responder
+            for wrap in rng.sample(CONTEXT_WRAPS, 4):
+                add(wrap.format(base=core.rstrip(".!…"), low=_low(core.rstrip(".!…"))))
+        if hook:
+            if asks:
+                add(rng.choice(PROVEN_HOOKS).format(topic=hook) + _low(core))
+            else:
+                add(f"Todo mundo vendo {hook} e eu aqui: {_low(core.rstrip('.!…'))}. Alguém ainda olha pra cá? 👀")
+    # Do gerador: primeiro as que falam do mesmo assunto da legenda (lingerie, cama, foto…), depois o mesmo formato.
+    made = compose("quente", seed)
+    words = {w for w in src.norm(base).split() if len(w) >= 4 and w not in STOP}
+    related = [line for line in made if words & set(src.norm(line).split())]
+    fmt = format_of(base) if base else None
+    same = [line for line in made if fmt and format_of(line) == fmt and line not in related]
+    for pool in (related, same, made):
+        for line in rng.sample(pool, min(len(pool), size * 2)):
+            if len(out) >= size:
+                break
+            add(line)
+    return out[:size]
+
+
+def caption_prompt(caption: str, verdict: str | None, heat: str = "quente", hooks: list[str] | None = None) -> str:
+    """Pedido ao Grok: o mesmo contexto da legenda, reescrito para viralizar (respostas e discussão), levando em
+    conta o que a verificação apontou."""
+    owner = OWNER_EXAMPLES_QUENTE if heat == "quente" else OWNER_EXAMPLES_LEVE
+    lines = [
+        "Você é a melhor copywriter de contas de modelos adultas (+18) de texto no X, em português do Brasil, com "
+        "gírias de internet. Quem posta é uma mulher; o público é de homens. O objetivo é viralizar: o algoritmo do X "
+        "entrega o post que gera respostas e discussão.",
+        f"Legenda que ela quer postar: \"{caption}\"",
+        f"A verificação do post disse: \"{verdict}\"" if verdict else "A verificação do post ainda não rodou.",
+        "Reescreva a legenda em 6 versões no MESMO contexto (a mesma ideia, a mesma foto), cada uma com um gancho "
+        "diferente (pergunta direta aos homens, enquete de duas opções, desafio ao ego, promessa que eles cobram, "
+        "confissão, duplo sentido), com muito mais chance de viralizar. Se a verificação apontou risco (nudez ou "
+        "outro), a legenda não pode piorar isso: provoca pela pergunta e pela imaginação, sem descrever o que a "
+        "foto mostra.",
+        "Tom do dono: " + " | ".join(f'"{e}"' for e in owner),
+    ]
+    if hooks:
+        lines.append("Pode pegar carona em um destes assuntos em alta no Brasil se encaixar naturalmente: " + ", ".join(hooks) + ".")
+    lines += [rules(heat), "Um post por linha, sem numeração nem aspas, cada um com até 200 caracteres. Não explique nada."]
+    return "\n".join(lines)
