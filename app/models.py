@@ -364,6 +364,8 @@ class UserSetting(IntPK, Base):
     # Leitura automática de quem não é admin (o admin usa app_settings): ligada e o intervalo dela.
     apify_auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     apify_interval_min: Mapped[int] = mapped_column(Integer, nullable=False, default=60, server_default="60")
+    # Verificação de saúde de todas as contas 1x por dia (vigia, com o token da API do X do usuário).
+    health_auto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     # Notificações (JSON, ver services.NOTIFY_DEFAULTS): tipos ligados, marcos de views e não perturbe.
     notify_prefs: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Pausa da madrugada da leitura automática (horário de Brasília); o botão continua lendo.

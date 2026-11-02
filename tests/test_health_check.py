@@ -185,3 +185,75 @@ def test_missing_token_is_503(monkeypatch):
     finally:
         app.dependency_overrides.clear()
     assert resp.status_code == 503
+
+
+
+# ---- Saúde completa: respostas escondidas (ghost ban), conteúdo sensível e o checklist ----
+
+def ago(**delta):
+    from datetime import datetime, timedelta, timezone
+
+    return (datetime.now(timezone.utc) - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ConversationX(FakeX):
+    """A busca da conversa (conversation_id:) responde diferente da busca from:."""
+
+    def __init__(self, conversation, **routes):
+        super().__init__(**routes)
+        self.conversation = conversation
+
+    def __call__(self, path, params, token=""):
+        if path == "/tweets/search/recent" and str(params.get("query", "")).startswith("conversation_id:"):
+            self.calls.append("conversation")
+            return self.conversation
+        return super().__call__(path, params, token)
+
+
+def timeline_with_reply():
+    return {"data": [
+        {"id": "20", "author_id": "42", "created_at": ago(hours=5), "possibly_sensitive": True},
+        {"id": "21", "author_id": "42", "created_at": ago(hours=2), "conversation_id": "900",
+         "in_reply_to_user_id": "77", "possibly_sensitive": False},
+    ]}
+
+
+def test_hidden_reply_is_ghost_ban(monkeypatch):
+    fake = ConversationX((200, {"data": [{"id": "901", "author_id": "77"}]}),
+                         timeline=(200, timeline_with_reply()), search=(200, timeline_with_reply()))
+    monkeypatch.setattr(services, "x_get", fake)
+    signals = services.collect_health("saude")
+    assert signals["reply_hidden"] is True and "conversation" in fake.calls
+    status, detail = derive_status(**{key: signals[key] for key in (
+        "profile_status", "protected", "timeline_status", "timeline_ids", "newest_tweet", "search_status",
+        "search_ids", "searchable_ids", "reply_hidden")}, had_known_user_id=False, profile_body=signals["profile_body"])
+    assert status == HealthStatus.GHOST_BAN and "resposta" in detail.lower()
+    checks = {item["key"]: item for item in services.health_checklist(signals, status)}
+    assert checks["respostas"]["state"] == "bad" and checks["busca"]["state"] == "ok"
+    assert checks["sensivel"]["state"] == "warn" and "1 de 2" in checks["sensivel"]["text"]
+    assert checks["sugestao"]["state"] == "na", "a API não mostra a sugestão da busca: a tela diz isso"
+
+
+def test_visible_reply_and_no_reply_to_test(monkeypatch):
+    fake = ConversationX((200, {"data": [{"id": "21", "author_id": "42"}]}),
+                         timeline=(200, timeline_with_reply()), search=(200, timeline_with_reply()))
+    monkeypatch.setattr(services, "x_get", fake)
+    signals = services.collect_health("saude")
+    assert signals["reply_hidden"] is False
+    fake = ConversationX((200, {}), timeline=(200, TWEETS), search=(200, TWEETS))
+    monkeypatch.setattr(services, "x_get", fake)
+    signals = services.collect_health("saude")
+    assert signals["reply_hidden"] is None and "conversation" not in fake.calls, "sem resposta recente: não gasta a chamada"
+    checks = {item["key"]: item for item in services.health_checklist(signals, HealthStatus.HEALTHY)}
+    assert checks["respostas"]["state"] == "na"
+
+
+def test_detail_shows_the_latest_checklist(x_api, telegram, account_id, monkeypatch):
+    fake = ConversationX((200, {"data": [{"id": "21", "author_id": "42"}]}),
+                         timeline=(200, timeline_with_reply()), search=(200, timeline_with_reply()))
+    monkeypatch.setattr(services, "x_get", fake)
+    result = check(account_id)
+    assert {item["key"] for item in result["checks"]} >= {"perfil", "busca", "respostas", "sensivel"}
+    with SessionLocal() as db:
+        detail = services.account_detail(db, db.get(XAccount, account_id).owner_id, account_id, "today")
+    assert detail["health"]["checks"] and detail["health"]["checked_at"]

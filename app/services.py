@@ -90,6 +90,7 @@ def ensure_user_auth_columns() -> None:
             "pause_from": "VARCHAR(5) NOT NULL DEFAULT '00:00'",
             "pause_to": "VARCHAR(5) NOT NULL DEFAULT '06:00'",
             "summary_read_on": "DATE",
+            "health_auto": "BOOLEAN NOT NULL DEFAULT FALSE",
         }
         for column, ddl in added.items():
             if column not in user_setting_cols:
@@ -395,10 +396,14 @@ def lookup_user(username: str, token: str = "") -> tuple[int, dict]:
     )
 
 
+# conversation_id/in_reply_to_user_id: o teste das respostas (ghost ban); possibly_sensitive: posts marcados.
+TWEET_FIELDS = "created_at,public_metrics,lang,author_id,conversation_id,in_reply_to_user_id,possibly_sensitive"
+
+
 def user_tweets(user_id: str, exclude: str | None = None, token: str = "") -> tuple[int, dict]:
     params: dict[str, Any] = {
         "max_results": 10,
-        "tweet.fields": "created_at,public_metrics,lang,author_id",
+        "tweet.fields": TWEET_FIELDS,
     }
     if exclude:
         params["exclude"] = exclude
@@ -413,6 +418,15 @@ def search_recent(username: str, token: str = "") -> tuple[int, dict]:
             "max_results": 10,
             "tweet.fields": "created_at,public_metrics,lang,author_id",
         },
+        token=token,
+    )
+
+
+def search_conversation(conversation_id: str, token: str = "") -> tuple[int, dict]:
+    """Respostas visíveis numa conversa (busca recente, 7 dias): a resposta da conta tem que estar aqui."""
+    return x_get(
+        "/tweets/search/recent",
+        {"query": f"conversation_id:{conversation_id}", "max_results": 100, "tweet.fields": "author_id,created_at"},
         token=token,
     )
 
@@ -438,9 +452,11 @@ def derive_status(
     search_status: int | None,
     search_ids: set[str],
     searchable_ids: list[str] | None = None,
+    reply_hidden: bool | None = None,
 ) -> tuple[HealthStatus, str]:
     """searchable_ids: posts da timeline que a busca recente já deveria mostrar (de SEARCH_LAG a SEARCH_DAYS
-    atrás). Se a busca responde 200 sem nenhum deles, a busca esconde a conta: search ban, mesmo sem 403/404."""
+    atrás). Se a busca responde 200 sem nenhum deles, a busca esconde a conta: search ban, mesmo sem 403/404.
+    reply_hidden: uma resposta recente da conta não aparece na conversa (ghost ban, respostas escondidas)."""
     text = error_text(profile_body).lower()
     if profile_status == 401:
         return HealthStatus.API_ERROR, "Token rejeitado pela API do X (401)."
@@ -471,6 +487,9 @@ def derive_status(
         return HealthStatus.SEARCH_BAN, (
             f"A busca do X não mostra nenhum dos {n} {'post recente' if n == 1 else 'posts recentes'} da conta "
             "(search ban). O Apify lê pela busca, então a leitura não traz os posts dessa conta.")
+    if reply_hidden:
+        return HealthStatus.GHOST_BAN, ("As respostas da conta não aparecem na conversa (ghost ban): quem abre o "
+                                        "post não vê a resposta dela.")
     if not timeline_ids:
         return HealthStatus.HEALTHY, "Perfil existe e não há tweets recentes. Conta inativa, não é search ban."
     return HealthStatus.HEALTHY, "Perfil público sem 403/404 na timeline ou na busca."
@@ -641,19 +660,35 @@ def collect_health(username: str, token: str = "") -> dict[str, Any]:
     search_status = None
     timeline: list[dict] = []
     search_ids: set[str] = set()
+    reply_hidden: bool | None = None
+    reply_tested: str | None = None
+    now = now_utc()
+
+    def testable(row: dict) -> bool:
+        when = parse_time(row.get("created_at"))
+        return when is not None and now - SEARCH_DAYS <= when <= now - SEARCH_LAG
+
     if user_id and profile_status == 200 and not protected:
-        timeline_status, timeline_body = user_tweets(user_id, exclude="retweets,replies", token=token)
+        # Uma chamada com as respostas (sem reposts): os posts para o teste da busca e uma resposta para o das
+        # conversas. Sem nada, tenta com tudo (conta que só repostou).
+        timeline_status, timeline_body = user_tweets(user_id, exclude="retweets", token=token)
         timeline = tweet_rows(timeline_body, user_id)
         if timeline_status == 200 and not timeline:
             timeline_status, timeline_body = user_tweets(user_id, token=token)
             timeline = tweet_rows(timeline_body, user_id)
         search_status, search_body = search_recent(username, token)
         search_ids = {str(row["id"]) for row in tweet_rows(search_body, user_id)}
+        reply = next((row for row in timeline if row.get("in_reply_to_user_id")
+                      and str(row["in_reply_to_user_id"]) != user_id and row.get("conversation_id") and testable(row)), None)
+        if reply is not None and search_status == 200:
+            conv_status, conv_body = search_conversation(str(reply["conversation_id"]), token)
+            if conv_status == 200:
+                reply_tested = str(reply["id"])
+                reply_hidden = reply_tested not in {str(row["id"]) for row in tweet_rows(conv_body)}
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
-    now = now_utc()
-    searchable = [str(row["id"]) for row in timeline
-                  if (when := parse_time(row.get("created_at"))) is not None and now - SEARCH_DAYS <= when <= now - SEARCH_LAG]
+    searchable = [str(row["id"]) for row in timeline if testable(row)]
+    sensitive = sum(1 for row in timeline if row.get("possibly_sensitive") is True)
     return {
         "profile_status": profile_status,
         "profile_body": profile_body,
@@ -666,7 +701,51 @@ def collect_health(username: str, token: str = "") -> dict[str, Any]:
         "search_status": search_status,
         "search_ids": search_ids,
         "searchable_ids": searchable,
+        "reply_hidden": reply_hidden,
+        "reply_tested": reply_tested,
+        "sensitive_count": sensitive,
+        "sensitive_total": len(timeline),
     }
+
+
+def health_checklist(signals: dict[str, Any], status: HealthStatus) -> list[dict[str, str]]:
+    """O checklist da verificação, item a item (ok, bad, warn ou na = não deu para testar), como as extensões
+    de shadowban mostram. Só o que a API oficial do X deixa ver; a sugestão da busca fica como "na"."""
+    profile_ok = signals.get("profile_status") == 200 and bool(signals.get("data"))
+    items = [{"key": "perfil", "label": "Perfil", "state": "ok" if profile_ok else "bad",
+              "text": "Encontrado pela API." if profile_ok else "A API não achou o perfil (suspensa, apagada ou @ errada)."}]
+    suspended = status == HealthStatus.SUSPENDED
+    items.append({"key": "suspensa", "label": "Suspensão", "state": "bad" if suspended else ("ok" if profile_ok else "na"),
+                  "text": "A conta está suspensa." if suspended else "Não está suspensa." if profile_ok else "Sem perfil para conferir."})
+    protected = bool(signals.get("protected"))
+    items.append({"key": "protegida", "label": "Perfil público", "state": "warn" if protected else ("ok" if profile_ok else "na"),
+                  "text": "Conta protegida: só seguidores veem os posts." if protected else "Posts públicos." if profile_ok else "Sem perfil para conferir."})
+    searchable = signals.get("searchable_ids") or []
+    found = len(set(searchable) & set(signals.get("search_ids") or set()))
+    if signals.get("search_status") in {403, 404}:
+        search = ("bad", "A busca recusou a conta (403/404).")
+    elif not searchable or signals.get("search_status") != 200:
+        search = ("na", "Sem post de 30 min a 6 dias atrás para testar a busca.")
+    elif found:
+        search = ("ok", f"A busca mostra {found} de {len(searchable)} {'post recente' if len(searchable) == 1 else 'posts recentes'}.")
+    else:
+        search = ("bad", f"A busca não mostra nenhum dos {len(searchable)} posts recentes (search ban).")
+    items.append({"key": "busca", "label": "Busca", "state": search[0], "text": search[1]})
+    hidden = signals.get("reply_hidden")
+    items.append({"key": "respostas", "label": "Respostas (ghost ban)",
+                  "state": "na" if hidden is None else "bad" if hidden else "ok",
+                  "text": "Sem resposta recente da conta para testar." if hidden is None
+                  else "A resposta mais recente não aparece na conversa (ghost ban)." if hidden
+                  else "A resposta mais recente aparece na conversa."})
+    total, marked = signals.get("sensitive_total") or 0, signals.get("sensitive_count") or 0
+    items.append({"key": "sensivel", "label": "Conteúdo sensível",
+                  "state": "na" if not total else "warn" if marked else "ok",
+                  "text": "Sem posts para conferir." if not total
+                  else f"{marked} de {total} posts marcados como sensíveis (alcance menor)." if marked
+                  else f"Nenhum dos {total} posts marcado como sensível."})
+    items.append({"key": "sugestao", "label": "Sugestão na busca", "state": "na",
+                  "text": "A API do X não mostra; confira na sua extensão."})
+    return items
 
 
 def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> tuple[HealthStatus, str]:
@@ -682,6 +761,7 @@ def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> 
         search_status=signals["search_status"],
         search_ids=signals["search_ids"],
         searchable_ids=signals.get("searchable_ids"),
+        reply_hidden=signals.get("reply_hidden"),
     )
     apply_profile(account, signals["data"])
     checked = now_utc()
@@ -710,6 +790,10 @@ def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> 
                 "timeline_tweet_count": len(signals["timeline_ids"]),
                 "search_hit_count": len(signals["search_ids"]),
                 "matched_recent_in_search": matched,
+                "reply_tested": signals.get("reply_tested"),
+                "reply_hidden": signals.get("reply_hidden"),
+                "sensitive_count": signals.get("sensitive_count"),
+                "checks": health_checklist(signals, status),
             },
         )
     )
@@ -781,6 +865,8 @@ def check_handle(db: Session, owner: User, handle: str, folder_id: int | None) -
             newest_tweet=signals["newest_tweet"],
             search_status=signals["search_status"],
             search_ids=signals["search_ids"],
+            searchable_ids=signals.get("searchable_ids"),
+            reply_hidden=signals.get("reply_hidden"),
         )
         results.append((None, status, detail))
     account, status, detail = results[0]
@@ -794,6 +880,7 @@ def check_handle(db: Session, owner: User, handle: str, folder_id: int | None) -
         "detail": detail,
         "persisted": account is not None,
         "checked_at": now_utc().isoformat(),
+        "checks": health_checklist(signals, status),
         "profile": {
             "id": data.get("id"),
             "name": data.get("name"),
@@ -1448,6 +1535,10 @@ def account_detail(db: Session, owner_id: int, account_id: int, period: str) -> 
             }
             for check in checks
         ],
+        # Checklist da última verificação (as antigas, de antes do checklist, não têm).
+        "health": next(({"status": check.status.value, "label": STATUS_LABELS.get(check.status.value, check.status.value),
+                         "checked_at": as_utc(check.checked_at).isoformat(), "checks": (check.evidence or {})["checks"]}
+                        for check in checks[:1] if (check.evidence or {}).get("checks")), None),
     }
 
 
@@ -1810,6 +1901,7 @@ def settings_payload(db: Session, user: User) -> dict[str, Any]:
         "xai_key_set": bool(xai_key(db, user)),
         "x_token_set": bool(x_token(db, user)),
         "apify_token_set": bool((row.apify_token or "").strip()),
+        "health_auto": bool(row.health_auto),
         "apify": {
             "status": row.apify_status,
             "detail": row.apify_detail,

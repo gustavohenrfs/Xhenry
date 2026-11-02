@@ -120,3 +120,44 @@ def test_auto_check_only_stale_accounts(monkeypatch):
         watchdog.run_auto_check(db)
     assert "velha" in checked and "nunca" in checked
     assert "fresca" not in checked and "arquivada" not in checked
+
+
+
+def test_daily_health_check_for_who_turned_it_on(monkeypatch):
+    """Verificação de saúde 1x por dia, para quem ligou em Configurações, com o token do X de cada um, no
+    máximo DAILY_PER_TICK por minuto; conta verificada há menos de 24 h fica para depois."""
+    from uuid import uuid4
+
+    from app.models import User
+    from app.services import user_settings
+
+    tag = uuid4().hex[:6]
+    with SessionLocal() as db:
+        on = User(email=f"on{tag}@x.com", name="On", is_approved=True)
+        off = User(email=f"off{tag}@x.com", name="Off", is_approved=True)
+        db.add_all([on, off])
+        db.flush()
+        for user, wanted in ((on, True), (off, False)):
+            row = user_settings(db, user.id)
+            row.health_auto = wanted
+            row.x_bearer_token = "tok"
+            folder = Folder(owner_id=user.id, name="Saúde", color="#FF2EC8")
+            db.add(folder)
+            db.flush()
+            db.add_all([
+                XAccount(folder_id=folder.id, username=f"d{tag}{user.name}1"),
+                XAccount(folder_id=folder.id, username=f"d{tag}{user.name}2", last_health_checked_at=now_utc() - timedelta(hours=30)),
+                XAccount(folder_id=folder.id, username=f"d{tag}{user.name}3", last_health_checked_at=now_utc() - timedelta(hours=3)),
+            ])
+        db.commit()
+        on_id = on.id
+    checked: list[tuple[int, str]] = []
+    monkeypatch.setattr(watchdog, "check_handle", lambda _db, owner, handle, _folder: checked.append((owner.id, handle)))
+    monkeypatch.setattr(watchdog, "DAILY_PER_TICK", 10)
+    with SessionLocal() as db:
+        assert watchdog.run_daily_health(db) == 2
+    assert checked == [(on_id, f"d{tag}On1"), (on_id, f"d{tag}On2")], "só quem ligou, só as vencidas"
+    checked.clear()
+    monkeypatch.setattr(watchdog, "DAILY_PER_TICK", 1)
+    with SessionLocal() as db:
+        assert watchdog.run_daily_health(db) == 1, "no máximo DAILY_PER_TICK por minuto"

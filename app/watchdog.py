@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app import radar
 from app.database import SessionLocal
-from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, User, XAccount
+from app.models import DEFAULT_TZ, SyncKind, SyncRun, SyncStatus, User, UserSetting, XAccount
 from app.push import push_new_alerts
 from app.services import (
     as_utc,
@@ -45,8 +45,12 @@ from app.services import (
     robot_interval,
     token_configured,
     record_alert,
+    x_token,
     zone,
 )
+
+DAILY_PER_TICK = 2               # verificações diárias por minuto (cota da API do X)
+DAILY_EVERY = timedelta(hours=24)
 
 log = logging.getLogger("xhenry")
 TICK_SECONDS = 60
@@ -143,6 +147,43 @@ def run_auto_check(db: Session, now: datetime | None = None) -> int:
     return checked
 
 
+def run_daily_health(db: Session, now: datetime | None = None) -> int:
+    """Quem ligou "Verificar a saúde 1x por dia" (Configurações): as contas verificadas há mais de 24 h, com o
+    token da API do X do dono, até DAILY_PER_TICK por minuto. O alerta de restrição sai do check_handle."""
+    cutoff = (now or now_utc()) - DAILY_EVERY
+    owners = db.scalars(
+        select(User).join(UserSetting, UserSetting.owner_id == User.id)
+        .where(UserSetting.health_auto.is_(True), User.is_approved.is_(True)).order_by(User.id)
+    ).all()
+    done = 0
+    for owner in owners:
+        if done >= DAILY_PER_TICK:
+            break
+        if not x_token(db, owner):
+            continue
+        due = db.scalars(
+            owned_accounts(owner.id)
+            .where(XAccount.is_active.is_(True), XAccount.is_archived.is_(False))
+            .order_by(XAccount.last_health_checked_at.is_not(None), XAccount.last_health_checked_at, XAccount.id)
+        ).all()
+        seen: set[str] = set()
+        for account in due:
+            if done >= DAILY_PER_TICK:
+                break
+            when = account.last_health_checked_at
+            if account.username in seen or (when is not None and as_utc(when) > cutoff):
+                continue
+            seen.add(account.username)
+            try:
+                check_handle(db, owner, account.username, None)
+                done += 1
+            except HTTPException as exc:
+                log.warning("verificação diária @%s falhou: %s", account.username, exc.detail)
+                db.rollback()
+                break  # token recusado vale para as contas desse dono: tenta no próximo minuto
+    return done
+
+
 def run_radar(db: Session, now: datetime | None = None) -> list[str]:
     """Fontes do radar vencidas; erro aqui nunca para o vigia."""
     if not radar.radar_enabled():
@@ -167,6 +208,11 @@ def run_once(now: datetime | None = None) -> None:
             log.exception("push dos alertas falhou nesta rodada")
             db.rollback()
         run_auto_check(db, now)
+        try:
+            run_daily_health(db, now)
+        except Exception:
+            log.exception("verificação diária falhou nesta rodada")
+            db.rollback()
         run_radar(db, now)
 
 

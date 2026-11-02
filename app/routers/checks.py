@@ -44,6 +44,7 @@ class SettingsIn(BaseModel):
     xai_api_key: str | None = Field(default=None, max_length=500)
     x_bearer_token: str | None = Field(default=None, max_length=500)
     apify_token: str | None = Field(default=None, max_length=500)
+    health_auto: bool | None = None  # verificar a saúde de todas as contas 1x por dia
 
 
 @router.get("/api/settings")
@@ -56,6 +57,8 @@ def write_settings(payload: SettingsIn, user: User = Depends(approved_user), db:
     row = user_settings(db, user.id)
     if payload.impression_goal is not None:
         row.impression_goal = payload.impression_goal
+    if payload.health_auto is not None:
+        row.health_auto = payload.health_auto
     for field in ("xai_api_key", "x_bearer_token", "apify_token"):
         value = getattr(payload, field)
         if value is not None:

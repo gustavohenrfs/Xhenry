@@ -1785,10 +1785,23 @@ async function load({ silent = false } = {}) {
     if (seq === loadSeq) loadInflight = false;
   }
 }
+document.getElementById("health-auto").addEventListener("change", async (event) => {
+  const on = event.target.checked;
+  const done = busyField();
+  try {
+    await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ health_auto: on }) });
+    toast(on ? "Saúde verificada 1× por dia: as contas entram aos poucos, 2 por minuto." : "Verificação diária desligada.");
+  } catch (error) {
+    event.target.checked = !on;
+    toast(error.message || "Não salvou.");
+  }
+  if (done) done();
+});
 async function verify(account) {
   try {
     const result = await api("/api/check/" + encodeURIComponent(account.username) + "?folder_id=" + account.folder_id);
-    toast("@" + account.username + ": " + result.status_label);
+    const bad = (result.checks || []).filter((item) => item.state === "bad").map((item) => item.label.toLowerCase());
+    toast("@" + account.username + ": " + result.status_label + (bad.length ? " (" + bad.join(", ") + ")" : ""));
     await load();
   } catch (error) { toast(error.message || "Falha na verificação."); }
 }
@@ -2312,6 +2325,7 @@ async function loadSettings() {
     loadNotify();
     paintKeyField("xai-key", "xai_api_key", settings.xai_key_set, "xai-...");
     paintKeyField("x-token", "x_bearer_token", settings.x_token_set, "AAAA...");
+    document.getElementById("health-auto").checked = Boolean(settings.health_auto);
     paintKeyField("apify-token", "apify_token", settings.apify_token_set, "apify_api_...");
     const me = await api("/api/me");
     document.getElementById("profile-name").value = me.nome_exibicao || "";
@@ -3698,6 +3712,22 @@ function renderDrawer(account, detail) {
       posts.append(li);
     });
     extra.append(drawerSection("Melhores posts", detail.top_posts.length ? posts : el("p", "text-sm text-mute", "Nenhum post lido no período.")));
+    // Saúde agora: o checklist da última verificação (perfil, busca, respostas, conteúdo sensível…).
+    const HC_ICON = { ok: "✓", bad: "✕", warn: "!", na: "–" };
+    const health = el("ul", "hc-list");
+    if (detail.health) {
+      detail.health.checks.forEach((item) => {
+        const li = el("li", "hc-item is-" + item.state);
+        const text = el("div", "min-w-0");
+        text.append(el("p", "hc-label", item.label), el("p", "hc-text", item.text));
+        li.append(el("span", "hc-icon", HC_ICON[item.state] || "–"), text);
+        health.append(li);
+      });
+    }
+    const healthBox = detail.health
+      ? [el("p", "text-[11px] text-mute", "Verificado " + stampBR(detail.health.checked_at) + " · " + detail.health.label), health]
+      : [el("p", "text-sm text-mute", "Clique em Verificar agora para ver o checklist: perfil, busca, respostas (ghost ban) e conteúdo sensível.")];
+    extra.append(drawerSection("Saúde agora", ...healthBox));
     const checks = el("ol", "drawer-list");
     detail.checks.forEach((item) => {
       const li = el("li", "drawer-check");

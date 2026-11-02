@@ -2439,3 +2439,11 @@ button.kw-chip-text:hover .kw-chip-role { text-decoration: underline; text-under
 .kw-understood:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; margin-top: .55rem; }
 .kw-chips-row { display: flex; flex-wrap: wrap; gap: .35rem; }
 .kw-chips-row .kw-chip-text { padding-right: .75rem; }
+
+/* Saúde agora (gaveta da conta): checklist da última verificação, ícone na cor do estado. */
+.hc-list { display: grid; gap: .45rem; margin-top: .5rem; }
+.hc-item { --tone: var(--muted); display: flex; align-items: flex-start; gap: .65rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: .9rem; background: var(--field); }
+.hc-item.is-ok { --tone: var(--ok); } .hc-item.is-bad { --tone: var(--bad); border-color: var(--bad-line); } .hc-item.is-warn { --tone: var(--warn); }
+.hc-icon { display: inline-grid; place-items: center; flex-shrink: 0; width: 1.5rem; height: 1.5rem; border-radius: 999px; font-size: .78rem; font-weight: 700; color: var(--tone); border: 1px solid currentColor; }
+.hc-label { font-size: .85rem; color: var(--fg); }
+.hc-text { font-size: .75rem; color: var(--muted); line-height: 1.35; }
