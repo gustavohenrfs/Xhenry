@@ -49,6 +49,36 @@ def test_derive_status(overrides, expected):
     assert status_of(**overrides) == expected
 
 
+def test_search_that_hides_recent_posts_is_search_ban():
+    """Busca 200 mas sem nenhum dos posts recentes da timeline: a busca esconde a conta (search ban), mesmo sem
+    403/404. Antes o selo dizia "Saudável" e o Apify (que lê pela busca) não trazia nada da conta."""
+    hidden = status_of(searchable_ids=["1", "2"], search_ids=set())
+    assert hidden == HealthStatus.SEARCH_BAN
+    assert status_of(searchable_ids=["1", "2"], search_ids={"2"}) == HealthStatus.HEALTHY, "achou um: normal"
+    assert status_of(searchable_ids=[], search_ids=set()) == HealthStatus.HEALTHY, "post velho ou recém-postado não conta"
+    assert status_of(searchable_ids=["1"], search_ids=set(), search_status=None) == HealthStatus.HEALTHY
+    detail = derive_status(had_known_user_id=False, profile_status=200, profile_body=PROFILE, protected=False,
+                           timeline_status=200, timeline_ids=["1"], newest_tweet=None, search_status=200,
+                           search_ids=set(), searchable_ids=["1"])[1]
+    assert "busca" in detail.lower() and "apify" in detail.lower()
+
+
+def test_collect_health_flags_posts_missing_from_search(x_api):
+    from datetime import datetime, timedelta, timezone
+
+    def at(**ago):
+        return (datetime.now(timezone.utc) - timedelta(**ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    timeline = {"data": [{"id": "10", "author_id": "42", "created_at": at(hours=3)},
+                         {"id": "11", "author_id": "42", "created_at": at(minutes=5)},  # a busca ainda nem indexou
+                         {"id": "12", "author_id": "42", "created_at": at(days=9)}]}   # fora da busca de 7 dias
+    x_api(timeline=(200, timeline), search=(200, {"meta": {"result_count": 0}}))
+    signals = services.collect_health("saude")
+    assert signals["searchable_ids"] == ["10"]
+    x_api(timeline=(200, {"data": [timeline["data"][1], timeline["data"][2]]}), search=(200, {"meta": {"result_count": 0}}))
+    assert services.collect_health("saude")["searchable_ids"] == [], "sem post na janela: não dá para julgar"
+
+
 class FakeX:
     """Responde /users/by, /users/{id}/tweets e /tweets/search/recent conforme o cenário."""
 

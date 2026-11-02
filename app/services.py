@@ -437,7 +437,10 @@ def derive_status(
     newest_tweet: datetime | None,
     search_status: int | None,
     search_ids: set[str],
+    searchable_ids: list[str] | None = None,
 ) -> tuple[HealthStatus, str]:
+    """searchable_ids: posts da timeline que a busca recente já deveria mostrar (de SEARCH_LAG a SEARCH_DAYS
+    atrás). Se a busca responde 200 sem nenhum deles, a busca esconde a conta: search ban, mesmo sem 403/404."""
     text = error_text(profile_body).lower()
     if profile_status == 401:
         return HealthStatus.API_ERROR, "Token rejeitado pela API do X (401)."
@@ -463,6 +466,11 @@ def derive_status(
     if timeline_status not in {None, 200} or search_status not in {None, 200}:
         failed = timeline_status if timeline_status not in {None, 200} else search_status
         return HealthStatus.API_ERROR, f"Consulta de tweets falhou (HTTP {failed})."
+    if searchable_ids and search_status == 200 and not set(searchable_ids) & set(search_ids):
+        n = len(searchable_ids)
+        return HealthStatus.SEARCH_BAN, (
+            f"A busca do X não mostra nenhum dos {n} {'post recente' if n == 1 else 'posts recentes'} da conta "
+            "(search ban). O Apify lê pela busca, então a leitura não traz os posts dessa conta.")
     if not timeline_ids:
         return HealthStatus.HEALTHY, "Perfil existe e não há tweets recentes. Conta inativa, não é search ban."
     return HealthStatus.HEALTHY, "Perfil público sem 403/404 na timeline ou na busca."
@@ -619,6 +627,10 @@ def save_snapshot_only(db: Session, account: XAccount, metrics: dict | None) -> 
     rebuild_folder_day(db, account.folder_id, day)
 
 
+SEARCH_LAG = timedelta(minutes=30)  # post mais novo que isso pode ainda não estar na busca
+SEARCH_DAYS = timedelta(days=6)     # a busca recente da API cobre 7 dias; 6 deixa folga
+
+
 def collect_health(username: str, token: str = "") -> dict[str, Any]:
     """Health check via API oficial. Não grava métricas de tweets."""
     profile_status, profile_body = lookup_user(username, token)
@@ -639,6 +651,9 @@ def collect_health(username: str, token: str = "") -> dict[str, Any]:
         search_ids = {str(row["id"]) for row in tweet_rows(search_body, user_id)}
     posted = [parse_time(row.get("created_at")) for row in timeline]
     posted = [item for item in posted if item is not None]
+    now = now_utc()
+    searchable = [str(row["id"]) for row in timeline
+                  if (when := parse_time(row.get("created_at"))) is not None and now - SEARCH_DAYS <= when <= now - SEARCH_LAG]
     return {
         "profile_status": profile_status,
         "profile_body": profile_body,
@@ -650,6 +665,7 @@ def collect_health(username: str, token: str = "") -> dict[str, Any]:
         "newest_tweet": max(posted) if posted else None,
         "search_status": search_status,
         "search_ids": search_ids,
+        "searchable_ids": searchable,
     }
 
 
@@ -665,6 +681,7 @@ def persist_account(db: Session, account: XAccount, signals: dict[str, Any]) -> 
         newest_tweet=signals["newest_tweet"],
         search_status=signals["search_status"],
         search_ids=signals["search_ids"],
+        searchable_ids=signals.get("searchable_ids"),
     )
     apply_profile(account, signals["data"])
     checked = now_utc()
