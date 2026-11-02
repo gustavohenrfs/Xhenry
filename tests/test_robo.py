@@ -135,13 +135,18 @@ def test_apify_input_and_actor(monkeypatch):
     assert robo.apify_actor() == "apidojo~tweet-scraper"
     monkeypatch.setenv("APIFY_ACTOR", "outro/ator")
     assert robo.apify_actor() == "outro~ator"
-    # Uma busca por conta, só com os posts de hoje (desde a meia-noite de Brasília): uma conta que posta muito
-    # não toma o lugar da outra no limite do pedido, e não se paga por post antigo que o robô jogaria fora.
+    # Regras do Tweet Scraper V2: até 5 buscas por execução e cada busca precisa trazer bastante coisa. As contas
+    # vão juntas numa busca ("from:a OR from:b"), só com os posts desde hoje (since:, o formato da documentação).
     midnight = datetime(2026, 11, 2, 0, 0, tzinfo=robo.BR_TZ)
-    since = int(midnight.timestamp())
     assert robo.apify_input(["a", "b"], midnight) == {
-        "searchTerms": [f"from:a since_time:{since}", f"from:b since_time:{since}"],
-        "maxItems": 2 * robo.APIFY_TODAY_PER_ACCOUNT, "sort": "Latest"}
+        "searchTerms": ["(from:a OR from:b) since:2026-11-02"],
+        "maxItems": max(robo.APIFY_MIN_PER_QUERY, 2 * robo.APIFY_TODAY_PER_ACCOUNT), "sort": "Latest"}
+    assert robo.apify_input(["a"], midnight)["searchTerms"] == ["from:a since:2026-11-02"]
+    many = [f"c{n}" for n in range(robo.APIFY_QUERY_ACCOUNTS + 1)]
+    terms = robo.apify_input(many, midnight)["searchTerms"]
+    assert len(terms) == 2 and terms[1] == f"from:c{robo.APIFY_QUERY_ACCOUNTS} since:2026-11-02"
+    assert robo.APIFY_MAX_ACCOUNTS <= robo.APIFY_MAX_QUERIES * robo.APIFY_QUERY_ACCOUNTS and robo.APIFY_MAX_QUERIES <= 5
+    assert robo.APIFY_PARALLEL == 1, "o ator só aceita uma execução por vez"
 
 
 @pytest.mark.parametrize(("code", "text"), [(401, "recusou o token"), (402, "sem crédito"), (500, "respondeu 500")])
@@ -176,8 +181,8 @@ def test_apify_fetch_returns_items(monkeypatch):
 
     monkeypatch.setattr(robo.urllib.request, "urlopen", answer)
     assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM]
-    since = int(robo.today_start_br().timestamp())
-    assert sent["body"]["searchTerms"] == [f"from:fulana since_time:{since}"], "só os posts de hoje da conta"
+    day = robo.today_start_br().date().isoformat()
+    assert sent["body"]["searchTerms"] == [f"from:fulana since:{day}"], "só os posts de hoje da conta"
 
 
 @pytest.mark.parametrize(("item", "repost"), [

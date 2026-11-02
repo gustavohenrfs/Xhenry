@@ -241,7 +241,9 @@ APIFY_TEST_WAYS = (
     ("busca_hoje", "Busca de hoje (a leitura normal)"),
     ("busca", "Busca sem data"),
     ("perfil", "Perfil da conta (a reserva)"),
+    ("unlimited", "Perfil pelo Twitter Scraper Unlimited"),
 )
+VIEW_FIELDS = ("viewCount", "view_count", "views", "impression_count")
 
 
 def _test_summary(robo_mod: Any, handle: str, items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -253,6 +255,8 @@ def _test_summary(robo_mod: Any, handle: str, items: list[dict[str, Any]]) -> di
     newest = max(dated, key=lambda pair: pair[0], default=None)
     return {
         "items": len(items), "posts": len(own), "today": sum(1 for when, _ in dated if when >= midnight),
+        # O ator devolve o campo de views? Sem ele, o painel não teria as views (o Unlimited não documenta).
+        "has_views": None if newest is None else any(field in newest[1] for field in VIEW_FIELDS),
         "newest": None if newest is None else {
             "created_at": newest[0].isoformat(), "views": robo_mod.tweet_metrics(newest[1])["view_count"],
             "likes": robo_mod.tweet_metrics(newest[1])["like_count"], "text": (robo_mod.tweet_text_of(newest[1]) or "")[:100]},
@@ -261,10 +265,9 @@ def _test_summary(robo_mod: Any, handle: str, items: list[dict[str, Any]]) -> di
 
 @user_router.post("/api/apify/test/{account_id}")
 def test_apify_reading(account_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Pede a mesma conta de três jeitos (gasta crédito do Apify do usuário: três runs pequenos) e mostra o que
-    cada um trouxe: é como se descobre se a busca do Apify esconde a conta."""
-    from concurrent.futures import ThreadPoolExecutor
-
+    """Pede a mesma conta de quatro jeitos (gasta crédito do Apify do usuário: quatro execuções pequenas, uma
+    depois da outra, porque o ator só aceita uma por vez) e mostra o que cada um trouxe: busca de hoje, busca
+    sem data, perfil e o perfil pelo Twitter Scraper Unlimited (que não pede mínimo de 50 tweets por busca)."""
     import robo as robo_mod
 
     account = owned_account(db, user.id, account_id)
@@ -274,22 +277,23 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
     handle = account.username
     payloads = {
         "busca_hoje": robo_mod.apify_input([handle]),
-        "busca": {"searchTerms": [f"from:{handle}"], "maxItems": 10, "sort": "Latest"},
+        "busca": {"searchTerms": [f"from:{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
         "perfil": robo_mod.apify_profile_input(handle),
+        "unlimited": {"startUrls": [f"https://x.com/{handle}"], "maxItems": 20, "sort": "Latest"},
     }
-
-    def run(key: str) -> tuple[str, list[dict[str, Any]] | None, str | None]:
+    answers: dict[str, tuple[list[dict[str, Any]] | None, str | None]] = {}
+    for key in payloads:
         try:
-            return key, robo_mod.apify_call(token, payloads[key]), None
+            actor = robo_mod.APIFY_UNLIMITED if key == "unlimited" else None
+            answers[key] = (robo_mod.apify_call(token, payloads[key], actor) if actor else
+                            robo_mod.apify_call(token, payloads[key]), None)
         except robo_mod.ApifyError as exc:
-            return key, None, str(exc)
-
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        answers = {key: (items, error) for key, items, error in pool.map(run, payloads)}
+            answers[key] = (None, str(exc))
     variants = []
     for key, label in APIFY_TEST_WAYS:
         items, error = answers[key]
-        summary = _test_summary(robo_mod, handle, items) if items is not None else {"items": 0, "posts": 0, "today": 0, "newest": None}
+        summary = (_test_summary(robo_mod, handle, items) if items is not None
+                   else {"items": 0, "posts": 0, "today": 0, "newest": None, "has_views": None})
         variants.append({"key": key, "label": label, "error": error, **summary})
     ways = {v["key"]: v for v in variants}
     if ways["busca_hoje"]["today"]:
@@ -297,6 +301,10 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
     elif ways["perfil"]["today"]:
         verdict = ("A busca do Apify esconde essa conta, mas o perfil traz os posts de hoje. A leitura já usa o "
                    "perfil como reserva para ela.")
+    elif ways["unlimited"]["today"]:
+        verdict = ("Só o Twitter Scraper Unlimited trouxe os posts de hoje"
+                   + (" com as views." if ways["unlimited"]["has_views"] else ", mas SEM o campo de views.")
+                   + " Mande esse resultado para trocar o ator da leitura.")
     elif ways["perfil"]["posts"] or ways["busca"]["posts"]:
         verdict = "O Apify acha a conta, mas nenhum post de hoje: ela não postou hoje (ou o post é só repost)."
     else:

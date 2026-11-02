@@ -444,19 +444,23 @@ def test_apify_reading_test_shows_what_each_way_brings(client, monkeypatch):
     posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
     seen = []
 
-    def call(token, payload):
-        seen.append((token, payload))
+    def call(token, payload, actor=None):
+        seen.append((token, payload, actor))
+        if "startUrls" in payload and actor:
+            return [{"id": "8", "createdAt": posted, "likeCount": 1, "text": "oi", "author": {"userName": handle}}]
         if "startUrls" in payload:
             return [{"id": "7", "createdAt": posted, "viewCount": 17, "likeCount": 1, "text": "oi", "author": {"userName": handle}}]
-        if "since_time" in payload["searchTerms"][0]:
+        if "since:" in payload["searchTerms"][0]:
             return []
         raise robo.ApifyError("o Apify respondeu 500.")
 
     monkeypatch.setattr(robo, "apify_call", call)
     body = client.post(f"/api/apify/test/{account_id}", headers=headers).json()
     ways = {item["key"]: item for item in body["variants"]}
-    assert ways["perfil"]["today"] == 1 and ways["perfil"]["newest"]["views"] == 17
+    assert ways["perfil"]["today"] == 1 and ways["perfil"]["newest"]["views"] == 17 and ways["perfil"]["has_views"]
     assert ways["busca_hoje"]["today"] == 0 and ways["busca"]["error"] == "o Apify respondeu 500."
-    assert "perfil" in body["verdict"].lower() and {t for t, _ in seen} == {"tok-teste"}
+    assert ways["unlimited"]["today"] == 1 and ways["unlimited"]["has_views"] is False, "sem campo de views: a tela avisa"
+    assert "perfil" in body["verdict"].lower() and {t for t, _, _ in seen} == {"tok-teste"}
+    assert [a for _, _, a in seen].count("apidojo~twitter-scraper-lite") == 1, "a 4ª linha usa o Unlimited"
     other, other_account = make_account(make_user())
     assert client.post(f"/api/apify/test/{other_account}", headers=headers).status_code == 404

@@ -3644,7 +3644,7 @@ function drawerSection(title, ...children) {
 }
 async function testApifyReading(accountId, box, button) {
   button.disabled = true;
-  setCostLabel(button, "Testando no Apify… (até 1 min)");
+  setCostLabel(button, "Testando no Apify… (até 3 min)");
   try {
     const data = await api("/api/apify/test/" + accountId, { method: "POST" });
     const list = el("ul", "hc-list");
@@ -3652,7 +3652,8 @@ async function testApifyReading(accountId, box, button) {
       const state = way.error ? "bad" : way.today ? "ok" : way.posts ? "warn" : "na";
       const li = el("li", "hc-item is-" + state);
       const text = el("div", "min-w-0");
-      const newest = way.newest ? " · mais novo: " + num(way.newest.views) + " views, " + stampBR(way.newest.created_at) : "";
+      const newest = way.newest ? (way.has_views === false ? " · mais novo: SEM o campo de views" : " · mais novo: " + num(way.newest.views) + " views")
+        + ", " + stampBR(way.newest.created_at) : "";
       text.append(el("p", "hc-label", way.label),
         el("p", "hc-text", way.error ? way.error : way.today + (way.today === 1 ? " post de hoje" : " posts de hoje") + " (" + way.posts + " no total)" + newest));
       li.append(el("span", "hc-icon", { ok: "✓", bad: "✕", warn: "!", na: "–" }[state]), text);

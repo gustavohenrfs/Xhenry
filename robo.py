@@ -606,11 +606,17 @@ APIFY_API = "https://api.apify.com/v2"
 APIFY_ACTOR_DEFAULT = "apidojo~tweet-scraper"
 APIFY_INTERVAL_DEFAULT = 60
 APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
+# Regras do Tweet Scraper V2 (apidojo/tweet-scraper, documentação do ator): no máximo 1 execução por vez, com
+# até 5 buscas; cada busca precisa trazer pelo menos 50 tweets; não repetir a mesma busca em intervalo curto.
 APIFY_TODAY_PER_ACCOUNT = 60  # teto de posts de hoje por conta na leitura (só se paga o que vier)
-APIFY_PROFILE_ITEMS = 15  # reserva pelo perfil: os posts mais novos da conta que a busca não trouxe
-APIFY_PROFILE_MAX = 25  # contas lidas pelo perfil numa leitura (uma chamada por conta, em paralelo)
-APIFY_MAX_ACCOUNTS = 25  # contas por chamada; mais que isso vira lotes em paralelo
-APIFY_PARALLEL = 4  # chamadas ao Apify ao mesmo tempo (cada uma é um run do ator)
+APIFY_MIN_PER_QUERY = 50  # o mínimo que o ator pede por busca
+APIFY_QUERY_ACCOUNTS = 8  # contas juntas numa busca ("(from:a OR from:b …) since:dia")
+APIFY_MAX_QUERIES = 5  # buscas por execução
+APIFY_MAX_ACCOUNTS = APIFY_QUERY_ACCOUNTS * APIFY_MAX_QUERIES  # contas por execução; mais que isso vira outra, em seguida
+APIFY_PARALLEL = 1  # o ator só aceita uma execução por vez
+APIFY_PROFILE_ITEMS = 50  # reserva pelo perfil: os posts mais novos da conta (o mínimo do ator)
+APIFY_PROFILE_MAX = 5  # contas lidas pelo perfil numa leitura (uma execução cada, uma depois da outra)
+APIFY_UNLIMITED = "apidojo~twitter-scraper-lite"  # Twitter Scraper Unlimited: sem mínimo por busca (teste)
 APIFY_ROUND_ACCOUNTS = 200  # contas de um usuário numa passada
 NO_APIFY_TOKEN = "Token do Apify em falta. Cole o seu em Configurações para o robô ler as suas contas."
 
@@ -629,15 +635,15 @@ def apify_interval() -> timedelta:
 
 
 def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, Any]:
-    """Uma busca por conta só com os posts de hoje ("from:conta since_time:<meia-noite de Brasília>").
-
-    Antes era um pedido só com todas as @ (twitterHandles) e 20 itens por conta no total, do mais novo
-    para o mais velho: as contas que postavam muito enchiam o limite e uma conta que postou cedo sumia das
-    leituras seguintes (o post ficava parado nas views da primeira leitura). Com o filtro de hoje, o limite
-    só serve de teto e não se paga por post antigo que o robô jogaria fora."""
-    stamp = int((since or today_start_br()).timestamp())
-    return {"searchTerms": [f"from:{handle} since_time:{stamp}" for handle in handles],
-            "maxItems": APIFY_TODAY_PER_ACCOUNT * len(handles), "sort": "Latest"}
+    """Os posts de hoje das contas: até APIFY_QUERY_ACCOUNTS contas juntas por busca
+    ("(from:a OR from:b) since:2026-11-02"), dentro das regras do ator (até 5 buscas por execução, buscas
+    maiores). since: é a data de Brasília; o X lê em UTC, então vem um pouco de ontem, que o robô descarta."""
+    day = (since or today_start_br()).date().isoformat()
+    groups = [handles[i:i + APIFY_QUERY_ACCOUNTS] for i in range(0, len(handles), APIFY_QUERY_ACCOUNTS)]
+    terms = [(f"from:{g[0]}" if len(g) == 1 else "(" + " OR ".join(f"from:{h}" for h in g) + ")") + f" since:{day}"
+             for g in groups]
+    return {"searchTerms": terms, "maxItems": max(APIFY_MIN_PER_QUERY * len(terms), APIFY_TODAY_PER_ACCOUNT * len(handles)),
+            "sort": "Latest"}
 
 
 def apify_profile_input(handle: str) -> dict[str, Any]:
@@ -656,9 +662,9 @@ def apify_profile(token: str, handle: str) -> list[dict[str, Any]]:
     return apify_call(token, apify_profile_input(handle))
 
 
-def apify_call(token: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Roda o ator e devolve os itens do dataset (posts). Erros viram ApifyError com o motivo."""
-    url = f"{APIFY_API}/acts/{apify_actor()}/run-sync-get-dataset-items?timeout={APIFY_TIMEOUT - 10}"
+def apify_call(token: str, payload: dict[str, Any], actor: str | None = None) -> list[dict[str, Any]]:
+    """Roda o ator (o do .env, ou outro com actor) e devolve os itens do dataset. Erros viram ApifyError."""
+    url = f"{APIFY_API}/acts/{actor or apify_actor()}/run-sync-get-dataset-items?timeout={APIFY_TIMEOUT - 10}"
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),
@@ -843,9 +849,8 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             log.warning("perfil de @%s pelo Apify falhou: %s", handle, exc)
             return handle, []
 
-    if missing:
-        with ThreadPoolExecutor(max_workers=min(APIFY_PARALLEL, len(missing)), thread_name_prefix="apify-perfil") as pool:
-            by_profile = dict(pool.map(from_profile, missing[:APIFY_PROFILE_MAX]))
+    # Uma execução de cada vez (regra do ator).
+    by_profile = dict(from_profile(handle) for handle in missing[:APIFY_PROFILE_MAX])
     answers = [items + [i for account in batch for i in by_profile.get(account["username"], [])]
                for batch, items in zip(batches, answers)]
     saved = 0
