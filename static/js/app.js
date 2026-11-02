@@ -3973,7 +3973,7 @@ document.querySelectorAll("[data-radar-heat]").forEach((button) => button.addEve
   paintRadarControls();
   paintHotQuestion();
   loadRadar({ silent: true });
-  if (kwChips.length) kwChanged(false);
+  if (kwHasInput()) kwChanged(false);
 }));
 document.getElementById("radar-engage").addEventListener("change", (event) => {
   radarEngage = event.target.checked;
@@ -4486,6 +4486,55 @@ let kwBusy = false;
 let kwTimer = null;
 let kwRecent = [];
 try { kwRecent = JSON.parse(localStorage.getItem("kw_recent") || "[]").filter((r) => Array.isArray(r)).slice(0, 8); } catch { kwRecent = []; }
+// "Frase pronta" (padrão): a frase inteira vai para o servidor, que separa gancho, quem, fato e com quem e
+// reescreve a mesma notícia; "Palavras-chave": os chips.
+let kwMode = "frase";
+try { kwMode = localStorage.getItem("kw_mode") === "palavras" ? "palavras" : "frase"; } catch { /* sem storage */ }
+let kwPhrase = "";
+let kwPhraseRecent = [];
+try { kwPhraseRecent = JSON.parse(localStorage.getItem("kw_recent_phrases") || "[]").filter((p) => typeof p === "string").slice(0, 8); } catch { kwPhraseRecent = []; }
+function kwHasInput() { return kwMode === "frase" ? Boolean(kwPhrase) : kwChips.length > 0; }
+function kwChip(text, role) {
+  const li = el("li", "kw-chip" + (role ? " is-" + role : ""));
+  const label = el("span", "kw-chip-text", text);
+  if (role) label.append(el("small", "kw-chip-role", KW_ROLES[role]));
+  li.append(label);
+  return li;
+}
+// "Entendi assim": o que o servidor separou da frase, com um botão para ajustar como palavras-chave.
+function paintUnderstood(terms, phrase) {
+  const host = document.getElementById("kw-understood");
+  host.hidden = kwMode !== "frase" || !terms;
+  if (host.hidden) return;
+  const kinds = { noticia: "notícia", promessa: "promessa", pergunta: "pergunta", pessoal: "frase sua" };
+  const chips = el("ul", "kw-chips-row");
+  chips.append(...terms.map((term) => kwChip(term.text, term.role)));
+  const label = el("span", "text-[11px] text-mute", "Entendi assim" + (phrase && kinds[phrase.kind] ? " (" + kinds[phrase.kind] + ")" : "") + ":");
+  host.replaceChildren(label, chips);
+  if (terms.some((term) => term.role !== "gancho")) {
+    const edit = el("button", "kw-recent-chip", "Ajustar como palavras-chave");
+    edit.type = "button";
+    edit.addEventListener("click", () => {
+      kwChips = terms.map((term) => ({ text: term.text, role: term.role, forced: term.role === "nome" }));
+      setKwMode("palavras");
+    });
+    host.append(edit);
+  }
+}
+function setKwMode(mode) {
+  kwMode = mode;
+  try { localStorage.setItem("kw_mode", mode); } catch { /* sem storage */ }
+  document.querySelectorAll("[data-kw-mode]").forEach((button) => button.setAttribute("aria-checked", String(button.dataset.kwMode === mode)));
+  const phrase = mode === "frase";
+  document.getElementById("kw-phrase-form").hidden = !phrase;
+  document.getElementById("kw-form").hidden = phrase;
+  document.getElementById("kw-legend").hidden = phrase;
+  document.getElementById("kw-understood").hidden = true;
+  document.getElementById("kw-help").textContent = phrase
+    ? "Cole uma frase pronta: ele entende quem fez o quê e reescreve a mesma notícia em todos os formatos, da maior nota viral para a menor. Grátis e sem fim."
+    : "Digite as palavras do assunto, separadas por vírgula. Ele monta manchete, pergunta, polêmica, enquete, desafio, promessa e confissão com elas. Grátis e sem fim.";
+  kwChanged(true);
+}
 function kwTermsParam() {
   return kwChips.map((c) => c.forced ? c.text + "=" + c.role : c.text).join(", ");
 }
@@ -4521,6 +4570,23 @@ function paintKwChips() {
 }
 function paintKwRecent() {
   const host = document.getElementById("kw-recent");
+  if (kwMode === "frase") {
+    const phrases = kwPhraseRecent.filter((p) => p !== kwPhrase);
+    host.hidden = !phrases.length;
+    if (!phrases.length) return;
+    host.replaceChildren(el("span", "text-[11px] text-mute", "Recentes"), ...phrases.map((text) => {
+      const chip = el("button", "kw-recent-chip", text.length > 70 ? text.slice(0, 70) + "…" : text);
+      chip.type = "button";
+      chip.title = text;
+      chip.addEventListener("click", () => {
+        document.getElementById("kw-phrase").value = text;
+        kwPhrase = text;
+        kwChanged(true);
+      });
+      return chip;
+    }));
+    return;
+  }
   const current = kwTermsParam().toLowerCase();
   const list = kwRecent.filter((set) => set.join(", ").toLowerCase() !== current);
   host.hidden = !list.length;
@@ -4540,7 +4606,12 @@ function paintKwRecent() {
   }));
 }
 function rememberKw() {
-  const set = kwChips.map((c) => c.forced ? c.text + "=" + c.role : c.text);
+  if (kwMode === "frase") {
+    kwPhraseRecent = [kwPhrase, ...kwPhraseRecent.filter((p) => p !== kwPhrase)].slice(0, 8);
+    try { localStorage.setItem("kw_recent_phrases", JSON.stringify(kwPhraseRecent)); } catch { /* sem storage */ }
+    return;
+  }
+  const set =kwChips.map((c) => c.forced ? c.text + "=" + c.role : c.text);
   const key = set.join(", ").toLowerCase();
   kwRecent = [set, ...kwRecent.filter((r) => r.join(", ").toLowerCase() !== key)].slice(0, 8);
   try { localStorage.setItem("kw_recent", JSON.stringify(kwRecent)); } catch { /* sem storage */ }
@@ -4582,12 +4653,13 @@ function kwStatus(text) { document.getElementById("kw-status").textContent = tex
 function kwChanged(reset) {
   paintKwChips();
   clearTimeout(kwTimer);
-  if (!kwChips.length) {
+  if (!kwHasInput()) {
     kwItems = [];
     kwSeen = new Set();
     document.getElementById("kw-list").replaceChildren();
     document.getElementById("kw-more").hidden = true;
     document.getElementById("kw-filters").hidden = true;
+    document.getElementById("kw-understood").hidden = true;
     kwStatus("");
     paintKwRecent();
     return;
@@ -4596,8 +4668,9 @@ function kwChanged(reset) {
   kwTimer = setTimeout(() => kwGenerate(false), 250);
 }
 async function kwGenerate(append) {
-  if (!kwChips.length || kwBusy) return;
+  if (!kwHasInput() || kwBusy) return;
   kwBusy = true;
+  const phraseMode = kwMode === "frase";
   const list = document.getElementById("kw-list");
   const next = document.getElementById("kw-next");
   if (!append) { kwPage = 0; kwMix = 0; kwItems = []; kwSeen = new Set(); list.classList.add("is-loading"); }
@@ -4605,10 +4678,12 @@ async function kwGenerate(append) {
   try {
     let added = [];
     for (let tries = 0; tries < 4 && added.length < 6; tries += 1) {
-      const query = new URLSearchParams({ terms: kwTermsParam(), heat: radarHeat, page: String(kwPage), mix: String(kwMix) });
+      const query = new URLSearchParams({ heat: radarHeat, page: String(kwPage), mix: String(kwMix) });
+      if (phraseMode) query.set("phrase", kwPhrase); else query.set("terms", kwTermsParam());
       if (kwFmt) query.set("fmt", kwFmt);
       const data = await api("/api/radar/keywords?" + query.toString());
-      data.terms.forEach((term, index) => { if (kwChips[index]) Object.assign(kwChips[index], { text: term.text, role: term.role, forced: term.forced }); });
+      if (phraseMode) paintUnderstood(data.terms, data.phrase);
+      else data.terms.forEach((term, index) => { if (kwChips[index]) Object.assign(kwChips[index], { text: term.text, role: term.role, forced: term.forced }); });
       kwFormats = data.formats;
       kwLabels = data.format_labels;
       const fresh = data.items.filter((item) => !kwSeen.has(item.text));
@@ -4627,7 +4702,7 @@ async function kwGenerate(append) {
     document.getElementById("kw-more").hidden = false;
     kwStatus(kwItems.length + " frases na tela" + (kwMix ? " · mistura " + (kwMix + 1) : "") + (radarHeat === "quente" ? " · nível quente" : " · nível leve"));
   } catch (error) {
-    if (!append) list.replaceChildren();
+    if (!append) { list.replaceChildren(); document.getElementById("kw-understood").hidden = true; }
     document.getElementById("kw-more").hidden = !kwItems.length;
     kwStatus(error.message || "Não gerou as frases.");
   }
@@ -4637,12 +4712,13 @@ async function kwGenerate(append) {
 }
 async function kwGrok() {
   const button = document.getElementById("kw-grok");
-  if (!kwChips.length || button.disabled) return;
+  if (!kwHasInput() || button.disabled) return;
   button.disabled = true;
   setCostLabel(button, "Pedindo ao Grok…");
+  const body = kwMode === "frase" ? { phrase: kwPhrase, heat: radarHeat } : { terms: kwTermsParam(), heat: radarHeat };
   try {
     const data = await api("/api/radar/keywords/grok", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ terms: kwTermsParam(), heat: radarHeat }) });
+      body: JSON.stringify(body) });
     const fresh = data.items.filter((item) => !kwSeen.has(item.text));
     fresh.forEach((item) => kwSeen.add(item.text));
     document.getElementById("kw-list").prepend(...fresh.map((item) => kwRow(item, true)));
@@ -4659,10 +4735,24 @@ function useInKeywords(title) {
   if (state.tab !== "radar") setTab("radar");
   const card = document.getElementById("radar-kw");
   card.scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth", block: "start" });
-  kwChanged(true);
+  setKwMode("palavras");
   document.getElementById("kw-input").focus({ preventScroll: true });
 }
 function setupKeywords() {
+  const phraseBox = document.getElementById("kw-phrase");
+  const sendPhrase = () => {
+    const text = phraseBox.value.replace(/\s+/g, " ").trim();
+    if (!text) return;
+    kwPhrase = text;
+    kwChanged(true);
+  };
+  document.getElementById("kw-phrase-form").addEventListener("submit", (event) => { event.preventDefault(); sendPhrase(); });
+  phraseBox.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendPhrase(); }  // Enter gera; Shift+Enter quebra a linha
+  });
+  document.querySelectorAll("[data-kw-mode]").forEach((button) => button.addEventListener("click", () => {
+    if (kwMode !== button.dataset.kwMode) setKwMode(button.dataset.kwMode);
+  }));
   const form = document.getElementById("kw-form");
   const input = document.getElementById("kw-input");
   form.addEventListener("submit", (event) => {
@@ -4696,7 +4786,7 @@ function setupKeywords() {
   const next = document.getElementById("kw-next");
   next.classList.add("cost-btn");
   next.append(costBadge("free"));
-  paintKwRecent();
+  setKwMode(kwMode);
 }
 setupKeywords();
 // Posts que estão engajando: só no clique (gasta Apify de quem clicou; 30 min de cache para todos).

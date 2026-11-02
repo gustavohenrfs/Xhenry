@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=47">
+  <link rel="stylesheet" href="/static/css/styles.css?v=48">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=65"></script>
+  <script defer src="/static/js/app.js?v=66"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -381,16 +381,25 @@
           <article id="radar-kw" class="glow kw-card rounded-3xl border border-neon/20 bg-card p-4" aria-labelledby="kw-title">
             <div class="hot-block-head">
               <div class="min-w-0 flex-1">
-                <h3 id="kw-title" class="font-display text-xl text-white">Gerador por palavras-chave</h3>
-                <p class="text-xs text-mute">Digite as palavras do assunto, separadas por vírgula. Ele monta manchete, pergunta, polêmica, enquete, desafio, promessa e confissão com elas, da maior nota viral para a menor. Grátis e sem fim.</p>
+                <h3 id="kw-title" class="font-display text-xl text-white">Gerador de frases</h3>
+                <p id="kw-help" class="text-xs text-mute">Cole uma frase pronta: ele entende quem fez o quê e reescreve a mesma notícia em todos os formatos, da maior nota viral para a menor. Grátis e sem fim.</p>
+              </div>
+              <div class="radar-seg" role="radiogroup" aria-label="Como gerar">
+                <button type="button" role="radio" data-kw-mode="frase" aria-checked="true">Frase pronta</button>
+                <button type="button" role="radio" data-kw-mode="palavras" aria-checked="false">Palavras-chave</button>
               </div>
             </div>
-            <form id="kw-form" class="kw-field" autocomplete="off">
+            <form id="kw-phrase-form" class="kw-field is-phrase" autocomplete="off">
+              <textarea id="kw-phrase" rows="2" maxlength="280" placeholder="Ex.: VAZOU!! Pitbull amigo do Fejuca faz live com Elisa Sanches" aria-label="Frase pronta" class="kw-input kw-phrase"></textarea>
+              <button type="submit" class="kw-go">Gerar</button>
+            </form>
+            <div id="kw-understood" class="kw-understood" hidden></div>
+            <form id="kw-form" class="kw-field" autocomplete="off" hidden>
               <ul id="kw-chips" class="kw-chips" aria-label="Palavras-chave"></ul>
               <input id="kw-input" maxlength="200" placeholder="Ex.: vazou, Pitbull amigo do Fejuca, Elisa Sanches, live" aria-label="Nova palavra-chave" aria-describedby="kw-legend" class="kw-input">
               <button id="kw-go" type="submit" class="kw-go">Gerar</button>
             </form>
-            <p id="kw-legend" class="kw-legend"><span class="kw-dot is-gancho"></span>gancho <span class="kw-dot is-nome"></span>nome <span class="kw-dot is-fato"></span>fato <span class="kw-dot is-tema"></span>tema · toque num nome ou tema para trocar o papel</p>
+            <p id="kw-legend" class="kw-legend" hidden><span class="kw-dot is-gancho"></span>gancho <span class="kw-dot is-nome"></span>nome <span class="kw-dot is-fato"></span>fato <span class="kw-dot is-tema"></span>tema · toque num nome ou tema para trocar o papel</p>
             <div id="kw-recent" class="kw-recent" hidden></div>
             <div id="kw-filters" class="mt-3 flex flex-wrap gap-1.5" aria-label="Filtrar por formato" hidden></div>
             <p id="kw-status" class="mt-2 text-[11px] text-mute" role="status"></p>

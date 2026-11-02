@@ -417,22 +417,29 @@ def tier_of(score: int) -> tuple[str, str]:
 
 
 def ordered(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Melhor nota primeiro, mas cada página de 12 com no máximo 3 do mesmo formato e 5 abrindo com o gancho em
-    caixa alta (variedade)."""
+    """Melhor nota primeiro, mas cada página de 12 com no máximo 3 do mesmo formato, 5 abrindo com o gancho em
+    caixa alta e nunca a mesma frase só com outro gancho (variedade)."""
     rest = sorted(items, key=lambda i: (-i["score"], i["text"]))
     out: list[dict[str, Any]] = []
     while rest:
         page: list[dict[str, Any]] = []
         count: dict[str, int] = {}
+        shapes: set[str] = set()  # a mesma frase só trocando o gancho ("EITA!!"/"BABADO!!") fica para outra página
+
+        def shape(item: dict[str, Any]) -> str:
+            return src.norm(HOOK_START.sub("", item["text"]))
+
         for fmt in dict.fromkeys(i["fmt"] for i in rest):  # a melhor de cada formato abre a página
             if len(page) >= PAGE:
                 break
             full = count.get("!!", 0) >= 5
-            item = next((i for i in rest if i["fmt"] == fmt and not (full and HOOK_START.match(i["text"]))), None)
+            item = next((i for i in rest if i["fmt"] == fmt and not (full and HOOK_START.match(i["text"]))
+                         and shape(i) not in shapes), None)
             if item is None:
                 continue
             hooked = bool(HOOK_START.match(item["text"]))
             page.append(item)
+            shapes.add(shape(item))
             count[fmt] = 1
             count["!!"] = count.get("!!", 0) + hooked
             rest.remove(item)
@@ -440,8 +447,9 @@ def ordered(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if len(page) >= PAGE:
                 break
             hooked = bool(HOOK_START.match(item["text"]))
-            if count.get(item["fmt"], 0) < 3 and (not hooked or count.get("!!", 0) < 5):
+            if count.get(item["fmt"], 0) < 3 and (not hooked or count.get("!!", 0) < 5) and shape(item) not in shapes:
                 page.append(item)
+                shapes.add(shape(item))
                 count[item["fmt"]] = count.get(item["fmt"], 0) + 1
                 count["!!"] = count.get("!!", 0) + hooked
                 rest.remove(item)
@@ -457,28 +465,32 @@ def ordered(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def generate(raw: str | list[str], heat: str = "quente", page: int = 0, mix: int = 0, fmt: str | None = None,
              potential: dict[str, Any] | None = None, now: datetime | None = None) -> dict[str, Any]:
     info = parse(raw)
-    lines = bank(raw, heat, mix, now)
+    return _paged(bank(raw, heat, mix, now), info["roles"], info["terms"], heat, page, mix, fmt, potential)
+
+
+def _paged(lines: list[tuple[str, str]], roles: list[dict[str, Any]], terms: list[str], heat: str, page: int, mix: int,
+           fmt: str | None, potential: dict[str, Any] | None) -> dict[str, Any]:
     formats: dict[str, int] = {}
     for f, _ in lines:
         formats[f] = formats.get(f, 0) + 1
     chosen = [(f, line) for f, line in lines if not fmt or f == fmt]
     items = ordered([{"text": line, "fmt": f, "fmt_label": FORMATS.get(f, f),
-                      "score": viral_score(line, f, info["terms"], potential)} for f, line in chosen])
+                      "score": viral_score(line, f, terms, potential)} for f, line in chosen])
     for item in items:
         item["tier"], item["tier_label"] = tier_of(item["score"])
     pages = max(1, -(-len(items) // PAGE))
     start = page * PAGE
-    return {"terms": info["roles"], "heat": heat, "mix": mix, "fmt": fmt, "page": page, "pages": pages,
+    return {"terms": roles, "heat": heat, "mix": mix, "fmt": fmt, "page": page, "pages": pages,
             "total": len(items), "done": start + PAGE >= len(items), "formats": formats,
             "format_labels": FORMATS, "items": items[start:start + PAGE]}
 
 
-def grok_prompt(raw: str | list[str], heat: str = "quente", refs: list[str] | None = None) -> str:
-    """Turbo com Grok: as mesmas palavras, todos os formatos, as mesmas regras."""
+def grok_prompt(raw: str | list[str], heat: str = "quente", refs: list[str] | None = None, phrase: str | None = None) -> str:
+    """Turbo com Grok: as mesmas palavras (ou a mesma frase pronta), todos os formatos, as mesmas regras."""
     from app.radar_ideas import FORMAT_GUIDE, OWNER_EXAMPLES_LEVE, OWNER_EXAMPLES_QUENTE
 
-    info = parse(raw)
-    roles = ", ".join(f"{r['text']} ({r['role']})" for r in info["roles"])
+    info = read_phrase(phrase) if phrase else parse(raw)
+    roles = ", ".join(f"{r['text']} ({r['role']})" for r in info["roles"]) or "as da frase"
     owner = OWNER_EXAMPLES_QUENTE if heat == "quente" else OWNER_EXAMPLES_LEVE
     lines = [
         "Você é a melhor copywriter de contas de texto no X, em português do Brasil, com gírias de internet. Quem posta é "
@@ -492,6 +504,9 @@ def grok_prompt(raw: str | list[str], heat: str = "quente", refs: list[str] | No
         FORMAT_GUIDE,
         "Tom do dono: " + " | ".join(f'"{e}"' for e in owner),
     ]
+    if phrase:
+        lines.insert(2, f"Frase base do dono: \"{info['phrase']}\". Todo post conta ESSA mesma notícia: o mesmo fato, os "
+                        "mesmos nomes e o mesmo sentido; muda só o jeito de contar (o formato). Nada solto nem genérico.")
     if info["names"]:
         lines.append("Os nomes são pessoas reais: fale só do fato que as palavras dizem, sem inventar fato novo, sem nada "
                      "sexual sobre elas e sem dizer que vazou conteúdo íntimo delas.")
@@ -500,3 +515,251 @@ def grok_prompt(raw: str | list[str], heat: str = "quente", refs: list[str] | No
     lines += [rules(heat), "Um post por linha (troque quebra de linha dentro do post por \" / \"), sem numeração nem aspas, "
               "até 220 caracteres. Não explique nada."]
     return "\n".join(lines)
+
+
+# ---- Frase pronta: a frase inteira entra e o gerador separa as partes sozinho ----
+# "VAZOU!! Pitbull amigo do Fejuca faz live com Elisa Sanches" → gancho VAZOU, quem = "Pitbull amigo do Fejuca",
+# fato = "faz live" (o verbo é o seu), com quem = "Elisa Sanches". As frases novas usam a sua frase inteira ou a
+# mesma notícia reescrita ("a live do Pitbull amigo do Fejuca com a Elisa Sanches"): nada de molde solto.
+CONNECT = {"com", "contra", "e", "x", "vs", "versus", "pra", "para", "ao", "junto", "a", "o"}
+NAME_GLUE = {"do", "da", "de", "dos", "das", "amigo", "amiga", "ex", "mae", "pai", "namorado", "namorada", "marido",
+             "esposa", "irmao", "parceiro", "parceira", "filho", "filha"}
+LEAD_HOOK = re.compile(r"^([A-ZÀ-Ú][A-ZÀ-Ú ]{1,24}?)\s*(?:!+|:)\s*")
+TAIL_HOOK = re.compile(r"\s+([A-ZÀ-Ú]{3,}(?: [A-ZÀ-Ú]{2,})*)\s*!+\s*$")
+TRAIL = re.compile(r"(?:[\s.!?…,;:]|[\U0001F300-\U0001FAFF☀-➿️])+$")
+PUNCT = ",.;:!?…\"'"
+EMOJI_AFTER_DOT = re.compile(r"\.\s+([\U0001F300-\U0001FAFF])")
+PHRASE_T = {
+    "manchete": ("{H}!!\n\n{S}", "{H}!! {S} {E}", "{S}\n\n{H}!! {E}", "{H}!!\n\n{S}\n\nVocês já viram? 👀",
+                 "{H}!!\n\n{S}\n\nO que vocês acham?", "{H}!!\n\n{S}\n\nAgora entendi tudo 👀", "{H}!!\n\n{S}\n\nNinguém esperava essa"),
+    "pergunta": ("{S}?? Isso é real? 👀", "Gente, {s}. Vocês já sabiam? {C}", "{S}. O que vocês acham disso? {C}",
+                 "{S}. Alguém mais viu ou só eu? 👀", "{H}!! {S}. Vocês viram? {C}", "Homens, {s}. O que vocês acharam? {C}"),
+    "polemica": ("{S}. Opinião impopular: já era esperado 😏", "{S} e a internet tá dividida. De que lado você tá? {E}",
+                 "{S}. Vou falar o que ninguém tem coragem: eu achei pouco 😏", "{S}. Quem defende vai ter que me explicar uma coisa 😏"),
+    "enquete": ("{S}. Aprovado ou reprovado? {E}", "{S}. Hype ou flop? Responde sem pensar", "{S}. Vocês assistiriam? Sim ou não? 👀",
+                "{S}. Nota de 0 a 10? {C}"),
+    "desafio": ("{S}. Duvido você não ir procurar agora 😏", "{S}. Aposto que metade de vocês já sabia rs"),
+    "urgencia": ("Corre: {s} {E}", "Acabou de acontecer: {s} {E}", "{S}. Quem não viu ainda vai se arrepender 👀"),
+    "confissao": ("{S}. Confesso que fiquei curiosa 👀 Quem mais?", "{S}. Admito: não esperava por essa 🙈"),
+    "promessa": ("{S}. Se esse post bater {n} {unit} eu conto o que achei {E}", "{S}. {n} {unit} e eu {R} {E}"),
+}
+# Frase de quem posta (não é notícia): continua sendo dela, com um gancho de resposta no fim.
+PERSONAL_T = {
+    "pergunta": ("{S}. E vocês? {C}", "{S}… vocês fariam o quê? {C}", "Sinceramente: {s}. Vocês também? {C}",
+                 "Homens, {s}. Isso é normal? {C}", "{S}. Me conta nos comentários 👀"),
+    "confissao": ("Confissão: {s} 🙈", "Admito: {s}. Quem mais?", "Ninguém sabe, mas {s} 🤭 Vocês me julgam?"),
+    "desafio": ("{S}. Duvido alguém aqui admitir o mesmo 😏", "{S}. Aposto que metade de vocês também rs"),
+    "enquete": ("{S}. Certo ou errado? Responde sem pensar", "{S}. Normal ou exagero? {E}"),
+    "promessa": ("{S}. Se esse post bater {n} {unit} eu {R} {E}", "{S}. {n} {unit} e eu {R} {E}"),
+    "polemica": ("{S}. Pode me julgar, eu não ligo 😏", "Opinião impopular: {s}. Quem concorda?"),
+}
+QUESTION_T = {
+    "pergunta": ("{S}? {C}", "Pergunta séria: {s}? {C}", "Homens, {s}? {C}", "Me respondam uma coisa: {s}? {C}",
+                 "Preciso saber: {s}? {C}"),
+    "enquete": ("{S}? Sim ou não? Responde sem pensar", "{S}? Um só, sem mentir {E}"),
+    "desafio": ("{S}? Duvido alguém responder com sinceridade 😏",),
+    "promessa": ("{S}? Se esse post bater {n} {unit} eu respondo a minha também {E}", "{S}? {n} {unit} e eu {R} {E}"),
+}
+# Frase que já é promessa com nome real e prêmio quente ("se o Lula ganhar eu mando nude"): só variações dela,
+# sem gancho em caixa alta.
+PROMISE_OPENERS = ("", "Homens,", "Vocês homens,", "Atenção, homens:", "Recado pros homens:", "Anota aí:", "Prometo:",
+                   "Valendo:", "Já avisei:", "Tá valendo:")
+PROMISE_CLOSERS = ("Combinado? 😈", "Quem vai torcer comigo? 👀", "Promessa é dívida 😈", "Comenta aí quem vai cobrar 👀",
+                   "E eu cumpro, hein rs", "Torcendo muito? 😏", "🔥", "😈", "👀", "Quem tá dentro?")
+PROMISE_T = tuple(f"{o} {{s}}. {k}".strip() if o else f"{{S}}. {k}" for o in PROMISE_OPENERS for k in PROMISE_CLOSERS)
+
+
+# Palavra comum que só tem maiúscula por abrir a frase ("A live…", "Se o Lula…"): não é nome.
+COMMON = {"a", "o", "as", "os", "se", "eu", "hoje", "um", "uma", "quando", "depois", "agora", "ontem", "gente", "voces",
+          "voce", "nao", "sim", "so", "ja", "que", "quem", "mas", "e", "ai", "olha", "tipo", "cara", "mano", "esse", "essa",
+          "isso", "aquele", "aquela", "meu", "minha", "nossa", "todo", "toda", "ninguem", "alguem", "homens", "por", "pra"}
+
+
+def _is_cap(word: str) -> bool:
+    word = word.strip(PUNCT)
+    return word[:1].isupper() and src.norm(word) not in COMMON
+
+
+def _name_span(tokens: list[str], start: int) -> list[str]:
+    """Nome a partir de start: palavras com maiúscula, com "do/da/amigo…" só no meio ("Pitbull amigo do Fejuca")."""
+    out: list[str] = []
+    i = start
+    while i < len(tokens):
+        word = tokens[i].strip(PUNCT)
+        if _is_cap(word):
+            out.append(word)
+        elif src.norm(word) in NAME_GLUE and any(_is_cap(t) for t in tokens[i + 1:i + 3]):
+            out.append(word)
+        else:
+            break
+        if re.search(r"[,.;:!?…]$", tokens[i]):  # pontuação colada acaba o nome
+            break
+        i += 1
+    while out and not _is_cap(out[-1]):
+        out.pop()
+    return out
+
+
+def _teams() -> set[str]:
+    from app.radar_ideas import TEAMS
+
+    return set(TEAMS)
+
+
+def read_phrase(text: str) -> dict[str, Any]:
+    """A frase pronta separada em partes: gancho, quem, fato (com o seu verbo), com quem e a frase-base."""
+    from app.radar import blocked_text
+    from app.radar_hot import format_of, has_cta, unsafe
+
+    raw = " ".join((text or "").split())
+    if len(src.norm(raw).split()) < 3:
+        raise KeywordError("Escreva a frase inteira (ex.: VAZOU!! Pitbull amigo do Fejuca faz live com Elisa Sanches).")
+    if len(raw) > 280:
+        raise KeywordError("Frase longa demais: até 280 caracteres.")
+    if unsafe(raw):
+        raise KeywordError("Tem palavra proibida (menor de idade, sem consentimento ou parente): sem frases.")
+    if has_cta(raw):
+        raise KeywordError("Tire link, bio, grupo, Telegram, privado ou venda: as frases vivem só de engajamento.")
+    hook, core = None, raw
+    lead = LEAD_HOOK.match(core)
+    loose = re.match(r"^([^\W\d_]+(?: [^\W\d_]+)?)\s*(?:!+|:)\s*", core)  # "vazou! …" em minúscula também é gancho
+    if lead and (src.norm(lead.group(1)) in HOOKS or len(lead.group(1).strip()) >= 3):
+        hook, core = HOOKS.get(src.norm(lead.group(1)), lead.group(1).strip()), core[lead.end():]
+    elif loose and src.norm(loose.group(1)) in HOOKS:
+        hook, core = HOOKS[src.norm(loose.group(1))], core[loose.end():]
+    else:
+        tail = TAIL_HOOK.search(core)
+        if tail and src.norm(tail.group(1)) in HOOKS:
+            hook, core = HOOKS[src.norm(tail.group(1))], core[:tail.start()]
+    question = re.search(r"\?[\s\W]*$", core) is not None
+    core = _cap(TRAIL.sub("", core).strip())  # depois do gancho a frase começa com maiúscula
+    if blocked_text(core):
+        raise KeywordError("Assunto sensível (morte, tragédia, crime, doença ou criança): sem frases.")
+    if len(src.norm(core).split()) < 2:
+        raise KeywordError("Junte ao gancho o assunto da frase (quem, o que aconteceu).")
+    tokens = core.split()
+    norms = [src.norm(t) for t in tokens]
+    a = b = verb = noun = None
+    conn = ""
+    fact_at = next((i for i, n in enumerate(norms) if i > 0 and n in FACTS), None)
+    if fact_at is not None:
+        j = fact_at - 1
+        while j >= 0 and not _is_cap(tokens[j]):
+            j -= 1
+        start = j
+        while start > 0 and (_is_cap(tokens[start - 1]) or norms[start - 1] in NAME_GLUE):
+            start -= 1
+        while start <= j and not _is_cap(tokens[start]):
+            start += 1
+        span = _name_span(tokens, start) if j >= 0 else []
+        if span and start + len(span) == j + 1:
+            a = " ".join(span)
+            verb = " ".join(tokens[j + 1:fact_at + 1]).strip(PUNCT)
+            noun = FACTS[norms[fact_at]][1]
+            k = fact_at + 1
+            while k < len(tokens) and norms[k] in CONNECT and not _is_cap(tokens[k]):
+                conn = conn or norms[k]
+                k += 1
+            if k < len(tokens) and conn:
+                b = " ".join(_name_span(tokens, k)) or None
+    names = [n for n in (a, b) if n]
+    if not names:  # sem fato: os nomes da frase (maiúscula fora do começo, ou nome de 2+ palavras)
+        i = 0
+        while i < len(tokens):
+            span = _name_span(tokens, i) if _is_cap(tokens[i]) else []
+            if span and (i > 0 or len(span) > 1):
+                names.append(" ".join(span))
+                i += len(span)
+            else:
+                i += 1
+    people = [n for n in names if src.norm(n) not in _teams()]
+    sexual = bool(SEX_RE.search(src.norm(core)))
+    if people and sexual and format_of(raw) != "promessa":
+        raise KeywordError("Com nome de pessoa real o gerador não usa palavra sexual sobre ela. Tire a palavra ou o nome.")
+    roles = [{"text": hook, "role": "gancho", "forced": False}] if hook else []
+    roles += [{"text": n, "role": "nome", "forced": True} for n in names]
+    if a:
+        roles.append({"text": tokens[fact_at].strip(PUNCT), "role": "fato", "forced": False})
+    event = None
+    if noun and a:
+        event = f"{noun} {de(a)}" + (f" {'contra' if conn == 'contra' else 'com'} {art(b)}" if b else "")
+    news = hook or event or (any(n in FACTS for n in norms) and "eu" not in norms)  # cita live/foto/treta… e não é "eu"
+    kind = ("noticia" if news else "promessa" if format_of(raw) == "promessa" else "pergunta" if question
+            else "pessoal")
+    return {"phrase": raw, "hook": hook, "sentence": core, "question": question, "event": event, "names": names, "kind": kind,
+            "people": people, "verb": verb, "promise_only": bool(people and sexual), "roles": roles,
+            "terms": [r["text"] for r in roles if r["role"] != "gancho"] or [core]}
+
+
+def phrase_bank(text: str, heat: str = "quente", mix: int = 0, now: datetime | None = None) -> list[tuple[str, str]]:
+    read_phrase(text)  # recusa antes de montar
+    day = (now or now_sp()).weekday()
+    return list(_phrase_bank(" ".join((text or "").split()), heat, mix, day, now))
+
+
+@lru_cache(maxsize=64)
+def _phrase_bank(text: str, heat: str, mix: int, day: int, now: datetime | None) -> tuple[tuple[str, str], ...]:
+    from app.radar_hot import format_of, has_cta, unsafe
+    from app.radar_ideas import variations
+
+    info = read_phrase(text)
+    rewards = REWARDS if heat == "quente" and not info["people"] else LEVE_REWARDS
+    sentence, event = info["sentence"], info["event"]
+    hooks = [info["hook"]] if info["hook"] else []
+    rng = random.Random(f"frase|{src.norm(text)}|{heat}|{mix}")
+    out: list[tuple[str, str]] = []
+    seen = {src.norm(text)}
+
+    def add(fmt: str, line: str) -> None:
+        line = "\n".join(" ".join(part.split()) for part in line.split("\n"))
+        line = EMOJI_AFTER_DOT.sub(r" \1", line)  # "…vocês. 🔥" → "…vocês 🔥"
+        key = src.norm(line)
+        sexual = bool(SEX_RE.search(key))
+        if (key in seen or len(line) > MAX_LEN or unsafe(line) or has_cta(line) or not fits_day(line, now)
+                or (info["people"] and sexual and (not info["promise_only"] or HOOK_START.match(line)))):
+            return
+        seen.add(key)
+        out.append((fmt, line))
+
+    for line in variations(info["phrase"], 12, seed=mix):  # a própria frase com abertura, fecho e meta trocados
+        fmt = format_of(line)
+        add({"provocacao": "manchete", "lista": "confissao"}.get(fmt, fmt), line)
+    kind = info["kind"]
+    if info["promise_only"] or kind == "promessa":
+        pools: dict[str, list[str]] = {"promessa": list(PROMISE_T)}
+    elif kind == "pergunta":
+        pools = {fmt: list(t) for fmt, t in QUESTION_T.items()}
+    elif kind == "pessoal":
+        pools = {fmt: list(t) for fmt, t in PERSONAL_T.items()}
+    else:
+        pools = {fmt: list(t) for fmt, t in PHRASE_T.items()}
+        if event:  # a mesma notícia reescrita com artigo: libera os moldes de acontecimento
+            for fmt, templates in EVENT_T.items():
+                if fmt == "enquete2":
+                    if len(info["names"]) >= 2:
+                        pools["enquete"].extend(templates)
+                    continue
+                # só moldes que carregam a notícia ({N}); a manchete crua ({S}) já vem de PHRASE_T
+                pools.setdefault(fmt, []).extend(t for t in templates if "{S}" not in t and re.search(r"\{(?:N|Ncap|dN)\}", t))
+    makers = [(fmt, t) for fmt, templates in pools.items() for t in templates]
+    a, b = (info["names"] + ["", ""])[:2]
+    for _ in range(POOL * 4):
+        if len(out) >= POOL:
+            break
+        fmt, template = rng.choice(makers)
+        hook = rng.choice(hooks) if hooks and rng.random() < .85 else rng.choice(DEFAULT_HOOKS)
+        noun = event or sentence
+        line = _fill(template, rng, H=hook, S=sentence, s=_low(sentence), N=noun, Ncap=_cap(noun),
+                     dN=d(event) if event else "disso", A=a, B=b, R=rng.choice(rewards))
+        if hooks and "{H}" not in template and rng.random() < .3 and kind == "noticia":
+            line = f"{hooks[0]}!! {line}"
+        add(fmt, line)
+    return tuple(out)
+
+
+def generate_phrase(text: str, heat: str = "quente", page: int = 0, mix: int = 0, fmt: str | None = None,
+                    potential: dict[str, Any] | None = None, now: datetime | None = None) -> dict[str, Any]:
+    info = read_phrase(text)
+    lines = phrase_bank(text, heat, mix, now)
+    return _paged(lines, info["roles"], info["terms"], heat, page, mix, fmt, potential) | {
+        "phrase": {"hook": info["hook"], "sentence": info["sentence"], "event": info["event"], "kind": info["kind"]}}

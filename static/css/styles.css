@@ -2432,3 +2432,10 @@ button.kw-chip-text:hover .kw-chip-role { text-decoration: underline; text-under
   .kw-go { flex: 1 1 100%; }
   .kw-input { flex-basis: 100%; }
 }
+/* Frase pronta: a caixa de texto no mesmo campo, e o "Entendi assim" com os chips do que o servidor separou. */
+.kw-field[hidden] { display: none; }
+.kw-field.is-phrase { align-items: flex-end; }
+.kw-phrase { min-height: 3.2rem; padding: .55rem .35rem; line-height: 1.4; font-size: .95rem; resize: vertical; }
+.kw-understood:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; margin-top: .55rem; }
+.kw-chips-row { display: flex; flex-wrap: wrap; gap: .35rem; }
+.kw-chips-row .kw-chip-text { padding-right: .75rem; }

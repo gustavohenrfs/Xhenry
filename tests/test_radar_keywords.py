@@ -143,3 +143,69 @@ def test_grok_route(client, monkeypatch):
     assert "VAZOU!!\n\nPitbull amigo do Fejuca faz live com Elisa Sanches" in texts
     assert not any("nude" in t or "link" in t for t in texts), "nada sexual sobre o nome, nunca link"
     assert "Elisa Sanches (nome)" in prompts[0] and "pessoas reais" in prompts[0]
+
+
+# ---- Frase pronta ----
+
+OWNER = "VAZOU!! Pitbull amigo do Fejuca faz live com Elisa Sanches"
+
+
+def phrase_lines(text, heat="quente", mix=0):
+    return [line for _, line in kw.phrase_bank(text, heat, mix, WED)]
+
+
+def test_phrase_is_split_by_itself():
+    info = kw.read_phrase(OWNER)
+    assert info["hook"] == "VAZOU" and info["sentence"] == "Pitbull amigo do Fejuca faz live com Elisa Sanches"
+    assert info["names"] == ["Pitbull amigo do Fejuca", "Elisa Sanches"] and info["verb"] == "faz live"
+    assert info["event"] == "a live do Pitbull amigo do Fejuca com a Elisa Sanches" and info["kind"] == "noticia"
+    other = kw.read_phrase("EITA: Neymar arma uma treta com Vini Jr no treino 👀")
+    assert other["hook"] == "EITA" and other["names"] == ["Neymar", "Vini Jr"] and other["event"] == "a treta do Neymar com o Vini Jr"
+    assert kw.read_phrase("Hoje acordei querendo atenção de vocês")["kind"] == "pessoal"
+    assert kw.read_phrase("Vocês preferem morena ou loira?")["kind"] == "pergunta"
+    assert kw.read_phrase("Se o Flamengo ganhar hoje eu mando nude")["kind"] == "promessa"
+
+
+def test_phrase_lines_stay_on_the_same_story():
+    lines = phrase_lines(OWNER)
+    assert len(lines) >= 200
+    for line in lines:
+        key = norm(line)
+        assert "pitbull" in key and ("elisa" in key or "fejuca" in key), "toda frase conta a mesma notícia: " + line
+    first = kw.generate_phrase(OWNER, "quente", now=WED)
+    shapes = [norm(kw.HOOK_START.sub("", i["text"])) for i in first["items"]]
+    assert len(shapes) == len(set(shapes)), "a mesma frase só com outro gancho não se repete na página"
+    assert first["phrase"]["kind"] == "noticia" and first["terms"][0] == {"text": "VAZOU", "role": "gancho", "forced": False}
+
+
+def test_personal_phrase_gets_no_news_frames():
+    lines = phrase_lines("Hoje acordei querendo atenção de vocês")
+    assert lines and all("acordei querendo atencao" in norm(line) for line in lines)
+    assert not any("ja viram" in norm(line) or "dividiu a internet" in norm(line) for line in lines)
+
+
+def test_promise_with_real_name_keeps_its_own_promise():
+    lines = phrase_lines("Se o Lula ganhar eu mando nude pra vocês")
+    assert len(lines) >= 30 and all("se o lula ganhar eu mando nude" in norm(line) for line in lines)
+    assert not any(kw.HOOK_START.match(line) for line in lines), "nada de VAZOU!! junto"
+    with pytest.raises(kw.KeywordError, match="pessoa real"):
+        kw.read_phrase("Elisa Sanches mandou nude na live")
+
+
+def test_phrase_route_and_grok(client, monkeypatch):
+    _, headers = user(xai="xai-teste")
+    data = client.get("/api/radar/keywords", params={"phrase": OWNER}, headers=headers).json()
+    assert len(data["items"]) == kw.PAGE and data["phrase"]["event"].startswith("a live do Pitbull")
+    prompts = []
+    monkeypatch.setattr(radar_ideas, "ask_grok_lines", lambda key, prompt: prompts.append(prompt) or "Vocês viram a live? 👀")
+    assert client.post("/api/radar/keywords/grok", json={"phrase": OWNER}, headers=headers).status_code == 200
+    assert OWNER in prompts[0] and "mesma notícia" in prompts[0]
+    bad = client.get("/api/radar/keywords", params={"phrase": "link na bio"}, headers=headers)
+    assert bad.status_code == 400
+
+
+def test_phrase_edges():
+    low = kw.read_phrase("vazou! a live do pitbull com a elisa sanches")
+    assert low["hook"] == "VAZOU" and low["sentence"].startswith("A live") and low["kind"] == "noticia"
+    start = kw.read_phrase("Se a live do Pitbull bater 1 milhão eu posto uma foto nova")
+    assert "Se" not in start["names"] and start["kind"] == "promessa", "palavra comum no começo não é nome"

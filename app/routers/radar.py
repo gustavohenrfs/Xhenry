@@ -326,22 +326,26 @@ def hot_grok(payload: HotGrokIn, user: User = Depends(approved_user), db: Sessio
 # ---- Gerador por palavras-chave (grátis; Turbo com Grok pela chave xAI) ----
 
 class KeywordsGrokIn(BaseModel):
-    terms: str = Field(min_length=1, max_length=600)
+    terms: str = Field(default="", max_length=600)
+    phrase: str | None = Field(default=None, max_length=600)  # "Frase pronta": o gerador separa as partes
     heat: str = Field(default="quente", pattern="^(leve|quente)$")
 
 
 @router.get("/api/radar/keywords")
-def keyword_lines(terms: str = Query(..., min_length=1, max_length=600),
+def keyword_lines(terms: str = Query("", max_length=600), phrase: str | None = Query(None, max_length=600),
                   heat: str = Query("quente", pattern="^(leve|quente)$"), page: int = Query(0, ge=0, le=10_000),
                   mix: int = Query(0, ge=0, le=1_000_000), fmt: str | None = Query(None, pattern="^[a-z]{3,16}$"),
                   user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Frases montadas com as suas palavras-chave, em todos os formatos, da maior nota viral para a menor, de 12
-    em 12 (page). Quando acaba (done), a tela troca a mistura (mix) e o banco vem com combinações novas."""
+    """Frases montadas com as suas palavras-chave (ou com a sua frase pronta, que ele separa sozinho), em todos os
+    formatos, da maior nota viral para a menor, de 12 em 12 (page). Quando acaba (done), a tela troca a mistura
+    (mix) e o banco vem com combinações novas."""
     from app.postar import format_potential
 
+    fmt = fmt if fmt in radar_keywords.FORMATS else None
     try:
-        return radar_keywords.generate(terms, heat, page, mix, fmt if fmt in radar_keywords.FORMATS else None,
-                                       format_potential(db, user.id))
+        if phrase and phrase.strip():
+            return radar_keywords.generate_phrase(phrase, heat, page, mix, fmt, format_potential(db, user.id))
+        return radar_keywords.generate(terms, heat, page, mix, fmt, format_potential(db, user.id))
     except radar_keywords.KeywordError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -350,8 +354,9 @@ def keyword_lines(terms: str = Query(..., min_length=1, max_length=600),
 def keyword_grok(payload: KeywordsGrokIn, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     """Turbo com Grok: 10 frases com as mesmas palavras, pelas mesmas regras."""
     try:
-        info = radar_keywords.parse(payload.terms)
-        prompt = radar_keywords.grok_prompt(payload.terms, payload.heat, radar_hot.proven_refs(db, user.id))
+        phrase = payload.phrase.strip() if payload.phrase and payload.phrase.strip() else None
+        info = radar_keywords.read_phrase(phrase) if phrase else radar_keywords.parse(payload.terms)
+        prompt = radar_keywords.grok_prompt(payload.terms, payload.heat, radar_hot.proven_refs(db, user.id), phrase)
     except radar_keywords.KeywordError as exc:
         raise HTTPException(400, str(exc)) from exc
     key = xai_key(db, user)
@@ -362,7 +367,7 @@ def keyword_grok(payload: KeywordsGrokIn, user: User = Depends(approved_user), d
     except ValueError as exc:
         raise HTTPException(502, str(exc)) from exc
     lines = [line.replace(" / ", "\n\n") for line in lines if radar_ideas.fits_day(line)]
-    if info["names"]:  # nome real: nada sexual nas frases do Grok fora da promessa de quem posta
+    if [n for n in info["names"] if norm_of(n) not in radar_ideas.TEAMS]:  # nome real: nada sexual fora da promessa
         lines = [line for line in lines if not radar_keywords.SEX_RE.search(norm_of(line))
                  or (radar_keywords.HOOK_START.match(line) is None and radar_hot.format_of(line) == "promessa")]
     if not lines:
