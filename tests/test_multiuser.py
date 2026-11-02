@@ -425,3 +425,38 @@ def test_refresh_reads_only_the_selected_folder(client, monkeypatch):
         with SessionLocal() as db:
             get_settings(db).robo_run_requested_at = None
             db.commit()
+
+
+def test_apify_reading_test_shows_what_each_way_brings(client, monkeypatch):
+    """"Testar leitura no Apify" (gaveta da conta): a mesma conta pela busca de hoje, busca sem data e perfil,
+    com o que cada jeito trouxe. Só a conta do próprio dono, com o token dele."""
+    from datetime import datetime, timezone
+
+    import robo
+
+    owner = make_user()
+    headers = bearer(owner)
+    _, account_id = make_account(owner)
+    with SessionLocal() as db:
+        handle = db.get(XAccount, account_id).username
+    assert client.post(f"/api/apify/test/{account_id}", headers=headers).status_code == 400, "sem token do Apify"
+    client.put("/api/settings", json={"apify_token": "tok-teste"}, headers=headers)
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    seen = []
+
+    def call(token, payload):
+        seen.append((token, payload))
+        if "startUrls" in payload:
+            return [{"id": "7", "createdAt": posted, "viewCount": 17, "likeCount": 1, "text": "oi", "author": {"userName": handle}}]
+        if "since_time" in payload["searchTerms"][0]:
+            return []
+        raise robo.ApifyError("o Apify respondeu 500.")
+
+    monkeypatch.setattr(robo, "apify_call", call)
+    body = client.post(f"/api/apify/test/{account_id}", headers=headers).json()
+    ways = {item["key"]: item for item in body["variants"]}
+    assert ways["perfil"]["today"] == 1 and ways["perfil"]["newest"]["views"] == 17
+    assert ways["busca_hoje"]["today"] == 0 and ways["busca"]["error"] == "o Apify respondeu 500."
+    assert "perfil" in body["verdict"].lower() and {t for t, _ in seen} == {"tok-teste"}
+    other, other_account = make_account(make_user())
+    assert client.post(f"/api/apify/test/{other_account}", headers=headers).status_code == 404

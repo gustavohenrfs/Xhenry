@@ -607,6 +607,8 @@ APIFY_ACTOR_DEFAULT = "apidojo~tweet-scraper"
 APIFY_INTERVAL_DEFAULT = 60
 APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
 APIFY_TODAY_PER_ACCOUNT = 60  # teto de posts de hoje por conta na leitura (só se paga o que vier)
+APIFY_PROFILE_ITEMS = 15  # reserva pelo perfil: os posts mais novos da conta que a busca não trouxe
+APIFY_PROFILE_MAX = 25  # contas lidas pelo perfil numa leitura (uma chamada por conta, em paralelo)
 APIFY_MAX_ACCOUNTS = 25  # contas por chamada; mais que isso vira lotes em paralelo
 APIFY_PARALLEL = 4  # chamadas ao Apify ao mesmo tempo (cada uma é um run do ator)
 APIFY_ROUND_ACCOUNTS = 200  # contas de um usuário numa passada
@@ -638,12 +640,28 @@ def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, 
             "maxItems": APIFY_TODAY_PER_ACCOUNT * len(handles), "sort": "Latest"}
 
 
+def apify_profile_input(handle: str) -> dict[str, Any]:
+    """Pedido pelo perfil (a linha do tempo da conta), não pela busca: a busca do X esconde algumas contas
+    para as contas que o ator usa (conteúdo sensível), e aí "from:conta" volta vazio mesmo com post novo."""
+    return {"startUrls": [f"https://x.com/{handle}"], "maxItems": APIFY_PROFILE_ITEMS, "sort": "Latest"}
+
+
 def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
+    """Leitura normal: a busca de hoje de cada conta (apify_input)."""
+    return apify_call(token, apify_input(handles))
+
+
+def apify_profile(token: str, handle: str) -> list[dict[str, Any]]:
+    """Reserva: os posts mais novos de uma conta pelo perfil."""
+    return apify_call(token, apify_profile_input(handle))
+
+
+def apify_call(token: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Roda o ator e devolve os itens do dataset (posts). Erros viram ApifyError com o motivo."""
     url = f"{APIFY_API}/acts/{apify_actor()}/run-sync-get-dataset-items?timeout={APIFY_TIMEOUT - 10}"
     req = urllib.request.Request(
         url,
-        data=json.dumps(apify_input(handles)).encode(),
+        data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
     )
@@ -802,8 +820,9 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     o dia refeito e seguidores (em toda leitura: vêm junto com os posts).
 
     Devolve os posts de hoje que vieram nesta leitura. Falha da chamada sobe como ApifyError antes de gravar
-    o lote; conta sem post nenhum não é falha. Com report, anota em report["sem_post"] as contas sem nenhum
-    post de hoje nesta leitura (o que já estava guardado continua lá).
+    o lote; conta sem post nenhum não é falha. A conta que a busca devolveu vazia é lida de novo pelo perfil
+    (apify_profile, só ela; erro aí não derruba a leitura). Com report, anota em report["perfil"] as contas
+    lidas pelo perfil e em report["sem_post"] as que nem assim trouxeram nada (o que já estava guardado fica).
     """
     batches = [accounts[start:start + APIFY_MAX_ACCOUNTS] for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS)]
     if len(batches) > 1:
@@ -812,6 +831,23 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             answers = list(pool.map(lambda batch: apify_fetch(token, [a["username"] for a in batch]), batches))
     else:
         answers = [apify_fetch(token, [a["username"] for a in batch]) for batch in batches]
+    # Reserva pelo perfil: contas sem item nenhum na busca (nem post antigo, nem repost).
+    missing = [account["username"] for batch, items in zip(batches, answers)
+               for account in batch if account["username"].lower() not in {apify_author(i)[0] for i in items}]
+    by_profile: dict[str, list[dict[str, Any]]] = {}
+
+    def from_profile(handle: str) -> tuple[str, list[dict[str, Any]]]:
+        try:
+            return handle, apify_profile(token, handle)
+        except ApifyError as exc:
+            log.warning("perfil de @%s pelo Apify falhou: %s", handle, exc)
+            return handle, []
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=min(APIFY_PARALLEL, len(missing)), thread_name_prefix="apify-perfil") as pool:
+            by_profile = dict(pool.map(from_profile, missing[:APIFY_PROFILE_MAX]))
+    answers = [items + [i for account in batch for i in by_profile.get(account["username"], [])]
+               for batch, items in zip(batches, answers)]
     saved = 0
     for batch, items in zip(batches, answers):
         by_author: dict[str, list[dict[str, Any]]] = {}
@@ -827,7 +863,12 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             by_author.setdefault(handle, []).append(item)
         if report is not None:
             seen = {apify_author(item)[0] for item in items}
-            report.setdefault("sem_post", []).extend(a["username"] for a in batch if a["username"].lower() not in seen)
+            for account in batch:
+                name = account["username"]
+                if name.lower() not in seen:
+                    report.setdefault("sem_post", []).append(name)
+                elif by_profile.get(name):
+                    report.setdefault("perfil", []).append(name)
         with conn.cursor() as cur:
             for account in batch:
                 handle = account["username"].lower()
@@ -854,6 +895,9 @@ def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name:
     empty = len(report.get("sem_post") or [])
     if empty:
         text += f" ({empty} {'conta' if empty == 1 else 'contas'} sem post hoje)"
+    profile = len(report.get("perfil") or [])
+    if profile:
+        text += f" · {profile} {'lida' if profile == 1 else 'lidas'} pelo perfil"
     return f"Pasta {folder_name}: {text}" if folder_name else text
 
 
@@ -1187,7 +1231,8 @@ def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: d
         empty = report.get("sem_post") or []
         set_apify_status(cur, admin["id"], "ok", read_detail(len(accounts), stored, report, folder_name))
         record_run(cur, started, "ok", None, {"via": "apify", "contas": len(accounts), "tweets": stored,
-                                               "novos": saved, "sem_post": len(empty), "falhas": 0,
+                                               "novos": saved, "sem_post": len(empty),
+                                               "perfil": len(report.get("perfil") or []), "falhas": 0,
                                                "manual": manual, "pasta": folder_name})
     conn.commit()
     log.info("fim pelo Apify — %s contas, %s posts novos, %s de hoje guardados, sem item: %s",

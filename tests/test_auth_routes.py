@@ -69,6 +69,7 @@ PROTECTED = [
     ("post", "/api/refresh-all", None),
     ("get", "/api/apify", None),
     ("post", "/api/apify/run", None),
+    ("post", "/api/apify/test/1", None),
     ("get", "/api/admin/users", None),
     ("post", "/api/admin/users/1/approve", None),
     ("post", "/api/admin/users/1/revoke", None),

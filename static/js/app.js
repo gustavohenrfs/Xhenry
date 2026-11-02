@@ -2761,7 +2761,8 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     if (run.status === "failed") toast("A leitura falhou: " + (run.error || "erro no Apify") + ".", "error");
     else {
       // "tweets" = posts de hoje guardados dessas contas (não só os que vieram nesta leitura).
-      const empty = run.sem_post ? " " + run.sem_post + (run.sem_post === 1 ? " conta sem post hoje." : " contas sem post hoje.") : "";
+      const empty = (run.sem_post ? " " + run.sem_post + (run.sem_post === 1 ? " conta sem post hoje." : " contas sem post hoje.") : "")
+        + (run.perfil ? " " + run.perfil + (run.perfil === 1 ? " lida pelo perfil." : " lidas pelo perfil.") : "");
       toast("Leitura feita" + (run.pasta ? " na pasta " + run.pasta : "") + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " posts de hoje." + empty);
     }
     if (state.tab === "settings") paintRobo(robo);
@@ -3641,6 +3642,28 @@ function drawerSection(title, ...children) {
   box.append(el("h3", "font-display text-base text-white", title), ...children);
   return box;
 }
+async function testApifyReading(accountId, box, button) {
+  button.disabled = true;
+  setCostLabel(button, "Testando no Apify… (até 1 min)");
+  try {
+    const data = await api("/api/apify/test/" + accountId, { method: "POST" });
+    const list = el("ul", "hc-list");
+    data.variants.forEach((way) => {
+      const state = way.error ? "bad" : way.today ? "ok" : way.posts ? "warn" : "na";
+      const li = el("li", "hc-item is-" + state);
+      const text = el("div", "min-w-0");
+      const newest = way.newest ? " · mais novo: " + num(way.newest.views) + " views, " + stampBR(way.newest.created_at) : "";
+      text.append(el("p", "hc-label", way.label),
+        el("p", "hc-text", way.error ? way.error : way.today + (way.today === 1 ? " post de hoje" : " posts de hoje") + " (" + way.posts + " no total)" + newest));
+      li.append(el("span", "hc-icon", { ok: "✓", bad: "✕", warn: "!", na: "–" }[state]), text);
+      list.append(li);
+    });
+    box.querySelectorAll(".hc-list, .apify-verdict").forEach((node) => node.remove());
+    box.append(list, el("p", "apify-verdict text-sm text-white", data.verdict));
+  } catch (error) { toast(error.message || "O teste no Apify falhou.", "error"); }
+  setCostLabel(button, "Testar leitura no Apify");
+  button.disabled = false;
+}
 async function openDrawer(accountId) {
   const account = ((state.data && state.data.accounts) || []).find((a) => a.id === accountId);
   if (!account) return;
@@ -3728,6 +3751,12 @@ function renderDrawer(account, detail) {
       ? [el("p", "text-[11px] text-mute", "Verificado " + stampBR(detail.health.checked_at) + " · " + detail.health.label), health]
       : [el("p", "text-sm text-mute", "Clique em Verificar agora para ver o checklist: perfil, busca, respostas (ghost ban) e conteúdo sensível.")];
     extra.append(drawerSection("Saúde agora", ...healthBox));
+    // Testar leitura no Apify: a mesma conta pela busca de hoje, busca sem data e perfil (gasta crédito).
+    const testBox = el("div", "space-y-2");
+    const testBtn = costButton("Testar leitura no Apify", "apify", "w-full rounded-2xl border border-neon/40 px-4 py-2.5 text-sm");
+    testBox.append(testBtn, el("p", "text-[11px] text-mute", "Mostra o que cada jeito de pedir traz para essa conta. Use quando ela não atualiza."));
+    testBtn.addEventListener("click", () => testApifyReading(account.id, testBox, testBtn));
+    extra.append(drawerSection("Leitura pelo Apify", testBox));
     const checks = el("ol", "drawer-list");
     detail.checks.forEach((item) => {
       const li = el("li", "drawer-check");

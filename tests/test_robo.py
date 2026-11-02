@@ -196,6 +196,7 @@ def test_is_repost(item, repost):
 
 def test_apify_read_reports_accounts_apify_brought_nothing_for(monkeypatch):
     """Uma leitura em que o Apify não traz nada de uma conta: anota a conta (o que já estava guardado fica)."""
+    monkeypatch.setattr(robo, "apify_profile", lambda token, handle: [])
     saved = []
     monkeypatch.setattr(robo, "save_followers", lambda cur, account, day, n: None)
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: saved.append((account["username"], len(tweets))) or len(tweets))
@@ -213,3 +214,46 @@ def test_read_detail_says_stored_total_folder_and_empty_accounts():
     text = robo.read_detail(4, 7, {"sem_post": ["a"]}, "Dinheiro")
     assert text.startswith("Pasta Dinheiro: 4 contas lidas, 7 posts de hoje")
     assert text.endswith("(1 conta sem post hoje)")
+
+
+
+def test_profile_reads_accounts_the_search_missed(monkeypatch):
+    """A busca do Apify esconde algumas contas (conteúdo sensível para as contas do ator): a conta que veio
+    vazia é lida de novo pelo perfil, só ela, e os posts e seguidores entram."""
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    saved, followers, asked = [], [], []
+    monkeypatch.setattr(robo, "save_followers", lambda cur, account, day, n: followers.append((account["username"], n)))
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: saved.append((account["username"], [t["id"] for t in tweets])) or len(tweets))
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [
+        {"id": "1", "createdAt": posted, "author": {"userName": "achada", "followers": 9}}])
+
+    def profile(token, handle):
+        asked.append(handle)
+        return [{"id": "2", "createdAt": posted, "viewCount": 17, "author": {"userName": "Escondida", "followers": 40}}]
+
+    monkeypatch.setattr(robo, "apify_profile", profile)
+    report = {}
+    accounts = [{"id": 1, "username": "achada"}, {"id": 2, "username": "escondida"}]
+    assert robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report) == 2
+    assert asked == ["escondida"], "só a conta que a busca não trouxe"
+    assert ("escondida", ["2"]) in saved and ("escondida", 40) in followers
+    assert report == {"perfil": ["escondida"]}, "lida pelo perfil e não fica como sem post"
+
+
+def test_profile_failure_does_not_break_the_read(monkeypatch):
+    monkeypatch.setattr(robo, "save_followers", lambda *a: None)
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: len(tweets))
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
+
+    def broken(token, handle):
+        raise robo.ApifyError("o Apify respondeu 500.")
+
+    monkeypatch.setattr(robo, "apify_profile", broken)
+    report = {}
+    assert robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "a"}], robo.today_start_br(), report) == 0
+    assert report == {"sem_post": ["a"]}
+
+
+def test_profile_input():
+    assert robo.apify_profile_input("fulana") == {"startUrls": ["https://x.com/fulana"],
+                                                   "maxItems": robo.APIFY_PROFILE_ITEMS, "sort": "Latest"}

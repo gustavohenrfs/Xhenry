@@ -29,6 +29,7 @@ from app.services import (
     as_utc,
     get_settings,
     now_utc,
+    owned_account,
     owned_folder,
     robot_interval,
     selected_accounts,
@@ -81,6 +82,7 @@ def robo_payload(db: Session) -> dict[str, Any]:
             "contas": stats.get("contas"),
             "tweets": stats.get("tweets"),
             "sem_post": stats.get("sem_post") or 0,
+            "perfil": stats.get("perfil") or 0,
             "pasta": stats.get("pasta"),
             "manual": bool(stats.get("manual")),
             "error": last.error,
@@ -231,3 +233,72 @@ def request_apify_run(folder_id: int | None = FOLDER, user: User = Depends(appro
         row.apify_run_requested_at = now_utc()
         db.commit()
     return read_apify(user, db)
+
+
+# ---- "Testar leitura no Apify" (gaveta da conta): o que cada jeito de pedir traz para essa conta ----
+
+APIFY_TEST_WAYS = (
+    ("busca_hoje", "Busca de hoje (a leitura normal)"),
+    ("busca", "Busca sem data"),
+    ("perfil", "Perfil da conta (a reserva)"),
+)
+
+
+def _test_summary(robo_mod: Any, handle: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Quantos itens vieram, quantos são posts da conta (sem repost), quantos de hoje e o mais novo."""
+    midnight = robo_mod.today_start_br()
+    own = [i for i in items if robo_mod.apify_author(i)[0] == handle.lower() and not robo_mod.is_repost(i)]
+    dated = [(robo_mod.parse_created_at(robo_mod.pick(i, "created_at", "createdAt", "date", "posted_at")), i) for i in own]
+    dated = [(when, i) for when, i in dated if when is not None]
+    newest = max(dated, key=lambda pair: pair[0], default=None)
+    return {
+        "items": len(items), "posts": len(own), "today": sum(1 for when, _ in dated if when >= midnight),
+        "newest": None if newest is None else {
+            "created_at": newest[0].isoformat(), "views": robo_mod.tweet_metrics(newest[1])["view_count"],
+            "likes": robo_mod.tweet_metrics(newest[1])["like_count"], "text": (robo_mod.tweet_text_of(newest[1]) or "")[:100]},
+    }
+
+
+@user_router.post("/api/apify/test/{account_id}")
+def test_apify_reading(account_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Pede a mesma conta de três jeitos (gasta crédito do Apify do usuário: três runs pequenos) e mostra o que
+    cada um trouxe: é como se descobre se a busca do Apify esconde a conta."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import robo as robo_mod
+
+    account = owned_account(db, user.id, account_id)
+    token = (user_settings(db, user.id).apify_token or "").strip()
+    if not token:
+        raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
+    handle = account.username
+    payloads = {
+        "busca_hoje": robo_mod.apify_input([handle]),
+        "busca": {"searchTerms": [f"from:{handle}"], "maxItems": 10, "sort": "Latest"},
+        "perfil": robo_mod.apify_profile_input(handle),
+    }
+
+    def run(key: str) -> tuple[str, list[dict[str, Any]] | None, str | None]:
+        try:
+            return key, robo_mod.apify_call(token, payloads[key]), None
+        except robo_mod.ApifyError as exc:
+            return key, None, str(exc)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        answers = {key: (items, error) for key, items, error in pool.map(run, payloads)}
+    variants = []
+    for key, label in APIFY_TEST_WAYS:
+        items, error = answers[key]
+        summary = _test_summary(robo_mod, handle, items) if items is not None else {"items": 0, "posts": 0, "today": 0, "newest": None}
+        variants.append({"key": key, "label": label, "error": error, **summary})
+    ways = {v["key"]: v for v in variants}
+    if ways["busca_hoje"]["today"]:
+        verdict = "A busca de hoje acha os posts dessa conta: a leitura normal funciona."
+    elif ways["perfil"]["today"]:
+        verdict = ("A busca do Apify esconde essa conta, mas o perfil traz os posts de hoje. A leitura já usa o "
+                   "perfil como reserva para ela.")
+    elif ways["perfil"]["posts"] or ways["busca"]["posts"]:
+        verdict = "O Apify acha a conta, mas nenhum post de hoje: ela não postou hoje (ou o post é só repost)."
+    else:
+        verdict = "Nenhum jeito trouxe post dessa conta: confira a @ ou se o Apify tem crédito."
+    return {"handle": handle, "variants": variants, "verdict": verdict}
