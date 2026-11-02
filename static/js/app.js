@@ -3973,6 +3973,7 @@ document.querySelectorAll("[data-radar-heat]").forEach((button) => button.addEve
   paintRadarControls();
   paintHotQuestion();
   loadRadar({ silent: true });
+  if (kwChips.length) kwChanged(false);
 }));
 document.getElementById("radar-engage").addEventListener("change", (event) => {
   radarEngage = event.target.checked;
@@ -4468,6 +4469,236 @@ async function huntHot() {
   refresh.classList.add("cost-btn");
   refresh.replaceChildren(el("span", "cost-label", "Atualizar"), costBadge("free"));
 })();
+// ---------- Gerador por palavras-chave ----------
+// Chips coloridos pelo papel que o servidor leu (gancho, nome, fato, tema); tocar num nome/tema troca o papel
+// ("Academia=tema"). Cada mudança gera de novo; "Gerar mais" busca a próxima página e, quando acaba o banco,
+// troca a mistura (as repetidas ficam de fora). Textos só por textContent.
+const KW_ROLES = { gancho: "Gancho", nome: "Nome", fato: "Fato", tema: "Tema" };
+let kwChips = [];      // [{ text, role, forced }]
+let kwItems = [];      // frases já na tela
+let kwSeen = new Set();
+let kwPage = 0;
+let kwMix = 0;
+let kwFmt = "";
+let kwFormats = {};
+let kwLabels = {};
+let kwBusy = false;
+let kwTimer = null;
+let kwRecent = [];
+try { kwRecent = JSON.parse(localStorage.getItem("kw_recent") || "[]").filter((r) => Array.isArray(r)).slice(0, 8); } catch { kwRecent = []; }
+function kwTermsParam() {
+  return kwChips.map((c) => c.forced ? c.text + "=" + c.role : c.text).join(", ");
+}
+function kwAddRaw(raw) {
+  raw.split(/[,;\n]+/).map((part) => part.trim().replace(/^#/, "")).filter(Boolean).forEach((text) => {
+    if (kwChips.length >= 8 || kwChips.some((c) => c.text.toLowerCase() === text.toLowerCase())) return;
+    kwChips.push({ text: text.slice(0, 60), role: "", forced: false });
+  });
+}
+function paintKwChips() {
+  const host = document.getElementById("kw-chips");
+  host.replaceChildren(...kwChips.map((chip, index) => {
+    const li = el("li", "kw-chip" + (chip.role ? " is-" + chip.role : ""));
+    const swap = chip.role === "nome" || chip.role === "tema";
+    const label = el(swap ? "button" : "span", "kw-chip-text", chip.text);
+    if (swap) {
+      label.type = "button";
+      label.title = "Trocar para " + (chip.role === "nome" ? "tema" : "nome");
+      label.addEventListener("click", () => {
+        chip.role = chip.role === "nome" ? "tema" : "nome";
+        chip.forced = true;
+        kwChanged(true);
+      });
+    }
+    if (chip.role) label.append(el("small", "kw-chip-role", KW_ROLES[chip.role]));
+    const remove = el("button", "kw-chip-x", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Tirar " + chip.text);
+    remove.addEventListener("click", () => { kwChips.splice(index, 1); kwChanged(true); document.getElementById("kw-input").focus(); });
+    li.append(label, remove);
+    return li;
+  }));
+}
+function paintKwRecent() {
+  const host = document.getElementById("kw-recent");
+  const current = kwTermsParam().toLowerCase();
+  const list = kwRecent.filter((set) => set.join(", ").toLowerCase() !== current);
+  host.hidden = !list.length;
+  if (!list.length) return;
+  host.replaceChildren(el("span", "text-[11px] text-mute", "Recentes"), ...list.map((set) => {
+    const chip = el("button", "kw-recent-chip", set.map((t) => t.replace(/=(nome|tema)$/, "")).join(" · "));
+    chip.type = "button";
+    chip.addEventListener("click", () => {
+      kwChips = [];
+      set.forEach((term) => {
+        const forced = term.match(/^(.*)=(nome|tema)$/);
+        kwChips.push(forced ? { text: forced[1], role: forced[2], forced: true } : { text: term, role: "", forced: false });
+      });
+      kwChanged(true);
+    });
+    return chip;
+  }));
+}
+function rememberKw() {
+  const set = kwChips.map((c) => c.forced ? c.text + "=" + c.role : c.text);
+  const key = set.join(", ").toLowerCase();
+  kwRecent = [set, ...kwRecent.filter((r) => r.join(", ").toLowerCase() !== key)].slice(0, 8);
+  try { localStorage.setItem("kw_recent", JSON.stringify(kwRecent)); } catch { /* sem storage */ }
+}
+function paintKwFilters() {
+  const host = document.getElementById("kw-filters");
+  const keys = Object.keys(kwLabels).filter((key) => kwFormats[key]);
+  host.hidden = !keys.length;
+  const chip = (key, label) => {
+    const button = el("button", "chip" + (kwFmt === key ? " on" : ""), label);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(kwFmt === key));
+    button.addEventListener("click", () => { if (kwFmt !== key) { kwFmt = key; kwChanged(false); } });
+    return button;
+  };
+  host.replaceChildren(chip("", "Todas"), ...keys.map((key) => chip(key, kwLabels[key] + " " + kwFormats[key])));
+}
+function kwMeter(item) {
+  const meter = el("span", "kw-meter is-" + item.tier);
+  meter.style.setProperty("--score", item.score);
+  meter.title = "Potencial viral " + item.score + "/100: formato, pergunta, polêmica, gancho, tamanho, suas palavras e o que já rendeu nas suas contas";
+  meter.append(el("b", "", String(item.score)), el("span", "kw-meter-bar"), el("span", "kw-meter-label", item.tier_label));
+  return meter;
+}
+function kwRow(item, grok) {
+  const li = el("li", "kw-item" + (grok ? " is-grok" : ""));
+  const top = el("div", "kw-item-top");
+  top.append(kwMeter(item), el("span", "radar-cat hot-fmt", item.fmt_label));
+  if (grok) top.append(el("span", "cost is-grok", "Grok"));
+  if (hotUsed.has(item.text)) top.append(el("span", "hot-used-tag", "já usada"));
+  const more = el("div", "kw-var");
+  more.hidden = true;
+  const actions = ideaActions(item.text);
+  actions.append(freeVariations(item.text, more));
+  li.append(top, el("p", "kw-text font-display", item.text), actions, more);
+  return li;
+}
+function kwStatus(text) { document.getElementById("kw-status").textContent = text; }
+function kwChanged(reset) {
+  paintKwChips();
+  clearTimeout(kwTimer);
+  if (!kwChips.length) {
+    kwItems = [];
+    kwSeen = new Set();
+    document.getElementById("kw-list").replaceChildren();
+    document.getElementById("kw-more").hidden = true;
+    document.getElementById("kw-filters").hidden = true;
+    kwStatus("");
+    paintKwRecent();
+    return;
+  }
+  if (reset) kwFmt = "";
+  kwTimer = setTimeout(() => kwGenerate(false), 250);
+}
+async function kwGenerate(append) {
+  if (!kwChips.length || kwBusy) return;
+  kwBusy = true;
+  const list = document.getElementById("kw-list");
+  const next = document.getElementById("kw-next");
+  if (!append) { kwPage = 0; kwMix = 0; kwItems = []; kwSeen = new Set(); list.classList.add("is-loading"); }
+  next.disabled = true;
+  try {
+    let added = [];
+    for (let tries = 0; tries < 4 && added.length < 6; tries += 1) {
+      const query = new URLSearchParams({ terms: kwTermsParam(), heat: radarHeat, page: String(kwPage), mix: String(kwMix) });
+      if (kwFmt) query.set("fmt", kwFmt);
+      const data = await api("/api/radar/keywords?" + query.toString());
+      data.terms.forEach((term, index) => { if (kwChips[index]) Object.assign(kwChips[index], { text: term.text, role: term.role, forced: term.forced }); });
+      kwFormats = data.formats;
+      kwLabels = data.format_labels;
+      const fresh = data.items.filter((item) => !kwSeen.has(item.text));
+      fresh.forEach((item) => kwSeen.add(item.text));
+      added = added.concat(fresh);
+      if (data.done) { kwMix += 1; kwPage = 0; } else kwPage += 1;
+      if (!append) break;
+    }
+    kwItems = kwItems.concat(added);
+    paintKwChips();
+    paintKwFilters();
+    rememberKw();
+    paintKwRecent();
+    if (append) list.append(...added.map((item) => kwRow(item)));
+    else list.replaceChildren(...added.map((item) => kwRow(item)));
+    document.getElementById("kw-more").hidden = false;
+    kwStatus(kwItems.length + " frases na tela" + (kwMix ? " · mistura " + (kwMix + 1) : "") + (radarHeat === "quente" ? " · nível quente" : " · nível leve"));
+  } catch (error) {
+    if (!append) list.replaceChildren();
+    document.getElementById("kw-more").hidden = !kwItems.length;
+    kwStatus(error.message || "Não gerou as frases.");
+  }
+  list.classList.remove("is-loading");
+  next.disabled = false;
+  kwBusy = false;
+}
+async function kwGrok() {
+  const button = document.getElementById("kw-grok");
+  if (!kwChips.length || button.disabled) return;
+  button.disabled = true;
+  setCostLabel(button, "Pedindo ao Grok…");
+  try {
+    const data = await api("/api/radar/keywords/grok", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ terms: kwTermsParam(), heat: radarHeat }) });
+    const fresh = data.items.filter((item) => !kwSeen.has(item.text));
+    fresh.forEach((item) => kwSeen.add(item.text));
+    document.getElementById("kw-list").prepend(...fresh.map((item) => kwRow(item, true)));
+    kwStatus(fresh.length + " frases novas do Grok no topo da lista");
+  } catch (error) { toast(error.message || "O Grok não respondeu.", "error"); }
+  setCostLabel(button, "Turbo com Grok");
+  button.disabled = false;
+}
+// Abre o gerador com um assunto do Radar (botão "Usar no gerador" do assunto).
+function useInKeywords(title) {
+  kwChips = [];
+  kwAddRaw(String(title || "").replace(/^#/, ""));
+  closeDrawer();
+  if (state.tab !== "radar") setTab("radar");
+  const card = document.getElementById("radar-kw");
+  card.scrollIntoView({ behavior: reduceMotion.matches ? "auto" : "smooth", block: "start" });
+  kwChanged(true);
+  document.getElementById("kw-input").focus({ preventScroll: true });
+}
+function setupKeywords() {
+  const form = document.getElementById("kw-form");
+  const input = document.getElementById("kw-input");
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (input.value.trim()) { kwAddRaw(input.value); input.value = ""; }
+    kwChanged(true);
+  });
+  input.addEventListener("input", () => {
+    if (!/[,;]/.test(input.value)) return;
+    const parts = input.value.split(/[,;]/);
+    const rest = parts.pop();
+    kwAddRaw(parts.join(","));
+    input.value = rest.trimStart();
+    kwChanged(true);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Backspace" && !input.value && kwChips.length) { kwChips.pop(); kwChanged(true); }
+  });
+  input.addEventListener("paste", (event) => {
+    const text = (event.clipboardData || window.clipboardData).getData("text");
+    if (!/[,;\n]/.test(text)) return;
+    event.preventDefault();
+    kwAddRaw(text);
+    kwChanged(true);
+  });
+  document.getElementById("kw-next").addEventListener("click", () => kwGenerate(true));
+  const grok = document.getElementById("kw-grok");
+  grok.classList.add("cost-btn");
+  grok.append(costBadge("grok"));
+  grok.addEventListener("click", kwGrok);
+  const next = document.getElementById("kw-next");
+  next.classList.add("cost-btn");
+  next.append(costBadge("free"));
+  paintKwRecent();
+}
+setupKeywords();
 // Posts que estão engajando: só no clique (gasta Apify de quem clicou; 30 min de cache para todos).
 async function loadEngagingPosts(term, box) {
   const button = box.querySelector("button");
@@ -4617,6 +4848,13 @@ function renderTopic(topic) {
     if (await addRadarTerm(topic.title.replace(/^#/, ""))) { watch.disabled = true; watch.textContent = "Termo vigiado"; }
   });
   actions.append(watch);
+  if (!topic.blocked) {
+    const gen = el("button", "rounded-full border border-neon/40 px-4 py-1.5 text-sm", "Usar no gerador");
+    gen.type = "button";
+    gen.title = "Gerar frases de todos os formatos com esse assunto";
+    gen.addEventListener("click", () => useInKeywords(topic.title));
+    actions.append(gen);
+  }
   head.append(el("span", "radar-cat", topic.category), title, el("p", "text-sm text-mute", where), actions);
   const stats = el("dl", "drawer-stats");
   [["Calor", topic.heat + "/100"], ["No X agora", topic.rank_x ? "#" + topic.rank_x : "—"], ["Em alta há", topic.hours_x ? topic.hours_x + " h" : "—"], ["Buscas", topic.volume || "—"]].forEach(([label, value]) => {

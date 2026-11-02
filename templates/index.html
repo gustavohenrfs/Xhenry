@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=46">
+  <link rel="stylesheet" href="/static/css/styles.css?v=47">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=64"></script>
+  <script defer src="/static/js/app.js?v=65"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -378,6 +378,28 @@
             </div>
           </div>
           <section id="radar-hook" class="radar-hook" aria-live="polite" hidden></section>
+          <article id="radar-kw" class="glow kw-card rounded-3xl border border-neon/20 bg-card p-4" aria-labelledby="kw-title">
+            <div class="hot-block-head">
+              <div class="min-w-0 flex-1">
+                <h3 id="kw-title" class="font-display text-xl text-white">Gerador por palavras-chave</h3>
+                <p class="text-xs text-mute">Digite as palavras do assunto, separadas por vírgula. Ele monta manchete, pergunta, polêmica, enquete, desafio, promessa e confissão com elas, da maior nota viral para a menor. Grátis e sem fim.</p>
+              </div>
+            </div>
+            <form id="kw-form" class="kw-field" autocomplete="off">
+              <ul id="kw-chips" class="kw-chips" aria-label="Palavras-chave"></ul>
+              <input id="kw-input" maxlength="200" placeholder="Ex.: vazou, Pitbull amigo do Fejuca, Elisa Sanches, live" aria-label="Nova palavra-chave" aria-describedby="kw-legend" class="kw-input">
+              <button id="kw-go" type="submit" class="kw-go">Gerar</button>
+            </form>
+            <p id="kw-legend" class="kw-legend"><span class="kw-dot is-gancho"></span>gancho <span class="kw-dot is-nome"></span>nome <span class="kw-dot is-fato"></span>fato <span class="kw-dot is-tema"></span>tema · toque num nome ou tema para trocar o papel</p>
+            <div id="kw-recent" class="kw-recent" hidden></div>
+            <div id="kw-filters" class="mt-3 flex flex-wrap gap-1.5" aria-label="Filtrar por formato" hidden></div>
+            <p id="kw-status" class="mt-2 text-[11px] text-mute" role="status"></p>
+            <ol id="kw-list" class="kw-list"></ol>
+            <div id="kw-more" class="mt-3 flex flex-wrap items-center gap-3" hidden>
+              <button id="kw-next" type="button" class="hot-btn"><span class="cost-label">Gerar mais 12</span></button>
+              <button id="kw-grok" type="button" class="hot-btn" title="10 frases com as mesmas palavras, escritas pela IA, com as mesmas regras"><span class="cost-label">Turbo com Grok</span></button>
+            </div>
+          </article>
           <article id="radar-hot" class="glow rounded-3xl border border-neon/20 bg-card p-4" aria-labelledby="radar-hot-title">
             <div class="hot-head">
               <div class="min-w-0 flex-1">

@@ -321,7 +321,10 @@ def test_quente_never_sexualizes_a_named_person_and_skips_long_politics():
     assert leve[0].startswith("Se o Flamengo ganhar hoje"), "leve sem semente continua igual a antes"
 
 
-def test_question_bank_by_format_and_moment(client):
+def test_question_bank_by_format_and_moment(client, monkeypatch):
+    # Sábado à tarde: as frases de fim de semana só entram no banco de sexta a domingo (antes dependia do dia real).
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setattr(radar_ideas, "now_sp", lambda: datetime(2026, 11, 7, 15, 0, tzinfo=timezone(timedelta(hours=-3))))
     _, a = user()
     one = client.get("/api/radar/hot/questions", params={"seed": 1}, headers=a).json()
     two = client.get("/api/radar/hot/questions", params={"seed": 2}, headers=a).json()

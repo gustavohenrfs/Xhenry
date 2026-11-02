@@ -2366,3 +2366,69 @@ html:has(#intro:not(.is-out)) { overflow: hidden; }
 .pz-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .3rem; }
 .pz-chip.is-day { color: var(--accent); border-color: rgb(var(--c-neon) / .45); }
 @media (prefers-reduced-motion: reduce) { .vr.is-viral:not(.is-guess) { animation: none; } }
+
+/* ---------- Gerador por palavras-chave (Radar) ----------
+   Um campo só com os chips dentro; cada chip acende na cor do papel que o servidor leu (gancho = magenta,
+   nome = ciano, fato = violeta, tema = neutro). Nota viral = número + régua fina; Muito alto acende em laser. */
+.kw-card { display: grid; gap: .25rem; }
+.kw-field {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; padding: .45rem .45rem .45rem .6rem;
+  border: 1px solid rgb(var(--c-neon) / .35); border-radius: 1.25rem; background: var(--field);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.kw-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(var(--c-neon) / .12), 0 12px 30px -20px var(--laser-a); }
+.kw-chips { display: contents; }
+.kw-chip {
+  --role: var(--muted);
+  display: inline-flex; align-items: center; max-width: 100%; min-height: 2rem; border-radius: 999px;
+  border: 1px dashed var(--line-strong); color: var(--fg); font-size: .85rem;
+  transition: border-color .3s ease, background-color .3s ease, box-shadow .3s ease;
+}
+.kw-chip:is(.is-gancho, .is-nome, .is-fato, .is-tema) {
+  border-style: solid; border-color: color-mix(in srgb, var(--role) 60%, transparent);
+  background: color-mix(in srgb, var(--role) 14%, transparent);
+}
+.kw-chip.is-gancho { --role: var(--accent); box-shadow: 0 0 14px -6px var(--accent); }
+.kw-chip.is-nome { --role: var(--accent-2); }
+.kw-chip.is-fato { --role: var(--violet); }
+.kw-chip.is-tema { --role: var(--muted); }
+.kw-chip-text { display: inline-flex; align-items: baseline; gap: .4rem; min-width: 0; padding: 0 .2rem 0 .75rem; overflow-wrap: anywhere; text-align: left; }
+button.kw-chip-text { cursor: pointer; }
+button.kw-chip-text:hover .kw-chip-role { text-decoration: underline; text-underline-offset: 2px; }
+.kw-chip-role { font-size: .66rem; color: var(--role); white-space: nowrap; }
+.kw-chip-x { display: inline-grid; place-items: center; width: 1.75rem; height: 1.75rem; margin-right: .1rem; border-radius: 999px; color: var(--muted); font-size: 1rem; line-height: 1; }
+.kw-chip-x:hover, .kw-chip-x:focus-visible { color: var(--fg); background: var(--line); }
+.kw-input { flex: 1 1 12rem; min-width: 8rem; min-height: 2.25rem; padding: 0 .35rem; border: 0; background: transparent; color: var(--fg); font-size: .9rem; outline: none; }
+.kw-input::placeholder { color: var(--muted); }
+.kw-go {
+  min-height: 2.4rem; padding: 0 1.15rem; border-radius: 999px; background: var(--accent); color: var(--on-accent);
+  font-size: .85rem; font-weight: 600; box-shadow: 0 8px 22px -12px var(--laser-a);
+}
+.kw-go:hover, .kw-go:focus-visible { filter: brightness(1.08); }
+.kw-legend { margin-top: .45rem; font-size: .7rem; color: var(--muted); line-height: 1.8; }
+.kw-dot { display: inline-block; width: .5rem; height: .5rem; margin: 0 .25rem 0 .4rem; border-radius: 999px; background: var(--muted); vertical-align: middle; }
+.kw-dot:first-child { margin-left: 0; }
+.kw-dot.is-gancho { background: var(--accent); } .kw-dot.is-nome { background: var(--accent-2); } .kw-dot.is-fato { background: var(--violet); }
+.kw-recent:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .45rem; margin-top: .5rem; }
+.kw-recent-chip { max-width: 100%; padding: .2rem .65rem; border: 1px solid var(--line); border-radius: 999px; font-size: .72rem; color: var(--muted); overflow-wrap: anywhere; text-align: left; }
+.kw-recent-chip:hover, .kw-recent-chip:focus-visible { color: var(--fg); border-color: var(--accent); }
+.kw-list { display: grid; gap: .6rem; margin-top: .6rem; transition: opacity .2s ease; }
+.kw-list.is-loading { opacity: .45; }
+@media (min-width: 1024px) { .kw-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.kw-item { display: flex; flex-direction: column; gap: .5rem; min-width: 0; padding: .85rem .95rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--field); }
+.kw-item.is-grok { border-color: var(--info-line); }
+.kw-item-top { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+.kw-text { font-size: 1.02rem; line-height: 1.4; color: var(--fg); overflow-wrap: anywhere; white-space: pre-line; }
+.kw-var:not([hidden]) { display: grid; gap: .5rem; padding-top: .35rem; }
+.kw-meter { --tone: var(--muted); display: inline-flex; align-items: center; gap: .4rem; font-size: .7rem; color: var(--tone); }
+.kw-meter b { min-width: 1.5rem; font-size: .9rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--tone); }
+.kw-meter-bar { position: relative; width: 4.5rem; height: 4px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.kw-meter-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: calc(var(--score, 0) * 1%); border-radius: inherit; background: var(--tone); }
+.kw-meter.is-bom { --tone: var(--ok); }
+.kw-meter.is-medio { --tone: var(--warn); }
+.kw-meter.is-alto { --tone: var(--accent); }
+.kw-meter.is-alto .kw-meter-bar::after { background: linear-gradient(90deg, var(--laser-b), var(--laser-a)); box-shadow: 0 0 8px var(--laser-a); }
+@media (max-width: 640px) {
+  .kw-go { flex: 1 1 100%; }
+  .kw-input { flex-basis: 100%; }
+}

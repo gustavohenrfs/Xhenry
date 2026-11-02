@@ -61,6 +61,8 @@ PROTECTED = [
     ("post", "/api/radar/hot/grok", {}),
     ("post", "/api/radar/hot/sources", {"handle": "fulana"}),
     ("delete", "/api/radar/hot/sources/fulana", None),
+    ("get", "/api/radar/keywords?terms=live", None),
+    ("post", "/api/radar/keywords/grok", {"terms": "live"}),
     ("get", "/api/dashboard?period=today", None),
     ("get", "/api/suggestions", None),
     ("get", "/api/folders", None),
