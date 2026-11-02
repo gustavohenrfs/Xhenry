@@ -460,7 +460,8 @@ def test_apify_reading_test_shows_what_each_way_brings(client, monkeypatch):
     assert ways["perfil"]["today"] == 1 and ways["perfil"]["newest"]["views"] == 17 and ways["perfil"]["has_views"]
     assert ways["busca_hoje"]["today"] == 0 and ways["busca"]["error"] == "o Apify respondeu 500."
     assert ways["unlimited"]["today"] == 1 and ways["unlimited"]["has_views"] is False, "sem campo de views: a tela avisa"
-    assert "perfil" in body["verdict"].lower() and {t for t, _, _ in seen} == {"tok-teste"}
+    assert "unlimited" in body["verdict"].lower() and "sem o campo de views" in body["verdict"].lower()
+    assert {t for t, _, _ in seen} == {"tok-teste"}
     assert [a for _, _, a in seen].count("apidojo~twitter-scraper-lite") == 1, "a 4ª linha usa o Unlimited"
     other, other_account = make_account(make_user())
     assert client.post(f"/api/apify/test/{other_account}", headers=headers).status_code == 404

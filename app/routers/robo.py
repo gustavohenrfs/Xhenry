@@ -240,8 +240,8 @@ def request_apify_run(folder_id: int | None = FOLDER, user: User = Depends(appro
 APIFY_TEST_WAYS = (
     ("busca_hoje", "Busca de hoje (a leitura normal)"),
     ("busca", "Busca sem data"),
-    ("perfil", "Perfil da conta (a reserva)"),
-    ("unlimited", "Perfil pelo Twitter Scraper Unlimited"),
+    ("perfil", "Perfil pelo Tweet Scraper V2"),
+    ("unlimited", "Perfil pelo Twitter Scraper Unlimited (a reserva)"),
 )
 VIEW_FIELDS = ("viewCount", "view_count", "views", "impression_count")
 
@@ -278,8 +278,8 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
     payloads = {
         "busca_hoje": robo_mod.apify_input([handle]),
         "busca": {"searchTerms": [f"from:{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
-        "perfil": robo_mod.apify_profile_input(handle),
-        "unlimited": {"startUrls": [f"https://x.com/{handle}"], "maxItems": 20, "sort": "Latest"},
+        "perfil": {"startUrls": [f"https://x.com/{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
+        "unlimited": robo_mod.apify_profile_input([handle]),
     }
     answers: dict[str, tuple[list[dict[str, Any]] | None, str | None]] = {}
     for key in payloads:
@@ -298,13 +298,13 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
     ways = {v["key"]: v for v in variants}
     if ways["busca_hoje"]["today"]:
         verdict = "A busca de hoje acha os posts dessa conta: a leitura normal funciona."
-    elif ways["perfil"]["today"]:
-        verdict = ("A busca do Apify esconde essa conta, mas o perfil traz os posts de hoje. A leitura já usa o "
-                   "perfil como reserva para ela.")
     elif ways["unlimited"]["today"]:
-        verdict = ("Só o Twitter Scraper Unlimited trouxe os posts de hoje"
-                   + (" com as views." if ways["unlimited"]["has_views"] else ", mas SEM o campo de views.")
-                   + " Mande esse resultado para trocar o ator da leitura.")
+        verdict = ("A busca do V2 não traz essa conta, mas o Twitter Scraper Unlimited traz os posts de hoje"
+                   + (" com as views. A leitura já usa ele como reserva para ela." if ways["unlimited"]["has_views"]
+                      else ", só que SEM o campo de views: likes e respostas atualizam, as views não."))
+    elif ways["perfil"]["today"]:
+        verdict = ("Só o perfil pelo V2 trouxe os posts de hoje (a reserva usa o Unlimited, que não trouxe): "
+                   "mande esse resultado.")
     elif ways["perfil"]["posts"] or ways["busca"]["posts"]:
         verdict = "O Apify acha a conta, mas nenhum post de hoje: ela não postou hoje (ou o post é só repost)."
     else:

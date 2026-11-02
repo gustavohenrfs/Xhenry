@@ -351,8 +351,9 @@ def upsert_sample(cur, account_id: int, tweet_id: str, posted_local: datetime, m
             reply_count = EXCLUDED.reply_count,
             quote_count = EXCLUDED.quote_count,
             bookmark_count = EXCLUDED.bookmark_count,
-            impression_count = EXCLUDED.impression_count,
-            view_count = EXCLUDED.view_count,
+            -- no X as views só sobem: ator sem o campo (ou leitura atrasada) não derruba o número
+            impression_count = GREATEST(tweet_samples.impression_count, EXCLUDED.impression_count),
+            view_count = GREATEST(tweet_samples.view_count, EXCLUDED.view_count),
             collected_at = NOW()
         """,
         (
@@ -614,9 +615,11 @@ APIFY_QUERY_ACCOUNTS = 8  # contas juntas numa busca ("(from:a OR from:b …) si
 APIFY_MAX_QUERIES = 5  # buscas por execução
 APIFY_MAX_ACCOUNTS = APIFY_QUERY_ACCOUNTS * APIFY_MAX_QUERIES  # contas por execução; mais que isso vira outra, em seguida
 APIFY_PARALLEL = 1  # o ator só aceita uma execução por vez
-APIFY_PROFILE_ITEMS = 50  # reserva pelo perfil: os posts mais novos da conta (o mínimo do ator)
-APIFY_PROFILE_MAX = 5  # contas lidas pelo perfil numa leitura (uma execução cada, uma depois da outra)
-APIFY_UNLIMITED = "apidojo~twitter-scraper-lite"  # Twitter Scraper Unlimited: sem mínimo por busca (teste)
+APIFY_PROFILE_ITEMS = 20  # reserva pelo perfil: os posts mais novos de cada conta (o Unlimited inclui ~40 por busca)
+APIFY_PROFILE_MAX = 5  # contas lidas pelo perfil numa leitura (uma execução, até 5 perfis: a faixa mais barata)
+# Twitter Scraper Unlimited: sem o mínimo de 50 tweets por busca do V2. É o ator da reserva (conta pequena ou que a
+# busca do V2 não trouxe); APIFY_FALLBACK_ACTOR no .env troca.
+APIFY_UNLIMITED = "apidojo~twitter-scraper-lite"
 APIFY_ROUND_ACCOUNTS = 200  # contas de um usuário numa passada
 NO_APIFY_TOKEN = "Token do Apify em falta. Cole o seu em Configurações para o robô ler as suas contas."
 
@@ -646,10 +649,14 @@ def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, 
             "sort": "Latest"}
 
 
-def apify_profile_input(handle: str) -> dict[str, Any]:
-    """Pedido pelo perfil (a linha do tempo da conta), não pela busca: a busca do X esconde algumas contas
-    para as contas que o ator usa (conteúdo sensível), e aí "from:conta" volta vazio mesmo com post novo."""
-    return {"startUrls": [f"https://x.com/{handle}"], "maxItems": APIFY_PROFILE_ITEMS, "sort": "Latest"}
+def apify_profile_input(handles: list[str]) -> dict[str, Any]:
+    """Pedido pelo perfil (a linha do tempo de cada conta), não pela busca."""
+    return {"startUrls": [f"https://x.com/{handle}" for handle in handles],
+            "maxItems": APIFY_PROFILE_ITEMS * len(handles), "sort": "Latest"}
+
+
+def apify_fallback_actor() -> str:
+    return (os.getenv("APIFY_FALLBACK_ACTOR") or APIFY_UNLIMITED).strip().replace("/", "~")
 
 
 def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
@@ -657,9 +664,10 @@ def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
     return apify_call(token, apify_input(handles))
 
 
-def apify_profile(token: str, handle: str) -> list[dict[str, Any]]:
-    """Reserva: os posts mais novos de uma conta pelo perfil."""
-    return apify_call(token, apify_profile_input(handle))
+def apify_profile(token: str, handles: list[str]) -> list[dict[str, Any]]:
+    """Reserva: os posts mais novos dessas contas pelo perfil, no Twitter Scraper Unlimited (o V2 pede pelo menos
+    50 tweets por busca; conta pequena, com 1 post no dia, não sai por ele)."""
+    return apify_call(token, apify_profile_input(handles), apify_fallback_actor())
 
 
 def apify_call(token: str, payload: dict[str, Any], actor: str | None = None) -> list[dict[str, Any]]:
@@ -842,15 +850,16 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
                for account in batch if account["username"].lower() not in {apify_author(i)[0] for i in items}]
     by_profile: dict[str, list[dict[str, Any]]] = {}
 
-    def from_profile(handle: str) -> tuple[str, list[dict[str, Any]]]:
+    if missing:
+        wanted = missing[:APIFY_PROFILE_MAX]
         try:
-            return handle, apify_profile(token, handle)
+            for item in apify_profile(token, wanted):  # uma execução só, com todas as que faltaram
+                author = apify_author(item)[0]
+                for handle in wanted:
+                    if handle.lower() == author:
+                        by_profile.setdefault(handle, []).append(item)
         except ApifyError as exc:
-            log.warning("perfil de @%s pelo Apify falhou: %s", handle, exc)
-            return handle, []
-
-    # Uma execução de cada vez (regra do ator).
-    by_profile = dict(from_profile(handle) for handle in missing[:APIFY_PROFILE_MAX])
+            log.warning("reserva pelo perfil (%s) falhou: %s", ", ".join(wanted), exc)
     answers = [items + [i for account in batch for i in by_profile.get(account["username"], [])]
                for batch, items in zip(batches, answers)]
     saved = 0

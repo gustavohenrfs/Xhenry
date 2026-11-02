@@ -201,7 +201,7 @@ def test_is_repost(item, repost):
 
 def test_apify_read_reports_accounts_apify_brought_nothing_for(monkeypatch):
     """Uma leitura em que o Apify não traz nada de uma conta: anota a conta (o que já estava guardado fica)."""
-    monkeypatch.setattr(robo, "apify_profile", lambda token, handle: [])
+    monkeypatch.setattr(robo, "apify_profile", lambda token, handles: [])
     saved = []
     monkeypatch.setattr(robo, "save_followers", lambda cur, account, day, n: None)
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: saved.append((account["username"], len(tweets))) or len(tweets))
@@ -232,17 +232,18 @@ def test_profile_reads_accounts_the_search_missed(monkeypatch):
     monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [
         {"id": "1", "createdAt": posted, "author": {"userName": "achada", "followers": 9}}])
 
-    def profile(token, handle):
-        asked.append(handle)
-        return [{"id": "2", "createdAt": posted, "viewCount": 17, "author": {"userName": "Escondida", "followers": 40}}]
+    def profile(token, handles):
+        asked.append(list(handles))
+        return [{"id": "2", "createdAt": posted, "viewCount": 17, "author": {"userName": "Escondida", "followers": 40}},
+                {"id": "3", "createdAt": posted, "viewCount": 5, "author": {"userName": "pequena", "followers": 2}}]
 
     monkeypatch.setattr(robo, "apify_profile", profile)
     report = {}
-    accounts = [{"id": 1, "username": "achada"}, {"id": 2, "username": "escondida"}]
-    assert robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report) == 2
-    assert asked == ["escondida"], "só a conta que a busca não trouxe"
-    assert ("escondida", ["2"]) in saved and ("escondida", 40) in followers
-    assert report == {"perfil": ["escondida"]}, "lida pelo perfil e não fica como sem post"
+    accounts = [{"id": 1, "username": "achada"}, {"id": 2, "username": "escondida"}, {"id": 3, "username": "pequena"}]
+    assert robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report) == 3
+    assert asked == [["escondida", "pequena"]], "uma execução só, com as contas que a busca não trouxe"
+    assert ("escondida", ["2"]) in saved and ("pequena", ["3"]) in saved and ("escondida", 40) in followers
+    assert report == {"perfil": ["escondida", "pequena"]}, "lidas pelo perfil e não ficam como sem post"
 
 
 def test_profile_failure_does_not_break_the_read(monkeypatch):
@@ -250,7 +251,7 @@ def test_profile_failure_does_not_break_the_read(monkeypatch):
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: len(tweets))
     monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
 
-    def broken(token, handle):
+    def broken(token, handles):
         raise robo.ApifyError("o Apify respondeu 500.")
 
     monkeypatch.setattr(robo, "apify_profile", broken)
@@ -259,6 +260,26 @@ def test_profile_failure_does_not_break_the_read(monkeypatch):
     assert report == {"sem_post": ["a"]}
 
 
-def test_profile_input():
-    assert robo.apify_profile_input("fulana") == {"startUrls": ["https://x.com/fulana"],
-                                                   "maxItems": robo.APIFY_PROFILE_ITEMS, "sort": "Latest"}
+def test_profile_input_and_actor(monkeypatch):
+    """A reserva vai pelo Twitter Scraper Unlimited (sem o mínimo de 50 tweets por busca do V2): conta pequena,
+    com poucos posts, só é lida assim."""
+    assert robo.apify_profile_input(["fulana", "beltrana"]) == {
+        "startUrls": ["https://x.com/fulana", "https://x.com/beltrana"],
+        "maxItems": 2 * robo.APIFY_PROFILE_ITEMS, "sort": "Latest"}
+    sent = []
+    monkeypatch.setattr(robo, "apify_call", lambda token, payload, actor=None: sent.append(actor) or [])
+    monkeypatch.delenv("APIFY_FALLBACK_ACTOR", raising=False)
+    robo.apify_profile("tok", ["fulana"])
+    monkeypatch.setenv("APIFY_FALLBACK_ACTOR", "outro/ator")
+    robo.apify_profile("tok", ["fulana"])
+    assert sent == [robo.APIFY_UNLIMITED, "outro~ator"]
+
+
+def test_views_never_go_down():
+    """No X as views só sobem: se um ator vier sem o campo (ou com menos), fica o número que já estava."""
+    log = []
+    robo.upsert_sample(FakeCursor(log), 1, "9", datetime.now(robo.BR_TZ), {"like_count": 1, "retweet_count": 0,
+                       "reply_count": 0, "quote_count": 0, "bookmark_count": 0, "view_count": 0}, "oi")
+    sql = log[0][0]
+    assert "view_count = GREATEST(tweet_samples.view_count, EXCLUDED.view_count)" in sql
+    assert "impression_count = GREATEST(tweet_samples.impression_count, EXCLUDED.impression_count)" in sql

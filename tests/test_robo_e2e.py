@@ -128,7 +128,7 @@ def w(tmp_path_factory):
         mp.setattr(robo, "summary_day", lambda now=None: world.summary_day)
         # Nenhum teste chama o Apify de verdade: quem precisa troca apify_fetch.
         mp.setattr(robo, "apify_fetch", lambda token, handles: pytest.fail("Apify chamado sem resposta falsa"))
-        mp.setattr(robo, "apify_profile", lambda token, handle: [])  # reserva pelo perfil: nada, salvo nos testes dela
+        mp.setattr(robo, "apify_profile", lambda token, handles: [])  # reserva pelo perfil: nada, salvo nos testes dela
         yield world
     world.engine.dispose()
 
