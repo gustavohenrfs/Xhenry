@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,6 +29,7 @@ from app.services import (
     as_utc,
     get_settings,
     now_utc,
+    owned_folder,
     robot_interval,
     selected_accounts,
     settings_payload,
@@ -79,6 +80,8 @@ def robo_payload(db: Session) -> dict[str, Any]:
             "status": last.status.value,
             "contas": stats.get("contas"),
             "tweets": stats.get("tweets"),
+            "sem_post": stats.get("sem_post") or 0,
+            "pasta": stats.get("pasta"),
             "manual": bool(stats.get("manual")),
             "error": last.error,
         }
@@ -131,13 +134,19 @@ def write_robo(payload: RoboIn, db: Session = Depends(get_db)) -> dict[str, Any]
     return robo_payload(db)
 
 
+FOLDER = Query(None, ge=1)
+
+
 @router.post("/api/robo/run")
-def request_run(user: User = Depends(admin_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Botão "Atualizar dados": lê na hora pelo Apify (app/reader.py); sem Postgres o robô pega o
-    pedido na próxima passada do cron (até 1 min)."""
+def request_run(folder_id: int | None = FOLDER, user: User = Depends(admin_user),
+                db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Botão "Atualizar dados": lê na hora pelo Apify (app/reader.py); com folder_id (pasta selecionada no
+    painel), só as contas dela. Sem Postgres o robô pega o pedido na próxima passada do cron (até 1 min)."""
     if not admin_apify_active(db):
         raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
-    if not reader.start(user.id, True):
+    if folder_id is not None:
+        owned_folder(db, user.id, folder_id)  # pasta de outro dono: 404
+    if not reader.start(user.id, True, folder_id):
         row = get_settings(db)
         row.robo_run_requested_at = now_utc()
         db.commit()
@@ -209,13 +218,16 @@ def write_apify(payload: ApifyIn, user: User = Depends(approved_user), db: Sessi
 
 
 @user_router.post("/api/apify/run")
-def request_apify_run(user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """"Atualizar dados" de quem lê pelo Apify: lê na hora (app/reader.py); sem Postgres, o robô lê
-    no próximo minuto."""
+def request_apify_run(folder_id: int | None = FOLDER, user: User = Depends(approved_user),
+                      db: Session = Depends(get_db)) -> dict[str, Any]:
+    """"Atualizar dados" de quem lê pelo Apify: lê na hora (app/reader.py), só a pasta com folder_id; sem
+    Postgres, o robô lê no próximo minuto."""
     row = user_settings(db, user.id)
     if not (row.apify_token or "").strip():
         raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
-    if not reader.start(user.id, False):
+    if folder_id is not None:
+        owned_folder(db, user.id, folder_id)  # pasta de outro dono: 404
+    if not reader.start(user.id, False, folder_id):
         row.apify_run_requested_at = now_utc()
         db.commit()
     return read_apify(user, db)

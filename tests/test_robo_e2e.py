@@ -538,3 +538,55 @@ def test_summary_reads_at_2355_and_congratulates_at_2359(w, monkeypatch):
     w.clock, w.summary_day = "12:00", None
     w.sql("update user_settings set notify_prefs = NULL")
     admin_token(w, None)
+
+
+# ---- Atualizar dados com uma pasta selecionada, e o aviso com o que ficou guardado ----
+
+def test_read_now_reads_only_the_selected_folder(w, monkeypatch):
+    import robo
+    from sqlalchemy.orm import Session
+
+    from app.models import Folder, XAccount
+
+    admin_token(w, "tok-admin")
+    with Session(w.engine) as db:
+        folder = Folder(owner_id=admin_id(w), name="Só uma", color="#4FE3FF")
+        db.add(folder)
+        db.flush()
+        db.add(XAccount(folder_id=folder.id, username="conta5"))
+        db.commit()
+        folder_id = folder.id
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(sorted(handles)) or [])
+    assert robo.read_now(admin_id(w), folder_id) == "ok"
+    assert calls == [["conta5"]], "pasta selecionada: só as contas dela"
+    assert w.last_beat()[1]["pasta"] == "Só uma"
+    calls.clear()
+    assert robo.read_now(admin_id(w)) == "ok"
+    assert len(calls) == 1 and {"conta1", "conta5"} <= set(calls[0]), "sem pasta: todas"
+    friend = w.q("select owner_id from user_settings where apify_token='tok-amiga'")[0][0]
+    calls.clear()
+    assert robo.read_now(friend, folder_id) == "sem_pasta"
+    assert calls == [], "pasta de outro dono: nada"
+    w.sql("delete from x_accounts where username='conta5'")
+    admin_token(w, None)
+
+
+def test_read_says_what_is_stored_when_apify_brings_nothing(w, monkeypatch):
+    """O post lido antes continua guardado; uma leitura em que o Apify não traz nada não vira "0 posts"."""
+    import robo
+
+    admin_token(w, "tok-admin")
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: admin_items(w, views=20))
+    assert robo.read_now(admin_id(w)) == "ok"
+    stored = w.last_beat()[1]["tweets"]
+    assert stored >= 4
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
+    assert robo.read_now(admin_id(w)) == "ok"
+    stats = w.last_beat()[1]
+    accounts = stats["contas"]
+    assert stats["tweets"] == stored, "o total de hoje é o guardado, não só o que veio agora"
+    assert stats["novos"] == 0 and stats["sem_post"] == accounts, "e diz que o Apify não trouxe nada dessas contas"
+    detail = w.q("select apify_detail from user_settings where owner_id=:o", o=admin_id(w))[0][0]
+    assert f"{stored} posts de hoje" in detail and f"não trouxe nada de {accounts}" in detail
+    admin_token(w, None)

@@ -355,8 +355,8 @@ def test_friend_reading_schedule_and_instant_read(client, monkeypatch):
     with SessionLocal() as db:
         db.query(UserSetting).filter(UserSetting.apify_token == "tok").update({"apify_run_requested_at": None})
         db.commit()
-    started: list[tuple[int, bool]] = []
-    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin: started.append((owner_id, is_admin)) or True)
+    started: list[tuple[int, bool, int | None]] = []
+    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin, folder_id=None: started.append((owner_id, is_admin, folder_id)) or True)
     monkeypatch.setattr(reader, "running", lambda owner_id: True)
     state = client.post("/api/apify/run", headers=friend).json()
     assert started and started[0][1] is False, "lê na hora pelo painel"
@@ -367,8 +367,8 @@ def test_admin_refresh_reads_now_and_needs_a_token(client, monkeypatch):
     from app import reader
 
     admin = admin_headers()
-    started: list[tuple[int, bool]] = []
-    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin: started.append((owner_id, is_admin)) or True)
+    started: list[tuple[int, bool, int | None]] = []
+    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin, folder_id=None: started.append((owner_id, is_admin, folder_id)) or True)
     try:
         with SessionLocal() as db:
             get_settings(db).robo_run_requested_at = None
@@ -395,3 +395,33 @@ def test_reader_without_postgres_leaves_it_to_the_cron():
     from app import reader
 
     assert reader.available() is False and reader.start(1, False) is False and reader.running(1) is False
+
+
+def test_refresh_reads_only_the_selected_folder(client, monkeypatch):
+    """Com uma pasta selecionada, "Atualizar dados" lê só as contas dela; pasta de outro dono é 404."""
+    from app import reader
+
+    started: list[tuple[int, bool, int | None]] = []
+    monkeypatch.setattr(reader, "start", lambda owner_id, is_admin, folder_id=None: started.append((owner_id, is_admin, folder_id)) or True)
+    friend_id = make_user()
+    friend = bearer(friend_id)
+    client.put("/api/settings", json={"apify_token": "tok-f"}, headers=friend)
+    mine, _ = make_account(friend_id)
+    other, _ = make_account(make_user())
+    assert client.post(f"/api/apify/run?folder_id={mine}", headers=friend).status_code == 200
+    assert started[-1] == (friend_id, False, mine)
+    assert client.post(f"/api/apify/run?folder_id={other}", headers=friend).status_code == 404
+    assert client.post("/api/apify/run", headers=friend).status_code == 200 and started[-1][2] is None
+    admin = admin_headers()
+    try:
+        client.put("/api/settings", json={"apify_token": "tok-admin"}, headers=admin)
+        with SessionLocal() as db:
+            admin_folder, _ = make_account(ensure_admin(db).id)
+        assert client.post(f"/api/robo/run?folder_id={admin_folder}", headers=admin).status_code == 200
+        assert started[-1][1] is True and started[-1][2] == admin_folder
+        assert client.post(f"/api/robo/run?folder_id={mine}", headers=admin).status_code == 404, "pasta do amigo"
+    finally:
+        client.put("/api/settings", json={"apify_token": ""}, headers=admin)
+        with SessionLocal() as db:
+            get_settings(db).robo_run_requested_at = None
+            db.commit()

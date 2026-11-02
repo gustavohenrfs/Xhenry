@@ -44,11 +44,11 @@ def _leave_for_cron(owner_id: int, is_admin: bool) -> None:
         db.commit()
 
 
-def _read(owner_id: int, is_admin: bool) -> None:
+def _read(owner_id: int, is_admin: bool, folder_id: int | None = None) -> None:
     try:
         import robo
 
-        result = robo.read_now(owner_id)
+        result = robo.read_now(owner_id, folder_id)
         log.info("leitura na hora do usuário %s: %s", owner_id, result)
     except Exception:
         log.exception("leitura na hora do usuário %s falhou; fica para o cron", owner_id)
@@ -62,13 +62,14 @@ def _read(owner_id: int, is_admin: bool) -> None:
         cache.forget()  # o dashboard monta de novo com o que acabou de chegar
 
 
-def start(owner_id: int, is_admin: bool) -> bool:
-    """Começa a leitura agora. False = indisponível aqui (SQLite): quem chamou grava o pedido do cron."""
+def start(owner_id: int, is_admin: bool, folder_id: int | None = None) -> bool:
+    """Começa a leitura agora (só as contas da pasta, com folder_id). False = indisponível aqui (SQLite): quem
+    chamou grava o pedido do cron, que lê todas as contas."""
     if not available():
         return False
     with _lock:
         if owner_id in _running:
             return True  # já está lendo: o segundo clique só espera a mesma leitura
         _running.add(owner_id)
-    threading.Thread(target=_read, args=(owner_id, is_admin), name=f"ler-agora-{owner_id}", daemon=True).start()
+    threading.Thread(target=_read, args=(owner_id, is_admin, folder_id), name=f"ler-agora-{owner_id}", daemon=True).start()
     return True

@@ -2653,7 +2653,7 @@ function paintRobo(robo) {
   if (robo.last_run) {
     const run = robo.last_run;
     let text = "Última leitura: " + stampBR(run.finished_at);
-    if (run.contas !== null && run.contas !== undefined) text += " · " + run.contas + " contas, " + (run.tweets || 0) + " tweets";
+    if (run.contas !== null && run.contas !== undefined) text += " · " + (run.pasta ? "pasta " + run.pasta + ", " : "") + run.contas + " contas, " + (run.tweets || 0) + " posts de hoje";
     if (run.status === "failed") text += " · falhou";
     else if (run.status === "partial") text += " · com falhas";
     parts.push(text);
@@ -2686,9 +2686,16 @@ const ROBO_PICKUP_MS = 3 * 60000;   // cron a cada minuto: passou disso, o robô
 const ROBO_RUN_MS = 12 * 60000;     // uma leitura com muitas contas pode levar alguns minutos no Apify
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const READ_POLL_MS = 2000;
+// Com uma pasta selecionada (na aba que mostra o seletor), "Atualizar dados" lê só as contas dela.
+function readFolder() {
+  if (!state.folderId || !FOLDER_TABS.includes(state.tab)) return null;
+  return ((state.data && state.data.folders) || []).find((folder) => folder.id === state.folderId) || null;
+}
+function readQuery(folder) { return folder ? "?folder_id=" + folder.id : ""; }
 async function refreshByApify(btn) {
-  btn.textContent = "Lendo pelo Apify...";
-  let apify = await api("/api/apify/run", { method: "POST" });
+  const folder = readFolder();
+  btn.textContent = folder ? "Lendo a pasta " + folder.name + "..." : "Lendo pelo Apify...";
+  let apify = await api("/api/apify/run" + readQuery(folder), { method: "POST" });
   paintApify(apify);
   const started = Date.now();
   while (apify.running || apify.requested_at) {
@@ -2713,13 +2720,14 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     return;
   }
   btn.textContent = "Atualizando...";
+  const folder = readFolder();
   try {
-    const asked = await api("/api/robo/run", { method: "POST" });
+    const asked = await api("/api/robo/run" + readQuery(folder), { method: "POST" });
     const askedAt = Date.parse(asked.asked_at || asked.requested_at);
     const started = Date.now();
     let robo = asked;
     // O painel lê na hora pelo Apify; sem Postgres o robô pega o pedido em até 1 minuto.
-    const say = (r) => { btn.textContent = r.running ? "Lendo pelo Apify..." : r.requested_at ? "Esperando o robô..." : "Lendo..."; };
+    const say = (r) => { btn.textContent = r.running ? (folder ? "Lendo a pasta " + folder.name + "..." : "Lendo pelo Apify...") : r.requested_at ? "Esperando o robô..." : "Lendo..."; };
     say(robo);
     let pickedFrom = Date.now();
     for (;;) {
@@ -2737,7 +2745,11 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     await load();
     const run = robo.last_run;
     if (run.status === "failed") toast("A leitura falhou: " + (run.error || "erro no Apify") + ".", "error");
-    else toast("Leitura feita pelo Apify: " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " tweets.");
+    else {
+      // "tweets" = posts de hoje guardados dessas contas (não só os que vieram nesta leitura).
+      const empty = run.sem_post ? " O Apify não trouxe nada de " + run.sem_post + (run.sem_post === 1 ? " conta" : " contas") + " desta vez; o que já estava guardado continua." : "";
+      toast("Leitura feita" + (run.pasta ? " na pasta " + run.pasta : "") + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " posts de hoje." + empty);
+    }
     if (state.tab === "settings") paintRobo(robo);
   } catch (error) { toast(error.message || "Falha ao atualizar."); }
   btn.disabled = false;

@@ -185,3 +185,24 @@ def test_apify_fetch_returns_items(monkeypatch):
 ])
 def test_is_repost(item, repost):
     assert robo.is_repost(item) is repost
+
+
+def test_apify_read_reports_accounts_apify_brought_nothing_for(monkeypatch):
+    """Uma leitura em que o Apify não traz nada de uma conta: anota a conta (o que já estava guardado fica)."""
+    saved = []
+    monkeypatch.setattr(robo, "save_followers", lambda cur, account, day, n: None)
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: saved.append((account["username"], len(tweets))) or len(tweets))
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [
+        {"id": "1", "createdAt": posted, "author": {"userName": "Cheia", "followers": 9}}])
+    report = {}
+    accounts = [{"id": 1, "username": "cheia"}, {"id": 2, "username": "vazia"}]
+    assert robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report) == 1
+    assert report == {"sem_post": ["vazia"]} and saved == [("cheia", 1), ("vazia", 0)]
+
+
+def test_read_detail_says_stored_total_folder_and_empty_accounts():
+    assert robo.read_detail(4, 7, {}) == "4 contas lidas, 7 posts de hoje"
+    text = robo.read_detail(4, 7, {"sem_post": ["a"]}, "Dinheiro")
+    assert text.startswith("Pasta Dinheiro: 4 contas lidas, 7 posts de hoje")
+    assert "não trouxe nada de 1 conta nesta leitura" in text and "continua" in text

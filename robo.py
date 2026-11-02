@@ -432,8 +432,8 @@ def upsert_followers(cur, account_id: int, day, followers: int) -> None:
     )
 
 
-def load_accounts(cur, limit: int) -> list[dict[str, Any]]:
-    """Contas do admin, as lidas há mais tempo primeiro."""
+def load_accounts(cur, limit: int, folder_id: int | None = None) -> list[dict[str, Any]]:
+    """Contas do admin, as lidas há mais tempo primeiro (só as da pasta, com folder_id)."""
     cur.execute(
         """
         SELECT a.id, a.owner_id, a.username, a.display_name, a.followers_at
@@ -442,10 +442,11 @@ def load_accounts(cur, limit: int) -> list[dict[str, Any]]:
         WHERE a.is_active IS TRUE
           AND COALESCE(a.is_archived, FALSE) IS FALSE
           AND u.is_admin IS TRUE
+          AND (%s::int IS NULL OR a.folder_id = %s::int)
         ORDER BY a.collected_at NULLS FIRST, a.id
         LIMIT %s
         """,
-        (limit,),
+        (folder_id, folder_id, limit),
     )
     return list(cur.fetchall())
 
@@ -749,8 +750,10 @@ def apify_users(cur) -> list[dict[str, Any]]:
     return list(cur.fetchall())
 
 
-def apify_accounts(cur, owner_id: int, everything: bool, interval_min: int | None = None) -> list[dict[str, Any]]:
-    """Contas do usuário para ler agora: todas com o botão, senão as que passaram do intervalo."""
+def apify_accounts(cur, owner_id: int, everything: bool, interval_min: int | None = None,
+                   folder_id: int | None = None) -> list[dict[str, Any]]:
+    """Contas do usuário para ler agora: todas com o botão, senão as que passaram do intervalo (só as da
+    pasta, com folder_id)."""
     cur.execute(
         """
         SELECT id, owner_id, username, display_name, followers_at
@@ -758,11 +761,13 @@ def apify_accounts(cur, owner_id: int, everything: bool, interval_min: int | Non
         WHERE owner_id = %s
           AND is_active IS TRUE
           AND COALESCE(is_archived, FALSE) IS FALSE
+          AND (%s::int IS NULL OR folder_id = %s::int)
           AND (%s OR collected_at IS NULL OR collected_at < NOW() - make_interval(mins => %s))
         ORDER BY collected_at NULLS FIRST, id
         LIMIT %s
         """,
-        (owner_id, everything, interval_min or int(apify_interval().total_seconds() // 60), APIFY_ROUND_ACCOUNTS),
+        (owner_id, folder_id, folder_id, everything, interval_min or int(apify_interval().total_seconds() // 60),
+         APIFY_ROUND_ACCOUNTS),
     )
     return list(cur.fetchall())
 
@@ -783,12 +788,15 @@ def set_apify_status(cur, owner_id: int, status: str, detail: str | None) -> Non
     )
 
 
-def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datetime) -> int:
+def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datetime,
+               report: dict[str, Any] | None = None) -> int:
     """Lê as contas pelo Apify (lotes de APIFY_MAX_ACCOUNTS) e grava: posts de hoje, alertas de views,
     o dia refeito e seguidores (em toda leitura: vêm junto com os posts).
 
-    Devolve os posts de hoje gravados. Falha da chamada sobe como ApifyError antes de gravar o lote;
-    conta sem post nenhum não é falha.
+    Devolve os posts de hoje que vieram nesta leitura. Falha da chamada sobe como ApifyError antes de gravar
+    o lote; conta sem post nenhum não é falha. Com report, anota em report["sem_post"] as contas de que o
+    Apify não trouxe item nenhum (nem post antigo, nem repost): a busca falhou para elas nesta leitura, e o
+    que já estava guardado continua lá.
     """
     batches = [accounts[start:start + APIFY_MAX_ACCOUNTS] for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS)]
     if len(batches) > 1:
@@ -810,6 +818,9 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             if is_repost(item):
                 continue
             by_author.setdefault(handle, []).append(item)
+        if report is not None:
+            seen = {apify_author(item)[0] for item in items}
+            report.setdefault("sem_post", []).extend(a["username"] for a in batch if a["username"].lower() not in seen)
         with conn.cursor() as cur:
             for account in batch:
                 handle = account["username"].lower()
@@ -818,6 +829,25 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
                 saved += save_tweets(cur, account, by_author.get(handle, []), midnight)
         conn.commit()
     return saved
+
+
+def stored_today(cur, account_ids: list[int], midnight: datetime) -> int:
+    """Posts de hoje guardados dessas contas (o que o painel mostra), não só os que vieram agora."""
+    if not account_ids:
+        return 0
+    cur.execute("SELECT COUNT(*) AS n FROM tweet_samples WHERE account_id = ANY(%s) AND posted_at >= %s",
+                (list(account_ids), midnight))
+    row = cur.fetchone()
+    return int((row["n"] if isinstance(row, dict) else row[0]) or 0)
+
+
+def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name: str | None = None) -> str:
+    """Texto do fim da leitura: contas lidas, posts de hoje guardados e as contas de que o Apify não trouxe nada."""
+    text = f"{accounts} contas lidas, {stored} posts de hoje"
+    empty = len(report.get("sem_post") or [])
+    if empty:
+        text += f" (o Apify não trouxe nada de {empty} {'conta' if empty == 1 else 'contas'} nesta leitura; o que já estava guardado continua)"
+    return f"Pasta {folder_name}: {text}" if folder_name else text
 
 
 def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str, Any]:
@@ -833,7 +863,7 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
     if not requested and (user.get("apify_auto") is False or paused(user)):
         return {"owner": owner_id, "contas": 0}  # automática desligada ou pausa da madrugada: só pelo botão
     with conn.cursor() as cur:
-        accounts = apify_accounts(cur, owner_id, requested, user.get("apify_interval_min"))
+        accounts = apify_accounts(cur, owner_id, requested, user.get("apify_interval_min"), user.get("folder_id"))
     conn.commit()
     if not accounts:
         if requested:  # nada para ler (tudo arquivado): só fecha o pedido
@@ -853,8 +883,9 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
         conn.commit()
         log.info("apify: usuário %s sem token (%s contas esperando)", owner_id, len(accounts))
         return {"owner": owner_id, "contas": 0, "erro": "sem_token"}
+    report: dict[str, Any] = {}
     try:
-        saved = apify_read(conn, token, accounts, midnight)
+        saved = apify_read(conn, token, accounts, midnight, report)
     except ApifyError as exc:
         conn.rollback()
         with conn.cursor() as cur:
@@ -866,10 +897,12 @@ def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str
         log.warning("apify: usuário %s: %s", owner_id, exc)
         return {"owner": owner_id, "contas": 0, "erro": str(exc)}
     with conn.cursor() as cur:
-        set_apify_status(cur, owner_id, "ok", f"{len(accounts)} contas lidas, {saved} posts de hoje")
+        stored = stored_today(cur, [a["id"] for a in accounts], midnight)
+        set_apify_status(cur, owner_id, "ok", read_detail(len(accounts), stored, report, user.get("folder_name")))
     conn.commit()
-    log.info("apify: usuário %s — %s contas, %s posts de hoje", owner_id, len(accounts), saved)
-    return {"owner": owner_id, "contas": len(accounts), "tweets": saved}
+    log.info("apify: usuário %s — %s contas, %s posts novos, %s de hoje guardados, sem item: %s", owner_id,
+             len(accounts), saved, stored, report.get("sem_post"))
+    return {"owner": owner_id, "contas": len(accounts), "tweets": stored, "novos": saved}
 
 
 def summary_day(now: datetime | None = None) -> date | None:
@@ -1109,20 +1142,24 @@ def admin_apify(conn) -> dict[str, Any] | None:
     return {"id": row["id"], "token": (row["apify_token"] or "").strip(), "due": due}
 
 
-def admin_accounts(cur) -> list[dict[str, Any]]:
-    """Todas as contas ativas do admin."""
-    return load_accounts(cur, 100_000)
+def admin_accounts(cur, folder_id: int | None = None) -> list[dict[str, Any]]:
+    """Todas as contas ativas do admin (só as da pasta, com folder_id)."""
+    return load_accounts(cur, 100_000, folder_id)
 
 
-def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: datetime, manual: bool) -> str | None:
-    """Lê as contas do admin pelo Apify e grava o batimento. None = deu certo; texto = motivo da falha."""
+def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: datetime, manual: bool,
+                     folder: dict[str, Any] | None = None) -> str | None:
+    """Lê as contas do admin pelo Apify e grava o batimento. None = deu certo; texto = motivo da falha.
+    Com folder ({"id", "name"}): só as contas dessa pasta ("Atualizar dados" com a pasta selecionada)."""
     with conn.cursor() as cur:
-        accounts = admin_accounts(cur)
+        accounts = admin_accounts(cur, folder["id"] if folder else None)
     conn.commit()
+    folder_name = folder["name"] if folder else None
     log.info("início pelo Apify%s — %s contas, tweets depois de %s", " (Atualizar Dados)" if manual else "",
              len(accounts), midnight.isoformat())
+    report: dict[str, Any] = {}
     try:
-        saved = apify_read(conn, admin["token"], accounts, midnight)
+        saved = apify_read(conn, admin["token"], accounts, midnight, report)
     except ApifyError as exc:
         conn.rollback()
         reason = str(exc)
@@ -1131,23 +1168,31 @@ def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: d
             set_apify_status(cur, admin["id"], "erro", reason)
             alert_once(cur, f"apify:{admin['id']}:erro:{hour}", "apify", f"⚠️ Apify falhou: {reason}", admin["id"])
             record_run(cur, started, "failed", reason[:500], {"via": "apify", "contas": 0, "tweets": 0,
-                                                               "falhas": len(accounts), "manual": manual})
+                                                               "falhas": len(accounts), "manual": manual,
+                                                               "pasta": folder_name})
         conn.commit()
         log.warning("apify do admin falhou (%s)", reason)
         return reason
     with conn.cursor() as cur:
-        set_apify_status(cur, admin["id"], "ok", f"{len(accounts)} contas lidas, {saved} posts de hoje")
-        record_run(cur, started, "ok", None, {"via": "apify", "contas": len(accounts), "tweets": saved,
-                                               "falhas": 0, "manual": manual})
+        # "tweets" é o total de hoje guardado dessas contas: uma leitura em que o Apify não trouxe um post não
+        # faz o aviso dizer 0 (o post continua guardado). "novos" = o que veio nesta leitura.
+        stored = stored_today(cur, [a["id"] for a in accounts], midnight)
+        empty = report.get("sem_post") or []
+        set_apify_status(cur, admin["id"], "ok", read_detail(len(accounts), stored, report, folder_name))
+        record_run(cur, started, "ok", None, {"via": "apify", "contas": len(accounts), "tweets": stored,
+                                               "novos": saved, "sem_post": len(empty), "falhas": 0,
+                                               "manual": manual, "pasta": folder_name})
     conn.commit()
-    log.info("fim pelo Apify — %s contas, %s tweets", len(accounts), saved)
+    log.info("fim pelo Apify — %s contas, %s posts novos, %s de hoje guardados, sem item: %s",
+             len(accounts), saved, stored, empty)
     return None
 
 
-def read_now(owner_id: int) -> str:
+def read_now(owner_id: int, folder_id: int | None = None) -> str:
     """"Atualizar dados" do painel (app/reader.py): lê as contas do usuário pelo Apify na hora, sem
-    esperar o cron. Devolve "ok", "erro" (o motivo fica em user_settings) ou "sem_apify". Postgres e
-    DATABASE_URL vêm do mesmo .env do painel.
+    esperar o cron. Com folder_id (a pasta selecionada no painel), só as contas dessa pasta. Devolve "ok",
+    "erro" (o motivo fica em user_settings), "sem_apify" ou "sem_pasta" (pasta que não é do usuário).
+    Postgres e DATABASE_URL vêm do mesmo .env do painel.
     """
     import psycopg
     from psycopg.rows import dict_row
@@ -1168,12 +1213,22 @@ def read_now(owner_id: int) -> str:
         conn.commit()
         if user is None or not (user["apify_token"] or "").strip():
             return "sem_apify"
+        folder = None
+        if folder_id is not None:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, name FROM folders WHERE id = %s AND owner_id = %s", (folder_id, owner_id))
+                folder = cur.fetchone()
+            conn.commit()
+            if folder is None:
+                return "sem_pasta"
         if user["is_admin"]:
-            error = apify_admin_read(conn, {"id": owner_id, "token": user["apify_token"].strip()}, started, midnight, True)
+            error = apify_admin_read(conn, {"id": owner_id, "token": user["apify_token"].strip()}, started, midnight,
+                                     True, folder)
             return "ok" if error is None else "erro"
         result = apify_user_round(conn, {
             "id": owner_id, "apify_token": user["apify_token"], "apify_run_requested_at": started,
             "apify_auto": True, "apify_interval_min": user["apify_interval_min"],
+            "folder_id": folder["id"] if folder else None, "folder_name": folder["name"] if folder else None,
         }, midnight)
         return "erro" if result.get("erro") else "ok"
 
