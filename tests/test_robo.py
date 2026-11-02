@@ -135,7 +135,13 @@ def test_apify_input_and_actor(monkeypatch):
     assert robo.apify_actor() == "apidojo~tweet-scraper"
     monkeypatch.setenv("APIFY_ACTOR", "outro/ator")
     assert robo.apify_actor() == "outro~ator"
-    assert robo.apify_input(["a", "b"]) == {"twitterHandles": ["a", "b"], "maxItems": 40, "sort": "Latest"}
+    # Uma busca por conta, só com os posts de hoje (desde a meia-noite de Brasília): uma conta que posta muito
+    # não toma o lugar da outra no limite do pedido, e não se paga por post antigo que o robô jogaria fora.
+    midnight = datetime(2026, 11, 2, 0, 0, tzinfo=robo.BR_TZ)
+    since = int(midnight.timestamp())
+    assert robo.apify_input(["a", "b"], midnight) == {
+        "searchTerms": [f"from:a since_time:{since}", f"from:b since_time:{since}"],
+        "maxItems": 2 * robo.APIFY_TODAY_PER_ACCOUNT, "sort": "Latest"}
 
 
 @pytest.mark.parametrize(("code", "text"), [(401, "recusou o token"), (402, "sem crédito"), (500, "respondeu 500")])
@@ -170,7 +176,8 @@ def test_apify_fetch_returns_items(monkeypatch):
 
     monkeypatch.setattr(robo.urllib.request, "urlopen", answer)
     assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM]
-    assert sent["body"]["twitterHandles"] == ["fulana"]
+    since = int(robo.today_start_br().timestamp())
+    assert sent["body"]["searchTerms"] == [f"from:fulana since_time:{since}"], "só os posts de hoje da conta"
 
 
 @pytest.mark.parametrize(("item", "repost"), [
@@ -205,4 +212,4 @@ def test_read_detail_says_stored_total_folder_and_empty_accounts():
     assert robo.read_detail(4, 7, {}) == "4 contas lidas, 7 posts de hoje"
     text = robo.read_detail(4, 7, {"sem_post": ["a"]}, "Dinheiro")
     assert text.startswith("Pasta Dinheiro: 4 contas lidas, 7 posts de hoje")
-    assert "não trouxe nada de 1 conta nesta leitura" in text and "continua" in text
+    assert text.endswith("(1 conta sem post hoje)")

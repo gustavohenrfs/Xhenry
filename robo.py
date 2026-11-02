@@ -606,7 +606,7 @@ APIFY_API = "https://api.apify.com/v2"
 APIFY_ACTOR_DEFAULT = "apidojo~tweet-scraper"
 APIFY_INTERVAL_DEFAULT = 60
 APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
-APIFY_PER_ACCOUNT = 20  # posts pedidos por conta
+APIFY_TODAY_PER_ACCOUNT = 60  # teto de posts de hoje por conta na leitura (só se paga o que vier)
 APIFY_MAX_ACCOUNTS = 25  # contas por chamada; mais que isso vira lotes em paralelo
 APIFY_PARALLEL = 4  # chamadas ao Apify ao mesmo tempo (cada uma é um run do ator)
 APIFY_ROUND_ACCOUNTS = 200  # contas de um usuário numa passada
@@ -626,8 +626,16 @@ def apify_interval() -> timedelta:
     return timedelta(minutes=env_int("APIFY_INTERVAL_MIN", APIFY_INTERVAL_DEFAULT, 5, 24 * 60))
 
 
-def apify_input(handles: list[str]) -> dict[str, Any]:
-    return {"twitterHandles": handles, "maxItems": APIFY_PER_ACCOUNT * len(handles), "sort": "Latest"}
+def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, Any]:
+    """Uma busca por conta só com os posts de hoje ("from:conta since_time:<meia-noite de Brasília>").
+
+    Antes era um pedido só com todas as @ (twitterHandles) e 20 itens por conta no total, do mais novo
+    para o mais velho: as contas que postavam muito enchiam o limite e uma conta que postou cedo sumia das
+    leituras seguintes (o post ficava parado nas views da primeira leitura). Com o filtro de hoje, o limite
+    só serve de teto e não se paga por post antigo que o robô jogaria fora."""
+    stamp = int((since or today_start_br()).timestamp())
+    return {"searchTerms": [f"from:{handle} since_time:{stamp}" for handle in handles],
+            "maxItems": APIFY_TODAY_PER_ACCOUNT * len(handles), "sort": "Latest"}
 
 
 def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
@@ -794,9 +802,8 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     o dia refeito e seguidores (em toda leitura: vêm junto com os posts).
 
     Devolve os posts de hoje que vieram nesta leitura. Falha da chamada sobe como ApifyError antes de gravar
-    o lote; conta sem post nenhum não é falha. Com report, anota em report["sem_post"] as contas de que o
-    Apify não trouxe item nenhum (nem post antigo, nem repost): a busca falhou para elas nesta leitura, e o
-    que já estava guardado continua lá.
+    o lote; conta sem post nenhum não é falha. Com report, anota em report["sem_post"] as contas sem nenhum
+    post de hoje nesta leitura (o que já estava guardado continua lá).
     """
     batches = [accounts[start:start + APIFY_MAX_ACCOUNTS] for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS)]
     if len(batches) > 1:
@@ -842,11 +849,11 @@ def stored_today(cur, account_ids: list[int], midnight: datetime) -> int:
 
 
 def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name: str | None = None) -> str:
-    """Texto do fim da leitura: contas lidas, posts de hoje guardados e as contas de que o Apify não trouxe nada."""
+    """Texto do fim da leitura: contas lidas, posts de hoje guardados e as contas sem post de hoje."""
     text = f"{accounts} contas lidas, {stored} posts de hoje"
     empty = len(report.get("sem_post") or [])
     if empty:
-        text += f" (o Apify não trouxe nada de {empty} {'conta' if empty == 1 else 'contas'} nesta leitura; o que já estava guardado continua)"
+        text += f" ({empty} {'conta' if empty == 1 else 'contas'} sem post hoje)"
     return f"Pasta {folder_name}: {text}" if folder_name else text
 
 

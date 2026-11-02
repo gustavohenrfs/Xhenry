@@ -2747,7 +2747,7 @@ document.getElementById("refresh-all").addEventListener("click", async () => {
     if (run.status === "failed") toast("A leitura falhou: " + (run.error || "erro no Apify") + ".", "error");
     else {
       // "tweets" = posts de hoje guardados dessas contas (não só os que vieram nesta leitura).
-      const empty = run.sem_post ? " O Apify não trouxe nada de " + run.sem_post + (run.sem_post === 1 ? " conta" : " contas") + " desta vez; o que já estava guardado continua." : "";
+      const empty = run.sem_post ? " " + run.sem_post + (run.sem_post === 1 ? " conta sem post hoje." : " contas sem post hoje.") : "";
       toast("Leitura feita" + (run.pasta ? " na pasta " + run.pasta : "") + ": " + (run.contas || 0) + " contas, " + (run.tweets || 0) + " posts de hoje." + empty);
     }
     if (state.tab === "settings") paintRobo(robo);

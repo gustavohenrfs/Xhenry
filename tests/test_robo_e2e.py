@@ -588,5 +588,5 @@ def test_read_says_what_is_stored_when_apify_brings_nothing(w, monkeypatch):
     assert stats["tweets"] == stored, "o total de hoje é o guardado, não só o que veio agora"
     assert stats["novos"] == 0 and stats["sem_post"] == accounts, "e diz que o Apify não trouxe nada dessas contas"
     detail = w.q("select apify_detail from user_settings where owner_id=:o", o=admin_id(w))[0][0]
-    assert f"{stored} posts de hoje" in detail and f"não trouxe nada de {accounts}" in detail
+    assert f"{stored} posts de hoje" in detail and f"{accounts} contas sem post hoje" in detail
     admin_token(w, None)
