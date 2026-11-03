@@ -5714,21 +5714,24 @@ boot();
 
 // Quanto vale cada ação, em curtidas (código aberto do X, 2023). A barra usa raiz quadrada para caber
 // do 0,5 ao 369 sem sumir com os pequenos.
+// Pesos do "Para você" de 2026 (Phoenix): multiplicam a chance prevista de cada ação, não contagens.
 const WEIGHTS = [
-  { label: "Reply que você responde", value: 75, note: "150 curtidas" },
-  { label: "Reply que você manda", value: 13.5, note: "27 curtidas" },
-  { label: "Clicou no perfil e engajou", value: 12, note: "24 curtidas" },
-  { label: "Leu por 2 minutos ou mais", value: 10, note: "20 curtidas" },
-  { label: "Salvou o post", value: 10, note: "20 curtidas" },
-  { label: "Repost", value: 1, note: "2 curtidas" },
+  { label: "Copiar o link do post", value: 20, note: "mandou para fora do X" },
+  { label: "Reply de quem você segue de volta", value: 20, note: "5 da reply + 15 do mútuo" },
+  { label: "Reply, citação ou DM", value: 5, note: "conversa e envio" },
+  { label: "Seguir você", value: 4, note: "intenção de longo prazo" },
+  { label: "Compartilhar", value: 2, note: "pelo botão do X" },
+  { label: "Repost", value: 1, note: "alcance sem conversa" },
   { label: "Curtida", value: 0.5, note: "a base" },
-  { label: "\"Ver menos disso\"", value: -13.5, note: "−27 curtidas" },
-  { label: "Bloqueio", value: -74, note: "−148 curtidas" },
-  { label: "Denúncia", value: -369, note: "−738 curtidas" },
+  { label: "Tempo de leitura", value: 0.05, note: "de 0,004 a 0,05" },
+  { label: "Bloqueio", value: -31.2, note: "corta o autor" },
+  { label: "\"Não tenho interesse\"", value: -43.2, note: "público errado" },
+  { label: "Silenciar", value: -58.8, note: "pior que bloquear" },
+  { label: "Denúncia", value: -234, note: "a pior de todas" },
 ];
 function weightText(value) { return (value > 0 ? "+" : value < 0 ? "−" : "") + String(Math.abs(value)).replace(".", ","); }
 function paintWeights() {
-  const top = Math.sqrt(369);
+  const top = Math.sqrt(Math.max(...WEIGHTS.map((item) => Math.abs(item.value))));
   const values = [];
   document.getElementById("weights-scale").replaceChildren(...WEIGHTS.map((item) => {
     const li = el("li", "weight-row" + (item.value < 0 ? " is-neg" : ""));
@@ -5745,7 +5748,7 @@ function paintWeights() {
     const t = Math.min(1, (now - begin) / 900);
     const eased = 1 - Math.pow(1 - t, 3);
     values.forEach(([node, target]) => {
-      const current = Math.abs(target) < 20 ? Math.round(target * eased * 10) / 10 : Math.round(target * eased);
+      const current = Math.abs(target) < 1 ? Math.round(target * eased * 100) / 100 : Math.abs(target) < 100 ? Math.round(target * eased * 10) / 10 : Math.round(target * eased);
       node.textContent = t === 1 ? weightText(target) : weightText(current);
     });
     if (t < 1) requestAnimationFrame(step);
@@ -5839,10 +5842,10 @@ function paintRede() {
 // Suporte I.A: base local sobre o X. Cada item: pergunta pronta, palavras que puxam ele e a resposta.
 // Nada sai do navegador; fora do assunto X, ele diz que só fala de X.
 const IA_KB = [
-  { q: "Como viralizar no X?", see: "algo-janelas", keys: ["viraliz", "viral", "bombar", "explodir", "alcance", "views", "visualiza", "milhoes", "crescer post", "engajar", "engajamento"],
-    a: ["Viralizar no X é ganhar os primeiros 30 minutos. É ali que o algoritmo decide se o post vai para quem não te segue nas próximas 24 h.",
-      ["Poste no seu pico (para +18: 22h–1h; geral: terça e quarta, 9h–10h).", "Abra com uma pergunta que faça homem responder: enquete de dois lados, desafio ao ego, \"vocês homens…\".", "Responda cada comentário na primeira hora: cada reply respondida vale 150 curtidas.", "Sem link no corpo do post e no máximo 2 hashtags.", "Use as suas outras contas para citar com comentário logo no começo (veja Rede de RT)."],
-      "No Radar, a parte Textos quentes tem perguntas prontas nesse formato."] },
+  { q: "Como viralizar no X?", see: "algo-48h", keys: ["viraliz", "viral", "bombar", "explodir", "alcance", "views", "visualiza", "milhoes", "crescer post", "engajar", "engajamento"],
+    a: ["Viralizar no X de 2026 é ganhar a primeira hora: o post tem só 48 h no \"Para você\" e a velocidade de reply e de compartilhamento no começo decide para quantos homens de fora ele vai.",
+      ["Poste no horário em que você está online (21h é o pico dos homens; terça e quarta são os melhores dias).", "Abra com algo que peça ação: pergunta ao ego, enquete de dois lados, desafio.", "Faça texto \"mandável\": copiar o link vale +20, o máximo da régua.", "Responda cada comentário na primeira hora e siga de volta quem comenta sempre (reply de mútuo vale +20).", "Sem link de venda no post e sem rage bait: silenciar (−58,8) e denunciar (−234) derrubam tudo."],
+      "No Radar, Perguntas quentes e o Gerador por palavras-chave já entregam textos nesse formato."] },
   { q: "Como aquecer uma conta nova?", see: "algo-aquecer", keys: ["aquec", "conta nova", "criar conta", "comecar conta", "conta zerada", "primeira semana", "warm", "conta antiga", "conta comprada", "conta parada", "molho"],
     a: ["De 5 a 7 dias, visando só post em texto. Cada dia é uma sessão curta:",
       ["Dia 0: logar em todas e fechar. Deixar de molho por 24 h a 48 h.", "Dia 1: molho, não abre.",
@@ -5860,28 +5863,28 @@ const IA_KB = [
     a: ["São restrições silenciosas: a conta continua no ar, mas some para os outros.",
       ["Search ban: a conta ou os posts não aparecem na busca.", "Ghost ban: as suas replies ficam escondidas para os outros.", "Rebaixamento de reply: as replies vão para \"mostrar mais respostas\"."],
       "O painel testa isso: Operações → botão Verificar em cada conta. Achou? Pare de seguir em massa, tire links, ligue o sensível se for +18 e reduza o volume por 1 a 2 semanas."] },
-  { q: "Minha conta está com restrição. Como recupero?", see: "algo-camadas", keys: ["recuper", "voltar na busca", "sair do shadow", "tirar restric", "limitad", "voltar ao normal", "desbloque"],
+  { q: "Minha conta está com restrição. Como recupero?", see: "algo-mata", keys: ["recuper", "voltar na busca", "sair do shadow", "tirar restric", "limitad", "voltar ao normal", "desbloque"],
     a: ["Não existe botão: a conta volta quando o comportamento muda e o tempo passa.",
-      ["Pare tudo que pode ter causado: follow em massa, links, hashtags demais, posts repetidos.", "Ligue \"conteúdo sensível\" se posta +18 e deixe foto e capa comportadas.", "Fique 7 a 14 dias só com posts bons e replies de verdade, em volume baixo.", "Confirme e-mail e telefone e considere o Premium (+10 na reputação).", "Verifique de novo no painel (Operações → Verificar) depois de uma semana."],
-      "\"Ver menos disso\" deixa marca por até 140 dias: evite o tipo de post que estava gerando isso."] },
+      ["Pare tudo que pode ter causado: follow em massa, links, o mesmo texto em várias contas, rage bait.", "Ligue \"conteúdo sensível\" se posta +18 e deixe foto e capa comportadas.", "Fique 7 a 14 dias só com textos bons e replies de verdade, em volume baixo.", "Confirme e-mail e telefone.", "Verifique de novo no painel (Operações → Verificar) depois de uma semana."],
+      "Cada silenciamento e cada \"não tenho interesse\" ensinam o modelo a te mostrar menos: evite o tipo de post que estava gerando isso."] },
   { q: "Qual o melhor horário para postar?", see: "algo-janelas", keys: ["horario", "hora", "que horas", "quando postar", "melhor dia", "pico"],
-    a: ["No Brasil, o geral é terça e quarta das 9h às 10h. Para conta +18, o pico do público é das 22h à 1h.",
-      "Melhor que regra geral é o seu dado: no Dashboard, o mapa de calor mostra a média de views por dia da semana e hora das suas contas."] },
-  { q: "Quantos posts por dia devo fazer?", see: "algo-rotina", keys: ["quantos post", "quantas vezes", "frequencia", "por dia", "volume", "postar muito"],
-    a: ["As contas que crescem fazem uns 95 posts por semana somando originais e replies.",
-      ["3 a 5 posts originais por dia, com pelo menos 2 horas entre eles.", "20 a 50 replies por dia em contas do nicho.", "O 4º post seguido seu vale só 25%: espalhe ao longo do dia."]] },
-  { q: "Por que responder os comentários é tão importante?", see: "algo-reply", keys: ["responder", "comentario", "reply", "replies", "respostas", "+75", "150"],
-    a: ["Porque é o sinal mais forte que existe: reply que você responde vale +75, o mesmo que 150 curtidas.",
-      ["Responda todo mundo, principalmente na primeira hora.", "Faça pergunta de volta: cada volta da conversa soma de novo.", "Em contas de outros: reply nos primeiros 5 a 15 minutos, com pergunta ou opinião, nunca \"amei\" nem link."]] },
+    a: ["Para homens no Brasil: 12h no almoço e 21h à noite (sexta 18h; sábado e domingo 10h e 20h). Terça e quarta à noite são os melhores. Para texto +18 o pico vai das 22h à 1h.",
+      "Melhor que a tabela é o seu dado: no Dashboard, o mapa de calor mostra a média de views por dia e hora das suas contas. E só poste o texto bom quando puder responder a primeira hora."] },
+  { q: "Quantos posts por dia devo fazer?", see: "algo-diversidade", keys: ["quantos post", "quantas vezes", "frequencia", "por dia", "volume", "postar muito"],
+    a: ["3 a 5 textos por conta por dia, com 2 horas ou mais entre eles.",
+      ["No feed de cada homem, o 2º post seu vale 62,5%, o 3º 43,8% e o piso é 25%: espalhar rende mais que despejar.", "Some 20 a 50 replies por dia em contas do nicho.", "Cada post vive 48 h no \"Para você\": não precisa postar de madrugada para \"ocupar\" o feed."]] },
+  { q: "Por que responder os comentários é tão importante?", see: "algo-reply", keys: ["responder", "comentario", "reply", "replies", "respostas", "mutuo", "seguir de volta"],
+    a: ["Porque conversa é o que o modelo mais premia: cada reply vale +5, e a reply de alguém que você segue de volta vale +20, quatro vezes mais.",
+      ["Responda todo mundo, principalmente na primeira hora.", "Siga de volta os homens que comentam sempre: as replies deles passam a valer +20.", "Faça pergunta de volta: cada volta da conversa é outra reply.", "Métricas → Responder agora mostra os posts com comentário esperando."]] },
   { q: "Link na bio ou no post?", see: "algo-adulto", keys: ["link", "linktree", "bio", "onlyfans", "privacy", "divulg", "vender"],
-    a: ["Na bio. Link na bio não pesa em nada.",
-      ["Link no corpo do post tira 30% a 50% do alcance.", "Conta sem Premium com link perde até 94%.", "Divulgação dentro de reply é marcada como spam."],
-      "Os textos de engajamento do painel nunca pedem clique em link: o post vive só das respostas."] },
-  { q: "Hashtag ajuda ou atrapalha?", see: "algo-mata", keys: ["hashtag", "#", "tag"],
-    a: ["Ajuda pouco e atrapalha fácil: 1 ou 2 no máximo. Com 3 ou mais, o post perde uns 40% do alcance. Pegar carona num assunto em alta escrevendo sobre ele funciona melhor que a hashtag."] },
+    a: ["Na bio. O post que deve viralizar vive só da conversa.",
+      ["Link de venda no corpo do post tira o foco da reply e do compartilhamento, que são o que dá alcance.", "No primeiro comentário do seu próprio post também dá.", "Em reply de post dos outros, nunca: vira denúncia e spam."],
+      "Os textos de engajamento do painel nunca pedem clique em link."] },
+  { q: "Hashtag ajuda ou atrapalha?", see: "algo-fabrica", keys: ["hashtag", "#", "tag"],
+    a: ["No algoritmo de 2026 a nota vem do comportamento, não das palavras: hashtag não dá ponto. No máximo ajuda alguém a achar o post na busca. Pegar carona num assunto em alta escrevendo sobre ele (o Radar mostra quais) funciona muito melhor."] },
   { q: "Vale a pena assinar o Premium?", see: "algo-camadas", keys: ["premium", "azul", "verificad", "selo", "assinatura", "blue"],
-    a: ["Para quem vive de alcance, vale.",
-      ["+10 na reputação da conta (TweepCred).", "Posts com link perdem bem menos alcance.", "Ajuda a passar do 65 de reputação, que é quando a conta escapa do filtro de spam da busca."]] },
+    a: ["O código novo do \"Para você\" não mostra bônus de nota para Premium (o +10 de reputação era do código de 2023).",
+      ["O selo ainda ajuda na confiança de quem lê e nas respostas, que aparecem mais em cima na conversa.", "Para conta +18, conta verificada é parte da configuração segura.", "Não espere o Premium resolver alcance: quem resolve é reply e compartilhamento."]] },
   { q: "Como configurar uma conta +18 do jeito certo?", see: "algo-adulto", keys: ["18", "adulto", "adult", "nsfw", "sensivel", "putaria", "conteudo adulto", "hot", "nude", "modelo"],
     a: ["A regra de ouro: você marca, antes do X marcar.",
       ["Ligue \"conteúdo sensível\" nas configurações antes de qualquer post +18.", "Foto de perfil e capa sempre comportadas.", "\"18+\" na bio e conta verificada.", "Conteúdo feito com IA tem que ser declarado.", "Nada +18 nas duas primeiras semanas de conta."],
@@ -5890,50 +5893,62 @@ const IA_KB = [
     a: [["Até 30 a 50 por dia. Acima disso é marcado como spam.", "Até 300 seguindo antes de ter 300 seguidores.", "Nunca passe de 2.500 seguindo: a reputação cai 50 vezes.", "Deixar de seguir em massa também pesa."]] },
   { q: "Comprar seguidores funciona?", see: "algo-erros", keys: ["comprar", "comprad", "fake", "bot", "seguidor falso", "painel smm"],
     a: ["Não. Seguidor comprado não interage, então o X passa a mostrar os seus posts para gente que não engaja e o alcance cai. Ainda bagunça o seu \"condomínio\" (SimCluster): a conta passa a ser lida como de outro público."] },
-  { q: "Como funciona o algoritmo do X?", see: "algo-fabrica", keys: ["algoritmo", "como funciona", "feed", "para voce", "for you", "ranker", "ranking"],
-    a: ["De 1 bilhão de posts por dia, uns 1.500 viram candidatos para cada pessoa, um filtro rápido corta os piores, um modelo pesado calcula 17 chances para cada post e os 50 melhores chegam no feed.",
-      "O que mais pesa é conversa: reply respondida (+75), reply (+13,5), clique no perfil com engajamento (+12), leitura longa e salvar (+10). Curtida vale só 0,5.",
+  { q: "Como funciona o algoritmo do X?", see: "algo-fabrica", keys: ["algoritmo", "como funciona", "feed", "para voce", "for you", "ranker", "ranking", "phoenix", "grok"],
+    a: ["Desde 2026 o \"Para você\" é montado por um modelo da família do Grok (Phoenix). Ele busca posts de quem a pessoa segue e de fora, passa 17 filtros (um deles tira tudo com mais de 48 h) e prevê a chance de cada ação.",
+      "A nota é a soma de cada chance vezes o peso: copiar o link e reply de mútuo +20, reply, citação e DM +5, seguir +4, repost +1, curtida 0,5. Silenciar −58,8 e denúncia −234.",
       "A régua completa está no topo de Algoritmo do X."] },
   { q: "O que mais derruba o alcance de um post?", see: "algo-mata", keys: ["derruba alcance", "penaliz", "punic", "perde alcance", "alcance caiu", "flopou", "flop", "nao engaja", "morreu"],
-    a: [["Denúncia (−369, o mesmo que 738 curtidas) e bloqueio (−74).", "\"Ver menos disso\" (−13,5 e marca de até 140 dias).", "Link no corpo, 3 hashtags ou mais, tom agressivo.", "Postar muitas vezes seguidas: o 4º vale 25%.", "Sem interação nos primeiros 30 minutos."]] },
+    a: [["Chance de denúncia (−234) e de silenciar (−58,8): rage bait e ofensa.", "\"Não tenho interesse\" (−43,2): o post chegou no público errado.", "Primeira hora vazia: postar sem ninguém para responder.", "Mais de 48 h de idade: sai do \"Para você\".", "O mesmo texto em várias contas juntas, ou repetido igualzinho."]] },
   { q: "Repost ou citação: qual vale mais?", see: "algo-ama", keys: ["repost", "retweet", "rt", "citar", "citacao", "quote"],
-    a: ["Citação com comentário. Ela entra em 3 sistemas do X e vale umas 3 vezes mais que o repost puro (que vale 2 curtidas). Na Rede de RT, prefira citar."] },
-  { q: "Como montar uma rede de RT entre minhas contas?", see: "algo-janelas", keys: ["rede", "rede de rt", "minhas contas", "entre contas", "grupo de rt", "corrente"],
-    a: ["A ideia é as suas contas darem o primeiro empurrão nos 30 minutos que decidem o alcance.",
-      ["Só conta saudável entra: conta com restrição puxa todas para baixo.", "Cite com comentário em vez de só repostar.", "Espalhe ao longo do dia, nunca todas no mesmo minuto.", "Poucos reposts por conta por dia, só no que combina com o público dela."],
+    a: ["Citação com comentário: vale +5, cinco vezes o repost puro (+1). Na Rede de RT, prefira citar, e dentro das 48 h do post."] },
+  { q: "Como montar uma rede de RT entre minhas contas?", see: "algo-diversidade", keys: ["rede", "rede de rt", "minhas contas", "entre contas", "grupo de rt", "corrente", "varias contas", "mesmo horario"],
+    a: ["A rede dá o primeiro empurrão na primeira hora, quando o post decide o alcance.",
+      ["Só conta saudável entra: conta com restrição puxa as outras.", "Cite com comentário (+5) em vez de só repostar (+1).", "Cada conta com o próprio texto e horários escalonados, 10 a 20 minutos entre uma e outra: texto igual no mesmo minuto parece rede de spam.", "Só dentro das 48 h do post: depois ele já saiu do \"Para você\"."],
       "A aba Rede de RT mostra as suas contas e quais podem entrar agora."] },
-  { q: "O que é TweepCred (reputação da conta)?", see: "algo-camadas", keys: ["tweepcred", "reputacao", "nota da conta", "score", "credibilidade"],
-    a: ["É a nota de 0 a 100 que o X dá para a conta.",
-      ["Sobe com: celular verificado, e-mail e telefone, idade da conta (máximo em 30 dias), Premium (+10).", "Acima de 65: a conta escapa do filtro de spam da busca.", "Abaixo de 40: tratada como baixa qualidade.", "Seguir mais de 2.500 divide a nota por 50."]] },
+  { q: "O que mudou no algoritmo em 2026?", see: "algo-camadas", keys: ["tweepcred", "reputacao", "mudou", "2023", "2026", "novo algoritmo", "atualiz", "credibilidade"],
+    a: ["Quase tudo. O código de 2023 (que a maioria dos guias ainda usa) foi trocado pelo Phoenix.",
+      ["Reply respondida +75 virou: reply +5, reply de mútuo +20.", "Salvar (+10) saiu da lista; copiar o link (+20) e DM (+5) entraram.", "Denúncia −234, silenciar −58,8, \"não tenho interesse\" −43,2, bloqueio −31,2.", "TweepCred e o +10 do Premium não aparecem mais como nota de conta.", "O \"Para você\" corta tudo com mais de 48 h.", "O 2º post do mesmo autor no feed já vale 62,5%."],
+      "A tabela completa está em Algoritmo do X → O que mudou."] },
   { q: "Como escolher e mudar de público (nicho)?", see: "algo-camadas", keys: ["nicho", "publico", "cluster", "simcluster", "audiencia", "mudar de nicho", "publico masculino", "homens"],
     a: ["O X te coloca num \"condomínio\" de público pelo perfil de quem te segue, e leva uns 7 dias para mudar.",
       ["Fique num nicho só no começo.", "Para pegar outro público, interaja e seja seguida por gente dele (ex.: futebol, games, academia).", "Seguidor comprado ou fora do nicho bagunça essa leitura."]] },
-  { q: "Vídeo, foto ou só texto?", see: "algo-ama", keys: ["video", "foto", "imagem", "midia", "texto puro", "so texto"],
-    a: ["Vídeo nativo rende umas 3 vezes mais e imagem umas 2 vezes. Texto puro vive de resposta: precisa de pergunta, enquete ou desafio que faça a pessoa comentar. Leitura de 2 minutos ou mais também conta (+10), por isso threads funcionam."] },
-  { q: "Thread vale a pena?", see: "algo-playbook", keys: ["thread", "fio", "sequencia de posts"],
-    a: ["Vale: segura a leitura por mais tempo (+10 com 2 minutos ou mais) e aumenta quantas vezes salvam. Na fase de 1 mil a 10 mil seguidores, é uma das ferramentas principais."] },
+  { q: "Vídeo, foto ou só texto?", see: "algo-adulto", keys: ["video", "foto", "imagem", "midia", "texto puro", "so texto"],
+    a: ["Para conta +18 que quer público novo, texto. Mídia +18 de fora da rede é filtrada para quem não é do público; texto sem mídia explícita chega a mais homens novos.",
+      ["Texto vive de ação: pergunta, enquete, desafio, confissão \"mandável\".", "Vídeo só conta tempo assistido com 10 segundos ou mais.", "A mídia fica para quem já te segue, que recebe tudo pelo feed de seguidos."]] },
+  { q: "Thread vale a pena?", see: "algo-texto", keys: ["thread", "fio", "sequencia de posts"],
+    a: ["Vale quando prende a leitura até o fim (o X passou a premiar quem lê tudo) e quando é \"mandável\": lista ou história que um homem mandaria para o amigo gera cópia de link (+20). O X junta os ramos da mesma conversa no feed, então a força está no primeiro post."] },
   { q: "Como crescer de 0 a 100 mil seguidores?", see: "algo-playbook", keys: ["seguidores", "crescer", "100 mil", "100k", "mil seguidores", "ganhar seguidor"],
-    a: [["0 a 1 mil: 70% replies, 30% posts. Mire contas 2 a 10 vezes maiores, 20 a 50 replies por dia.", "1 mil a 10 mil: um nicho, uns 95 posts por semana, threads, e a meta é quantas vezes salvam.", "10 mil a 50 mil: citações em contas grandes, parcerias, Spaces, post fixado por 2 semanas.", "50 mil a 100 mil: volume e divulgação cruzada entre as suas contas."]] },
-  { q: "O que é a janela de 30 minutos?", see: "algo-janelas", keys: ["30 minutos", "meia hora", "janela", "primeiros minutos", "velocidade"],
-    a: ["É o período que decide se o post vai para quem não te segue nas próximas 24 h. Conta pessoas diferentes, e velocidade ganha de volume: 100 curtidas em 6 h valem mais que 100 em 48 h. Por isso o melhor post do dia vai no seu pico, com você online respondendo."] },
-  { q: "Denúncia e bloqueio pesam muito?", see: "algo-mata", keys: ["denuncia", "report", "bloqueio", "block", "ver menos"],
-    a: ["Pesam muito: uma denúncia é −369 (738 curtidas para compensar) e um bloqueio −74. \"Ver menos disso\" esconde você daquela pessoa por 14 dias e deixa marca por até 140. Provocar é bom; ofender, expor gente ou pegar pesado demais vira denúncia."] },
+    a: [["0 a 1 mil: 70% replies, 30% posts. Contas 2 a 10 vezes maiores com público masculino, 20 a 50 replies por dia.", "1 mil a 10 mil: um nicho, 3 a 5 textos por dia, seguir de volta quem comenta; a métrica é reply por post.", "10 mil a 50 mil: citações de contas grandes, listas e confissões \"mandáveis\", post fixado.", "50 mil a 100 mil: volume com qualidade e divulgação cruzada entre as suas contas, cada uma com o próprio texto."]] },
+  { q: "O que é a janela de 30 minutos?", see: "algo-48h", keys: ["30 minutos", "meia hora", "janela", "primeiros minutos", "velocidade", "primeira hora"],
+    a: ["São os primeiros 30 a 60 minutos do post: o X mede a velocidade de reply e de compartilhamento ali para decidir quantos homens de fora vão ver. Depois o post ainda vive até 48 h, mas quem não decolou na primeira hora quase nunca decola. Por isso o melhor texto vai quando você está online para responder."] },
+  { q: "Denúncia e bloqueio pesam muito?", see: "algo-mata", keys: ["denuncia", "report", "bloqueio", "block", "ver menos", "silenciar", "mute", "nao tenho interesse"],
+    a: ["Pesam muito, e silenciar pesa mais que bloquear: denúncia −234, silenciar −58,8, \"não tenho interesse\" −43,2, bloqueio −31,2. É sobre a chance prevista, não contagem: o X aprende que posts como o seu fazem gente parecida silenciar. Provocar o ego é bom; ofender ou expor alguém vira denúncia."] },
   { q: "Como funciona a punição por strikes?", see: "algo-adulto", keys: ["strike", "advertencia", "aviso", "punicao", "monetiza"],
     a: [["1º: aviso.", "2º: 7 dias de restrição.", "3º: 30 dias e perda de monetização.", "4º: banimento."], "Na conta +18, o que mais gera strike é postar sem a marcação de sensível."] },
   { q: "Posso usar foto feita com IA?", see: "algo-adulto", keys: ["ia", "inteligencia artificial", "gerada", "deepfake", "ai"],
     a: ["Pode, declarando que é feito com IA (além da marcação de sensível no +18). Deepfake de pessoa real sem consentimento é banimento e caso de polícia."] },
   { q: "O que medir para saber se está dando certo?", see: "algo-kpis", keys: ["medir", "metrica", "kpi", "resultado", "analisar", "dados"],
-    a: [["Replies que você respondeu.", "Quantas vezes salvaram.", "Cliques no perfil.", "Velocidade nos primeiros 30 minutos.", "Quem segue de volta."], "Curtida sozinha e número de seguidores enganam. No Dashboard, olhe as views por post e as interações."] },
+    a: [["Replies por post.", "Replies que você respondeu na primeira hora.", "Citações.", "Seguidores novos depois de um post.", "Homens que comentam sempre (e que você segue de volta)."], "Curtida sozinha e número de seguidores enganam. A aba Métricas já calcula a nota com os pesos de 2026."] },
   { q: "O que é engagement farming?", see: "algo-erros", keys: ["farming", "pedir curtida", "pedir rt", "curte e", "sorteio", "troca"],
     a: ["É pedir curtida, repost ou comentário em troca de algo (\"curte e comenta que eu mando\"). O X pune como manipulação. Pergunta e enquete que geram resposta de verdade não contam: o problema é a troca."] },
   { q: "Spaces e Comunidades ajudam?", see: "algo-playbook", keys: ["spaces", "comunidade", "community", "live", "ao vivo"],
-    a: ["Ajudam a criar público fiel: quem interage muito com você vê os seus posts mesmo com penalidades. Comunidades são uma das 9 fontes do feed (cota de 100 posts), e Spaces aproximam o público na fase de 10 mil a 50 mil."] },
+    a: ["Ajudam a criar público fiel, e é o público fiel que segura a conta: quem te segue recebe os seus posts pelo feed de seguidos, sem passar pelos filtros de fora da rede. Use para aproximar os homens que já comentam, não para achar gente nova."] },
   { q: "Como achar contas para responder?", see: "algo-reply", keys: ["contas alvo", "alvo", "target", "quem responder", "onde comentar"],
     a: [["Contas do seu nicho 2 a 10 vezes maiores que a sua.", "Que sabidamente respondem quem comenta: observe por uma semana.", "Ative as notificações delas e responda nos primeiros 5 a 15 minutos."], "No Radar → Textos que bombaram → Contas do nicho, você lista essas contas e vê os textos que mais engajaram nelas."] },
   { q: "O que o painel faz por mim?", see: null, keys: ["painel", "xhenry", "saas", "o que voce faz", "funcionalidade", "ajuda do painel"],
     a: [["Dashboard: views, interações, melhor horário e crescimento das suas contas.", "Operações: pastas, contas e a verificação de ghost ban e search ban.", "Radar: o que está em alta no Brasil, ideias de post e textos quentes.", "Ferramentas: Verificar post (Grok) e Metadados (cópias com hash diferente).", "Alertas de post viralizando no celular."]] },
+  { q: "Post some do Para você depois de 48 horas?", see: "algo-48h", keys: ["48", "48h", "dois dias", "2 dias", "post antigo", "sumiu do para voce", "vida do post", "idade do post", "repostar"],
+    a: ["Some. O filtro de idade tira do \"Para você\" todo post com mais de 48 h; depois ele só aparece no perfil, na busca e para quem já te segue.",
+      ["A primeira hora decide, as 48 h só esticam.", "Texto que bombou volta depois de 48 h com outra abertura ou outro fechamento (Variações no Radar). Igualzinho não: o X tira o que a pessoa já viu.", "Empurrão da sua rede só vale dentro das 48 h."]] },
+  { q: "Várias contas postando no mesmo horário atrapalha?", see: "algo-diversidade", keys: ["mesmo horario", "mesma hora", "todas as contas", "70 contas", "escalonar", "diversidade", "author diversity", "varias contas"],
+    a: ["O desconto de autor vale por conta: no feed de cada homem, o 2º post da mesma conta vale 62,5%. Contas diferentes não caem nele.",
+      ["O que pega a rede é texto parecido: o X separa posts parecidos no topo do feed e a moderação vê o mesmo texto saindo de várias contas como spam.", "Cada conta com o próprio texto (a aba Postar avisa quando o texto já está na fila de outra).", "Escalone 10 a 20 minutos entre uma conta e outra."]] },
+  { q: "Que texto funciona para o público masculino?", see: "algo-texto", keys: ["texto", "copy", "o que escrever", "frase", "legenda", "pergunta", "enquete", "desafio", "homem", "publico masculino", "que pergunta", "pros homens", "homens responderem", "fazer pergunta"],
+    a: ["Texto que pede uma ação, porque o modelo premia ação:",
+      ["Pergunta ao ego (reply).", "Enquete de dois lados (reply e citação).", "Desafio: \"se passar de 100 respostas eu conto\" (reply e seguir).", "Lista ou confissão que um homem mandaria no grupo dos amigos (copiar link, +20).", "Gancho no assunto do momento: futebol, luta, reality."],
+      "Provoque o ego, nunca ataque: silenciar e denunciar pesam até 468 vezes uma curtida. O Radar gera esses textos de graça."] },
 ];
-const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
+const IA_FIRST = ["Como viralizar no X?", "Como aquecer uma conta nova?", "Como evitar que a conta caia?", "O que é shadowban (ghost ban e search ban)?", "Post some do Para você depois de 48 horas?", "Qual o melhor horário para postar?", "Como configurar uma conta +18 do jeito certo?", "Link na bio ou no post?", "Como montar uma rede de RT entre minhas contas?"];
 // Palavras que mostram que a pergunta é sobre o X (sem nenhuma delas e sem casar com a base, é fora do assunto).
 const IA_TOPIC = ["x", "twitter", "tweet", "post", "conta", "perfil", "seguidor", "algoritmo", "alcance", "feed", "rt", "reply", "bio", "story", "engaj", "viral", "ban", "nicho", "publico"];
 function iaTokens(text) { return plain(text).replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean); }
@@ -6221,16 +6236,16 @@ function paintMxKpis(data) {
   const accounts = data.accounts.length || 1;
   const series = data.series.slice(-30);
   const pace = t.posts_per_day;
-  const paceNote = pace === null || pace === undefined ? "" : pace < 3 ? "Abaixo do ritmo que cresce: suba aos poucos para 3 a 5 por dia." : pace > 6 ? "Acima de 6 por dia o 4º post seguido vale só 25%: espalhe." : "Dentro do ritmo que cresce.";
+  const paceNote = pace === null || pace === undefined ? "" : pace < 3 ? "Abaixo do ritmo que cresce: suba aos poucos para 3 a 5 por dia." : pace > 6 ? "Acima de 6 por dia o mesmo homem recebe vários seus seguidos (o 2º já vale 62,5%): espalhe." : "Dentro do ritmo que cresce.";
   document.getElementById("mx-kpis").replaceChildren(
     mxKpi({ label: "Salvamentos por post", value: dec(t.bookmarks_per_post, 1), cur: t.bookmarks_per_post, prev: p.bookmarks_per_post, spark: mxDaily(series, "bookmarks", true),
-      lines: ["+10 cada · vale 20 curtidas", "KPI número 1 da fase de 1 mil a 10 mil. " + dec(t.bookmarks_per_k, 2) + " a cada mil views."], tone: "cyan" }),
+      lines: ["Não soma ponto desde 2026 · pista de leitura", "Quem salva leu até o fim. " + dec(t.bookmarks_per_k, 2) + " a cada mil views."], tone: "cyan" }),
     mxKpi({ label: "Replies por post", value: dec(t.replies_per_post, 1), cur: t.replies_per_post, prev: p.replies_per_post, spark: mxDaily(series, "replies", true),
-      lines: ["+13,5 cada · respondida vira +75 (150 curtidas)", dec(t.replies_per_k, 1) + " a cada mil views. Responda todas na primeira hora."], tone: "pink" }),
+      lines: ["+5 cada · de quem você segue de volta, +20", "KPI da fase de 1 mil a 10 mil. " + dec(t.replies_per_k, 1) + " a cada mil views. Responda todas na primeira hora."], tone: "pink" }),
     mxKpi({ label: "Citações recebidas", value: num(t.quotes), cur: t.quotes, prev: p.quotes, spark: mxDaily(series, "quotes"),
-      lines: ["Entra em 3 sistemas · vale 3 reposts", "KPI da fase de 10 mil a 50 mil. " + dec(t.quotes_per_post, 2) + " por post."], tone: "violet" }),
+      lines: ["+5 cada · vale 5 reposts", "KPI da fase de 10 mil a 50 mil. " + dec(t.quotes_per_post, 2) + " por post."], tone: "violet" }),
     mxKpi({ label: "Reposts por post", value: dec(t.retweets_per_post, 1), cur: t.retweets_per_post, prev: p.retweets_per_post, spark: mxDaily(series, "retweets", true),
-      lines: ["+1 cada · vale 2 curtidas", "Citação rende 3 vezes mais: na sua rede, cite em vez de só repostar."], tone: "amber" }),
+      lines: ["+1 cada · vale 2 curtidas", "Citação rende 5 vezes mais: na sua rede, cite em vez de só repostar."], tone: "amber" }),
     mxKpi({ label: "Taxa de salvamento", value: t.save_rate === null ? "—" : dec(t.save_rate, 1), unit: t.save_rate === null ? "" : "%", cur: t.save_rate, prev: p.save_rate,
       spark: series.map((day) => day.likes ? day.bookmarks * 100 / day.likes : 0),
       lines: ["Salvaram a cada 100 que curtiram", "Quanto mais alta, mais o texto prendeu: é a melhor pista de leitura de verdade."], tone: "green" }),

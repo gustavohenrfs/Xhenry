@@ -22,9 +22,9 @@
   <script>try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="dark"}try{if(sessionStorage.getItem("intro_seen"))document.documentElement.dataset.intro="short"}catch(e){}</script>
   <!-- Tailwind compilado (scripts/build_css.sh) e, por cima, os componentes do styles.css. -->
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
-  <link rel="stylesheet" href="/static/css/styles.css?v=49">
+  <link rel="stylesheet" href="/static/css/styles.css?v=50">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=71"></script>
+  <script defer src="/static/js/app.js?v=72"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -328,7 +328,7 @@
             </article>
             <details class="mx-how glow">
               <summary class="font-display">Como a nota é calculada</summary>
-              <p>Cada post soma os pontos que o código aberto do X dá para cada ação: curtida 0,5 · repost 1 · citação 3 (entra em 3 sistemas) · salvamento 10 · reply 13,5. A nota divide esse total pelas views e multiplica por mil, para comparar contas grandes e pequenas. Replies que a própria conta mandou não contam como post.</p>
+              <p>Cada post soma os pontos do "Para você" de 2026 para cada ação que dá para ler de fora: curtida 0,5 · repost 1 · reply 5 · citação 5. Salvar saiu da lista de ações do código novo e não soma; copiar o link (+20) e DM (+5) valem muito, mas o X não mostra esses números para ninguém de fora. A nota divide esse total pelas views e multiplica por mil, para comparar contas grandes e pequenas. Replies que a própria conta mandou não contam como post.</p>
               <p>Taxa de salvamento é quantas pessoas salvaram a cada 100 que curtiram: quanto mais alta, mais o texto prendeu. Ritmo de posts conta só posts próprios, por conta e por dia; o guia recomenda de 3 a 5.</p>
             </details>
           </div>
@@ -660,90 +660,150 @@
           <div class="info-page">
             <header class="info-hero">
               <h2 class="font-display info-title">Algoritmo do X</h2>
-              <p class="info-lede">O feed do X é uma fila de 1 bilhão de posts por dia que vira 50 na sua tela. Quem passa é quem faz as pessoas conversarem, não só curtirem. Aqui está cada peso, janela e regra que decide isso, organizado para conta de texto +18 no Brasil.</p>
+              <p class="info-lede">Desde 2026 o "Para você" é montado por um modelo da família do Grok (Phoenix) que prevê o que cada homem vai fazer com o seu post: responder, mandar o link para um amigo, silenciar ou denunciar. Post com mais de 48 horas sai da disputa. Este guia é para conta de texto +18 que quer público masculino no Brasil.</p>
             </header>
             <section class="weights glow" aria-labelledby="weights-title">
               <div class="weights-head">
                 <h3 id="weights-title" class="font-display">Quanto vale cada ação</h3>
-                <p class="text-xs text-mute">Em curtidas. Uma reply que você responde vale 150 curtidas; uma denúncia apaga 738.</p>
+                <p class="text-xs text-mute">O peso multiplica a chance que o X prevê de cada pessoa fazer aquilo. Não é contagem: uma denúncia não "apaga" 468 curtidas, mas a chance de denúncia pesa 468 vezes mais que a de curtida.</p>
               </div>
               <ol id="weights-scale" class="weights-scale"></ol>
             </section>
             <nav class="info-toc" aria-label="Partes do guia">
-              <a href="#algo-fabrica">Como funciona</a><a href="#algo-ama">O que ele ama</a><a href="#algo-mata">O que ele mata</a><a href="#algo-camadas">Camadas invisíveis</a><a href="#algo-janelas">Janelas</a><a href="#algo-reply">Reply 150x</a><a href="#algo-adulto">Conta +18</a><a href="#algo-aquecer">Aquecer conta</a><a href="#algo-rotina">Rotina</a><a href="#algo-playbook">0 a 100 mil</a><a href="#algo-erros">Erros</a><a href="#algo-kpis">O que medir</a>
+              <a href="#algo-fabrica">Como funciona</a><a href="#algo-48h">Regra das 48 h</a><a href="#algo-ama">O que ele ama</a><a href="#algo-mata">O que ele mata</a><a href="#algo-diversidade">Várias contas</a><a href="#algo-camadas">O que mudou</a><a href="#algo-janelas">Horários</a><a href="#algo-reply">Conversa</a><a href="#algo-texto">Texto que vende</a><a href="#algo-adulto">Conta +18</a><a href="#algo-aquecer">Aquecer conta</a><a href="#algo-rotina">Rotina</a><a href="#algo-playbook">0 a 100 mil</a><a href="#algo-erros">Erros</a><a href="#algo-kpis">O que medir</a>
             </nav>
             <div class="info-doc">
               <section class="info-sec glow" id="algo-fabrica">
                 <h3 class="font-display">Como o feed é montado</h3>
-                <p>O X funciona como uma fábrica em etapas. Nove esteiras paralelas juntam uns 1.500 candidatos para você, um porteiro rápido (Light Ranker) descarta os piores, um juiz pesado (Heavy Ranker) calcula 17 probabilidades para cada post, ajustes finos entram por cima e os 50 melhores chegam no feed.</p>
+                <p>Cada vez que um homem abre o X, o feed é montado na hora, em quatro etapas.</p>
+                <ol class="steps">
+                  <li><b>Busca de candidatos.</b> Quatro fontes ao mesmo tempo: Thunder (posts recentes de quem ele segue, guardados em memória), Phoenix (posts de fora da rede parecidos com o que ele já engaja), SimClusters (grupos de contas com o mesmo público) e uma lista de posts populares do momento.</li>
+                  <li><b>Filtros.</b> 17 filtros tiram o que nem pode concorrer: post com mais de 48 h, post que ele já viu ou já recebeu, palavras que ele silenciou, contas que ele bloqueou ou silenciou, reply e repost de quem ele não segue, e conteúdo +18 de fora da rede para quem não é desse público.</li>
+                  <li><b>Nota.</b> O Phoenix calcula a chance de cada ação (são 64 tipos, como responder, copiar o link, seguir, silenciar). A nota é a soma de cada chance vezes o peso da régua acima. Cada post é avaliado sozinho: o post do lado não muda a sua nota.</li>
+                  <li><b>Ajustes e entrega.</b> Repetir autor desconta, post de fora da rede vale ×0,75, conta pequena ganha um empurrão para perto da 15ª posição, e o VMRanker separa posts parecidos entre os 150 primeiros. Por último, a moderação decide se o post entra, entra com aviso, entra atrás de "conteúdo sensível" ou sai.</li>
+                </ol>
+                <p class="info-callout"><b>O modelo lê comportamento.</b> O que entra no Phoenix são códigos de quem interagiu, o histórico dessa pessoa e qual foi a ação. O texto é a isca: ele não ganha nota por ser bonito, ganha pelo que faz os homens fazerem. As palavras ainda contam em dois lugares: nas palavras silenciadas e na moderação.</p>
+              </section>
+              <section class="info-sec glow" id="algo-48h">
+                <h3 class="font-display">A regra das 48 horas</h3>
+                <p>O filtro de idade (AgeFilter) tira do "Para você" todo post com mais de 48 horas. Depois disso o post só aparece no seu perfil, na busca e para quem já te segue de perto. A vida útil de um texto no feed de descoberta é de dois dias, e quase tudo se decide na primeira hora.</p>
+                <ol class="life48" aria-label="Vida de um post no Para você">
+                  <li class="is-hot"><time>0 a 1 h</time><b>Decide</b><span>A velocidade de reply e de compartilhamento aqui define para quantos homens de fora o post vai.</span></li>
+                  <li><time>1 a 24 h</time><b>Espalha</b><span>Quem engajou puxa gente parecida. Responder os comentários mantém o post subindo.</span></li>
+                  <li><time>24 a 48 h</time><b>Cauda</b><span>Ainda entra para quem não viu. Bom momento para a sua rede citar com comentário.</span></li>
+                  <li class="is-out"><time>48 h +</time><b>Fora</b><span>Sai do "Para você" para sempre. Não adianta mais empurrar.</span></li>
+                </ol>
                 <ul>
-                  <li><b>Coleta.</b> Cada fonte tem cota: quem você segue 600, mistura de posts parecidos 400, o que a sua rede curtiu nas últimas 24 h (UTEG) 300, reforço 200, listas 100, comunidades 100.</li>
-                  <li><b>Juiz.</b> A nota que mais pesa é se as pessoas conversam com você. Aplauso sozinho (curtida) vale quase nada.</li>
-                  <li><b>Ajustes.</b> Mais de 16 multiplicadores: link para fora do X derruba, assinatura Premium ajuda.</li>
-                  <li><b>Mistura.</b> No máximo 2 posts seguidos de quem a pessoa não segue.</li>
+                  <li><b>Texto campeão volta, com outra roupa.</b> Depois de 48 h, poste de novo o que bombou com outra abertura ou outro fechamento (a ideia "Variações" do Radar faz isso). Igualzinho não: o X tira post que a pessoa já viu e corta texto repetido.</li>
+                  <li><b>Não queime texto bom em horário morto.</b> Se o post nasce de madrugada sem ninguém para responder, a primeira hora passa vazia e as 48 h acabam sem ele decolar.</li>
+                  <li><b>Empurrão da rede só vale dentro das 48 h.</b> Citação da sua outra conta num post de 3 dias não traz ninguém novo.</li>
                 </ul>
-                <p class="text-sm text-mute">Pesos do porteiro (Light Ranker), que decide quem nem chega no juiz: reply 9 · repost 1 · curtida 1 · clique no perfil 1 · clique no post 0,3 · link 0,1 · foto 0,03 · metade de um vídeo 0,01.</p>
               </section>
               <section class="info-sec glow" id="algo-ama">
                 <h3 class="font-display">O que ele ama</h3>
                 <div class="tiers">
-                  <div class="tier-row is-s"><span class="tier-mark">S</span><div><b>Explode o alcance</b><p>Reply que você responde (150 curtidas) · velocidade nos primeiros 30 minutos · seguir de volta quem engaja e prender a leitura.</p></div></div>
-                  <div class="tier-row is-a"><span class="tier-mark">A</span><div><b>Alto impacto</b><p>Salvar o post (20 curtidas) · leitura de 2 minutos ou mais · citação com comentário (entra em 3 sistemas) · Premium.</p></div></div>
-                  <div class="tier-row is-b"><span class="tier-mark">B</span><div><b>Bom</b><p>Repost (2 curtidas) · reply em conta grande · vídeo nativo (3x) · imagem (2x).</p></div></div>
-                  <div class="tier-row is-c"><span class="tier-mark">C</span><div><b>Base</b><p>Curtida · clique no perfil · 1 ou 2 hashtags.</p></div></div>
-                  <div class="tier-row is-f"><span class="tier-mark">F</span><div><b>Jogado fora</b><p>Não responder quem comentou (perde o +75) · postar e sumir, sem interagir com ninguém.</p></div></div>
+                  <div class="tier-row is-s"><span class="tier-mark">S</span><div><b>Explode o alcance (+20)</b><p>Copiar o link do post (o X quer que o post saia da plataforma, é o "manda no WhatsApp pro amigo") · reply de alguém que você segue de volta (5 da reply + 15 por ser mútuo).</p></div></div>
+                  <div class="tier-row is-a"><span class="tier-mark">A</span><div><b>Alto impacto (+4 a +5)</b><p>Reply · citação · mandar o post por DM · seguir você depois de ler o post.</p></div></div>
+                  <div class="tier-row is-b"><span class="tier-mark">B</span><div><b>Bom (+1 a +2)</b><p>Compartilhar · repost · ficar lendo (tempo de leitura soma de 0,004 a 0,05 e o X passou a premiar quem lê até o fim) · vídeo com 10 segundos ou mais (abaixo disso o tempo assistido nem conta).</p></div></div>
+                  <div class="tier-row is-c"><span class="tier-mark">C</span><div><b>Base (+0,5 ou menos)</b><p>Curtida · clique no perfil, em foto ou em link (0,05 a 0,4).</p></div></div>
+                  <div class="tier-row is-f"><span class="tier-mark">F</span><div><b>Jogado fora</b><p>Não seguir de volta quem comenta sempre (a reply dele valeria 4 vezes mais) · não responder na primeira hora · postar e sumir.</p></div></div>
                 </div>
               </section>
               <section class="info-sec glow" id="algo-mata">
                 <h3 class="font-display">O que ele mata</h3>
                 <div class="tiers is-bad">
-                  <div class="tier-row"><span class="tier-mark">1</span><div><b>Banimento</b><p>Qualquer coisa com menor de idade · listas negras de recomendação e de busca (RecommendationsBlacklist, SearchBlacklist).</p></div></div>
-                  <div class="tier-row"><span class="tier-mark">2</span><div><b>Crítico</b><p>Conteúdo +18 sem a marcação de sensível (o detector NsfwHighPrecision marca por você, e isso é punição: nsfwAdmin) · conta marcada como "não amplificar" (DoNotAmplify) · suspeita de conteúdo ilegal (LikelyIvs).</p></div></div>
-                  <div class="tier-row"><span class="tier-mark">3</span><div><b>Severo</b><p>Conta em período de teste (NotGraduated) · seguir mais de 2.500 perfis (a reputação cai 50 vezes) · post muito denunciado (HighlyReportedTweet) · reply com cara de spam (DownrankSpamReply).</p></div></div>
-                  <div class="tier-row"><span class="tier-mark">4</span><div><b>Alto</b><p>Conta sem Premium com link para fora (até 94% menos alcance) · o 4º post seguido do mesmo autor vale 25% · tom agressivo.</p></div></div>
-                  <div class="tier-row"><span class="tier-mark">5</span><div><b>Moderado</b><p>3 hashtags ou mais (40% menos) · ser reply (×0,75) · aparecer para quem não te segue (×0,75).</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">1</span><div><b>Banimento</b><p>Qualquer coisa com menor de idade, sem consentimento ou de pessoa real sem autorização · conteúdo ilegal. A moderação (54 regras) tira da plataforma, não só do feed.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">2</span><div><b>Denúncia (−234)</b><p>A pior chance de todas. Post que faz o X prever denúncia some do feed de quem não te segue. Ofender, expor pessoa ou pegar pesado com quem não pediu é o caminho mais rápido.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">3</span><div><b>Silenciar (−58,8)</b><p>Pior que bloquear. Quem silencia tira você do feed dele para sempre e ensina o modelo que gente parecida também não quer. Rage bait e post repetido geram silenciamento.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">4</span><div><b>"Não tenho interesse" (−43,2) e bloqueio (−31,2)</b><p>Aparecem quando o post chega para o público errado: +18 para quem não segue nada do nicho, por exemplo. Nicho bem definido protege.</p></div></div>
+                  <div class="tier-row"><span class="tier-mark">5</span><div><b>Filtros que cortam antes da nota</b><p>Palavras silenciadas pelos homens (nada de texto cheio de termo de spam) · reply e repost de quem ele não segue não entram no feed dele · +18 de fora da rede é filtrado para quem não é do público (OONNsfwSimclustersFilter) · passar direto sem ler (−0,02).</p></div></div>
                 </div>
               </section>
-              <section class="info-sec glow" id="algo-camadas">
-                <h3 class="font-display">As 3 camadas invisíveis</h3>
+              <section class="info-sec glow" id="algo-diversidade">
+                <h3 class="font-display">Várias contas: o que desconta e o que não</h3>
+                <p>O desconto por autor vale <b>por conta</b>, no feed de cada pessoa: a fórmula é 0,75 × 0,5<sup>k</sup> + 0,25, em que k é quantos posts seus já apareceram antes para ele.</p>
+                <ol class="decay" aria-label="Quanto vale cada post seu no mesmo feed">
+                  <li style="--v: 100%"><span>1º post</span><i></i><b>100%</b></li>
+                  <li style="--v: 62.5%"><span>2º post</span><i></i><b>62,5%</b></li>
+                  <li style="--v: 43.75%"><span>3º post</span><i></i><b>43,8%</b></li>
+                  <li style="--v: 34.4%"><span>4º post</span><i></i><b>34,4%</b></li>
+                  <li style="--v: 25%"><span>piso</span><i></i><b>25%</b></li>
+                </ol>
                 <ul>
-                  <li><b>SimClusters.</b> O X divide o público em 145 mil "condomínios" e te coloca em um pelo perfil de <em>quem te segue</em>. Leva uns 7 dias para mudar. Quer outro público? Interaja e seja seguida por gente dele.</li>
-                  <li><b>Real Graph.</b> Prevê se A vai interagir com B, com meia-vida de 7 dias. Uma pessoa que curte, clica e reposta vale mais que 10 curtidas de gente diferente. Seguir de volta fica para sempre; deixar de seguir ou bloquear destrói.</li>
-                  <li><b>TweepCred.</b> Nota de 0 a 100 da conta. Celular verificado +0,5, e-mail e telefone +0,2, 30 dias de conta é o máximo de idade, Premium +10. Acima de 65 a conta escapa do filtro de spam da busca; abaixo de 40 vira "baixa qualidade". Seguir mais de 2.500 divide a nota por 50.</li>
+                  <li><b>Na mesma conta:</b> 3 a 5 posts por dia, com 2 horas ou mais entre eles, para que o mesmo homem não receba dois seguidos.</li>
+                  <li><b>Entre contas diferentes:</b> a diversidade de autor não pega, cada conta é outro autor. Quem pega é o VMRanker, que separa posts parecidos entre os 150 primeiros, e a moderação, que vê texto igual saindo de várias contas no mesmo minuto como rede de spam.</li>
+                  <li><b>Por isso:</b> cada conta com o próprio texto (a aba Postar avisa quando o mesmo texto está na fila de outra conta) e horários escalonados, com 10 a 20 minutos entre uma conta e outra.</li>
                 </ul>
               </section>
+              <section class="info-sec glow" id="algo-camadas">
+                <h3 class="font-display">O que mudou de 2023 para 2026</h3>
+                <p>Quase todo guia que circula ainda usa o código de 2023. Ele foi trocado. O que você ouvir com estes números é antigo:</p>
+                <div class="change-table" role="table" aria-label="Algoritmo de 2023 contra o de 2026">
+                  <div role="row" class="is-head"><span role="columnheader">Antes (2023)</span><span role="columnheader">Agora (2026)</span></div>
+                  <div role="row"><span role="cell">Light Ranker e Heavy Ranker, 17 chances por post</span><span role="cell">Phoenix (Grok), 64 tipos de ação, cada post avaliado sozinho</span></div>
+                  <div role="row"><span role="cell">Reply que você responde +75 ("150 curtidas")</span><span role="cell">Reply +5; reply de quem você segue de volta +20</span></div>
+                  <div role="row"><span role="cell">Salvar o post +10</span><span role="cell">Fora da lista de ações; o que vale é copiar o link (+20) e mandar por DM (+5)</span></div>
+                  <div role="row"><span role="cell">Denúncia −369, bloqueio −74</span><span role="cell">Denúncia −234, silenciar −58,8, "não tenho interesse" −43,2, bloqueio −31,2</span></div>
+                  <div role="row"><span role="cell">TweepCred, Real Graph, +10 do Premium</span><span role="cell">Não aparecem no código novo como nota de conta</span></div>
+                  <div role="row"><span role="cell">Janela de 24 h para fora da rede</span><span role="cell">48 h para tudo no "Para você"</span></div>
+                  <div role="row"><span role="cell">O 4º post do mesmo autor vale 25%</span><span role="cell">O 2º já vale 62,5%; piso de 25%</span></div>
+                  <div role="row"><span role="cell">Texto, hashtag e tamanho do post entravam na nota</span><span role="cell">A nota vem do comportamento; texto só pesa nas palavras silenciadas e na moderação</span></div>
+                </div>
+                <p class="text-sm text-mute">Continuam valendo: desconto de ×0,75 para quem não te segue, SimClusters (o "condomínio" de público definido por quem te segue) e a marcação de conteúdo sensível.</p>
+              </section>
               <section class="info-sec glow" id="algo-janelas">
-                <h3 class="font-display">As janelas que salvam ou matam um post</h3>
-                <p class="info-callout"><b>Os primeiros 30 minutos decidem.</b> É ali que o X escolhe se o post vai aparecer para quem não te segue nas próximas 24 horas. 100 curtidas em 6 horas valem mais que 100 em 48: velocidade ganha de volume. Conta cada pessoa uma vez só, e o mínimo para entrar é 1 curtida de alguém que não seja você.</p>
+                <h3 class="font-display">Horários para homens no Brasil</h3>
+                <p>Homens de 18 a 45 anos usam o X no almoço e à noite. Terça e quarta à noite são os melhores momentos da semana. O post principal vai no horário em que você está online para responder a primeira hora.</p>
+                <div class="week-table" role="table" aria-label="Horários de post por dia da semana">
+                  <div role="row" class="is-head"><span role="columnheader">Dia</span><span role="columnheader">Almoço</span><span role="columnheader">Noite</span><span role="columnheader">Pico +18</span></div>
+                  <div role="row"><span role="cell">Segunda</span><span role="cell">12h</span><span role="cell">21h</span><span role="cell">22h–1h</span></div>
+                  <div role="row" class="is-best"><span role="cell">Terça</span><span role="cell">12h</span><span role="cell">21h</span><span role="cell">22h–1h</span></div>
+                  <div role="row" class="is-best"><span role="cell">Quarta</span><span role="cell">12h</span><span role="cell">21h</span><span role="cell">22h–1h</span></div>
+                  <div role="row"><span role="cell">Quinta</span><span role="cell">12h</span><span role="cell">21h</span><span role="cell">22h–1h</span></div>
+                  <div role="row"><span role="cell">Sexta</span><span role="cell">12h</span><span role="cell">18h</span><span role="cell">22h–2h</span></div>
+                  <div role="row"><span role="cell">Sábado</span><span role="cell">10h</span><span role="cell">20h</span><span role="cell">22h–2h</span></div>
+                  <div role="row"><span role="cell">Domingo</span><span role="cell">10h</span><span role="cell">20h</span><span role="cell">21h–0h</span></div>
+                </div>
                 <ul>
-                  <li>O "Para você" olha as últimas 48 h; posts parecidos ficam no radar por 30 dias; a busca guarda uns 7 dias.</li>
-                  <li><b>"Ver menos disso".</b> Bloqueia o seu conteúdo para aquela pessoa por 14 dias e deixa uma penalidade que some aos poucos em 140 dias, sem aviso nenhum. E pune também quem curtiu aquele post.</li>
-                  <li>Melhores horários no Brasil: terça e quarta, 9h–10h. Para conteúdo +18 o pico é 22h–1h.</li>
+                  <li><b>A primeira hora decide.</b> O X mede a velocidade nos primeiros 30 a 60 minutos. Fique online para responder cada comentário nesse tempo.</li>
+                  <li><b>Seu dado manda mais que a tabela.</b> No Dashboard, o mapa de calor mostra as views médias por dia e hora das suas contas. Use a tabela para começar e o mapa para ajustar.</li>
                 </ul>
               </section>
               <section class="info-sec glow" id="algo-reply">
-                <h3 class="font-display">Reply: o sinal que quase ninguém usa</h3>
+                <h3 class="font-display">Conversa: o sinal que a gente controla</h3>
                 <ul>
-                  <li><b>Onde.</b> Em contas que sabidamente respondem: observe uma semana antes de mirar.</li>
-                  <li><b>Quando.</b> Entre 5 e 15 minutos depois do post. Depois de 30 minutos a chance cai muito.</li>
-                  <li><b>Como.</b> Pergunta que prova que você leu, contraponto, dado novo ou experiência sua. "Amei!", reply genérica ou pergunta que o próprio post já respondeu não valem nada.</li>
-                  <li><b>Nunca.</b> Divulgação ou link na reply: o X marca como spam.</li>
-                  <li><b>Responderam você?</b> Responda de volta. Cada volta da conversa soma sinal.</li>
-                  <li><b>Na sua conta.</b> Responda todo mundo que comentar. Ignorar é jogar fora 150 curtidas por comentário.</li>
+                  <li><b>Responda todo mundo na primeira hora.</b> Cada resposta sua puxa outra reply dele (+5) e mantém o post vivo dentro das 48 h. Métricas → Responder agora lista os posts com comentário esperando.</li>
+                  <li><b>Siga de volta quem comenta sempre.</b> A reply de um seguidor mútuo vale +20, quatro vezes a de um desconhecido. Os fãs que mais comentam viram os seus melhores sinais.</li>
+                  <li><b>Faça pergunta de volta.</b> "E você, faria?" rende mais que "obrigada". Cada volta da conversa é outra chance de reply.</li>
+                  <li><b>Reply em conta grande traz perfil, não feed.</b> Reply de quem o homem não segue não entra no "Para você" dele. Ela funciona para quem lê a conversa e clica no seu perfil. Escolha contas do nicho com público masculino e responda nos primeiros 15 minutos.</li>
+                  <li><b>Nunca.</b> Divulgação ou link em reply de post dos outros: vira denúncia e spam.</li>
                 </ul>
+              </section>
+              <section class="info-sec glow" id="algo-texto">
+                <h3 class="font-display">Texto que faz homem agir</h3>
+                <p>Como o modelo premia ação, cada texto precisa pedir uma ação: responder, mandar para um amigo ou seguir. Os formatos que mais rendem para o público masculino:</p>
+                <ul>
+                  <li><b>Pergunta direta ao ego</b> (reply): "Homem que aguenta mais de uma rodada existe ou é lenda?"</li>
+                  <li><b>Enquete de dois lados</b> (reply e citação): "De quatro ou por cima? Responde sem mentir."</li>
+                  <li><b>Desafio</b> (reply e seguir): "Se esse post passar de 100 respostas eu conto o que fiz ontem."</li>
+                  <li><b>Lista e confissão "mandável"</b> (copiar link e DM, +20 e +5): o teste é "algum homem mandaria isso no grupo dos amigos?".</li>
+                  <li><b>Gancho no assunto do momento</b> (fora da rede): futebol, luta, reality, games. O Radar mostra o que está em alta e marca o que é bom para engajar.</li>
+                </ul>
+                <p class="info-callout is-warn"><b>Provocar sim, irritar não.</b> Rage bait traz reply, mas também silenciamento (−58,8) e denúncia (−234), que pesam muito mais. Brinque com o ego, nunca ataque.</p>
+                <p>Os geradores do Radar (Gancho do momento, Perguntas quentes, Gerador por palavras-chave) já seguem essas regras: nenhum texto pede link, bio ou grupo, porque o post que deve viralizar vive só da conversa.</p>
               </section>
               <section class="info-sec glow" id="algo-adulto">
                 <h3 class="font-display">Conta +18: o campo minado</h3>
-                <p class="info-callout is-warn"><b>Marcar você mesma como sensível protege. Ser marcada pelo X pune.</b> Ligue "conteúdo sensível" nas configurações da conta antes de postar qualquer coisa +18. Quem não liga é pego pelo detector automático, e essa marcação tira a conta da busca sem volta.</p>
+                <p class="info-callout is-warn"><b>Marcar você mesma como sensível protege. Ser marcada pelo X pune.</b> Ligue "conteúdo sensível" nas configurações da conta antes de postar qualquer coisa +18. A moderação decide para cada post e cada pessoa se ele entra, entra com aviso, fica atrás de "conteúdo sensível" ou sai, e o corte só acontece nas recomendações para quem não te segue.</p>
                 <ul>
+                  <li><b>Por que texto.</b> Mídia +18 de fora da rede é filtrada para quem não é do público. Texto sem mídia explícita passa pelos filtros e chega a mais homens novos; a mídia fica para quem já segue.</li>
                   <li><b>Foto de perfil e capa sempre comportadas.</b> Qualquer coisa +18 nelas tira a conta da busca.</li>
-                  <li><b>Configuração.</b> Sensível ligado, conta verificada, "18+" na bio e o cadastro de criadora adulta do X (ACC Program; segundo o guia, obrigatório desde janeiro de 2026: sem ele a fiscalização é mais dura).</li>
+                  <li><b>Configuração.</b> Sensível ligado, conta verificada e "18+" na bio.</li>
                   <li><b>Punições.</b> 1º aviso, 2º 7 dias, 3º 30 dias e perda de monetização, 4º banimento.</li>
                   <li><b>IA.</b> Conteúdo feito com IA precisa ser declarado. Deepfake de pessoa real sem consentimento é banimento e caso de polícia.</li>
-                  <li><b>Links.</b> Link na bio não pesa. No corpo do post, 30% a 50% menos alcance; em conta sem Premium, até 94%. Na página de links (Linktree e parecidos), 3 links comportados para cada link adulto.</li>
+                  <li><b>Link de venda.</b> Nunca no post que você quer que viralize. Na bio é o mais seguro; no primeiro comentário do próprio post também dá. Em reply de post dos outros, nunca.</li>
                   <li><b>Onde está o público.</b> União Europeia e Reino Unido cortam conteúdo adulto por verificação de idade. O foco é Brasil e América Latina, EUA e Canadá.</li>
-                  <li><b>Público fiel blinda.</b> Quem interage muito com você vê os seus posts mesmo com as penalidades. 500 a 1.000 fãs de verdade já sustentam a conta.</li>
-                  <li><b>O que funciona.</b> Entrar em assuntos de público grande (futebol, games, academia, anime, reality), personalidade nos textos, pergunta que faz homem responder, Spaces, mensagem direta só manual (nunca automática), corrente de seguir com outras criadoras 2 a 3 vezes por semana, rodízio do post fixado, threads contando a sua história e o pico das 22h–1h.</li>
+                  <li><b>Público fiel blinda.</b> Quem já te segue recebe pelo Thunder, sem passar pelos filtros de fora da rede. 500 a 1.000 homens que comentam sempre sustentam a conta.</li>
                 </ul>
               </section>
               <section class="info-sec glow" id="algo-aquecer">
@@ -764,51 +824,41 @@
               <section class="info-sec glow" id="algo-rotina">
                 <h3 class="font-display">Rotina de cada dia (conta aquecida)</h3>
                 <ol class="steps is-time">
-                  <li><time>7h40</time><b>Ler o feed</b> por 15 a 20 minutos, de verdade.</li>
-                  <li><time>8h</time><b>O melhor post do dia primeiro.</b> É ele que puxa a conta nas próximas horas.</li>
-                  <li><time>8h às 9h</time><b>Replies nas contas-alvo</b>, 20 a 50 por dia, nos primeiros 15 minutos do post delas.</li>
-                  <li><time>+2 h</time><b>Segundo post.</b> Pelo menos 2 horas entre um post original e outro.</li>
-                  <li><time>O dia todo</time><b>Responder todos os comentários.</b></li>
-                  <li><time>22h a 1h</time><b>Janela +18</b>, quando o público do nicho mais engaja.</li>
+                  <li><time>11h40</time><b>Ler o feed</b> por 10 a 15 minutos, de verdade, curtindo e respondendo coisas do nicho.</li>
+                  <li><time>12h</time><b>Post do almoço.</b> Pergunta ou enquete leve, para pegar o homem no intervalo.</li>
+                  <li><time>12h às 13h</time><b>Responder todos os comentários</b> e seguir de volta quem comenta sempre.</li>
+                  <li><time>+2 h</time><b>Replies em contas do nicho</b>, nos primeiros 15 minutos do post delas.</li>
+                  <li><time>21h</time><b>O melhor texto do dia.</b> É o horário com mais homens online; fique para responder a primeira hora.</li>
+                  <li><time>22h a 1h</time><b>Janela +18.</b> Um texto mais quente e a sua rede citando os posts do dia que ainda estão dentro das 48 h.</li>
                 </ol>
-                <p>Volume que cresce: uns 95 posts por semana somando originais e replies, mais o empurrão da sua rede. Terça e quarta são os melhores dias.</p>
-                <div class="week-table" role="table" aria-label="Ritmo da semana por conta">
-                  <div role="row" class="is-head"><span role="columnheader">Dia</span><span role="columnheader">Posts</span><span role="columnheader">Replies</span><span role="columnheader">RT da rede</span></div>
-                  <div role="row"><span role="cell">Segunda</span><span role="cell">4</span><span role="cell">50</span><span role="cell">12</span></div>
-                  <div role="row" class="is-best"><span role="cell">Terça</span><span role="cell">5</span><span role="cell">60</span><span role="cell">14</span></div>
-                  <div role="row" class="is-best"><span role="cell">Quarta</span><span role="cell">5</span><span role="cell">60</span><span role="cell">14</span></div>
-                  <div role="row"><span role="cell">Quinta</span><span role="cell">4</span><span role="cell">50</span><span role="cell">12</span></div>
-                  <div role="row"><span role="cell">Sexta</span><span role="cell">4</span><span role="cell">45</span><span role="cell">12</span></div>
-                  <div role="row"><span role="cell">Sábado</span><span role="cell">3</span><span role="cell">35</span><span role="cell">8</span></div>
-                  <div role="row"><span role="cell">Domingo</span><span role="cell">3</span><span role="cell">30</span><span role="cell">8</span></div>
-                </div>
-                <p>Mistura para conta +18: 40% personalidade (opinião, enquete, provocação), 30% prévia sugestiva sem link, 20% divulgação (link só na reply do próprio post), 10% comunidade (reposts, marcos).</p>
+                <p>Mistura para conta +18 de texto: 40% personalidade (opinião, enquete, provocação), 30% prévia sugestiva sem link, 20% desafio e confissão, 10% comunidade (citar a sua rede, marcos). A venda fica na bio, nunca no texto que deve viralizar.</p>
               </section>
               <section class="info-sec glow" id="algo-playbook">
                 <h3 class="font-display">De 0 a 100 mil seguidores</h3>
                 <ol class="steps">
-                  <li><b>0 a 1 mil.</b> 70% replies e 30% posts próprios. Mire contas 2 a 10 vezes maiores que a sua, 20 a 50 replies por dia, nos primeiros 15 minutos. Caso real: de 500 para 12 mil seguidores em 6 meses só com isso.</li>
-                  <li><b>1 mil a 10 mil.</b> Um nicho só, uns 95 posts por semana, threads, comunidades. A métrica número 1 é quantas vezes salvam o seu post. Responda todo mundo.</li>
-                  <li><b>10 mil a 50 mil.</b> Citações em contas grandes, parcerias, Spaces, post fixado por 2 semanas, terça e quarta das 9h às 10h.</li>
-                  <li><b>50 mil a 100 mil.</b> Volume, divulgação cruzada entre as suas contas, newsletter e público fiel que segue de volta.</li>
+                  <li><b>0 a 1 mil.</b> 70% replies e 30% posts próprios. Mire contas 2 a 10 vezes maiores, com público masculino, 20 a 50 replies por dia nos primeiros 15 minutos. Conta pequena ganha o empurrão de autor novo: aproveite enquanto ele dura.</li>
+                  <li><b>1 mil a 10 mil.</b> Um nicho só, 3 a 5 textos por dia, e seguir de volta os homens que mais comentam (reply de mútuo vale +20). A métrica número 1 é reply por post.</li>
+                  <li><b>10 mil a 50 mil.</b> Citações vindas de contas grandes do nicho, listas e confissões "mandáveis" para gerar cópia de link e DM, post fixado com o seu melhor texto.</li>
+                  <li><b>50 mil a 100 mil.</b> Volume com qualidade, divulgação cruzada entre as suas contas (cada uma com o próprio texto) e o público fiel recebendo tudo pelo Thunder.</li>
                 </ol>
               </section>
               <section class="info-sec glow" id="algo-erros">
                 <h3 class="font-display">Os erros que derrubam conta</h3>
                 <ul>
-                  <li><b class="is-bad">Graves.</b> Pedir curtida ou RT em troca de algo (engagement farming) · +18 sem marcação de sensível · seguir mais de 50 por dia · postar sempre no mesmo horário exato · link com conta sem Premium · 3 hashtags ou mais.</li>
-                  <li><b>Silenciosos.</b> Ignorar comentários · postar sem interagir · trocar de nicho · link no corpo do post · olhar só curtida · ficar sem Premium · comprar seguidores · começar com nicho amplo demais.</li>
-                  <li><b class="is-bad">No +18.</b> Só interagir com outras criadoras (o público fica fechado) · página de links só com conteúdo adulto · não ter a marcação de sensível · mirar União Europeia e Reino Unido · ficar fora do ACC Program.</li>
+                  <li><b class="is-bad">Graves.</b> Rage bait e ofensa (silenciar e denunciar pesam até 468 vezes uma curtida) · +18 sem marcação de sensível · o mesmo texto em várias contas no mesmo minuto · pedir curtida ou RT em troca de algo · seguir mais de 50 por dia.</li>
+                  <li><b>Silenciosos.</b> Postar de madrugada sem ninguém para responder · repostar o mesmo texto igualzinho (o X tira o que a pessoa já viu) · ignorar comentários · não seguir de volta os fãs que comentam · trocar de nicho · olhar só curtida.</li>
+                  <li><b class="is-bad">No +18.</b> Mídia explícita no post que deve alcançar quem não te segue · foto de perfil +18 · link de venda no corpo do post · só interagir com outras criadoras (o público fica fechado) · mirar União Europeia e Reino Unido.</li>
                 </ul>
               </section>
               <section class="info-sec glow" id="algo-kpis">
                 <h3 class="font-display">O que medir (e o que ignorar)</h3>
-                <p class="info-callout"><b>Salvar é a nova curtida.</b> Importa: replies que você respondeu (meta: pelo menos 1 por conta por dia) · quantas vezes salvaram · leitura de 2 min · cliques no perfil · citações · velocidade nos 30 minutos · quem segue de volta · o público fiel.</p>
-                <p><b>Engana.</b> Curtida sozinha (vale 0,5) · impressão sem interação (piora os próximos posts) · número de seguidores (mil fiéis valem mais que 100 mil parados) · repost sem comentário (a citação vale 3 vezes mais).</p>
+                <p class="info-callout"><b>Conversa e compartilhamento são a nova curtida.</b> Importa: replies por post · replies que você respondeu na primeira hora · citações · seguidores novos depois de um post · velocidade na primeira hora · homens que comentam sempre (e que você segue de volta).</p>
+                <p><b>Engana.</b> Curtida sozinha (vale 0,5) · views sem conversa (o X aprende que o texto não faz agir) · número de seguidores parados · repost sem comentário (a citação vale 5 vezes mais).</p>
+                <p class="text-sm text-mute">Cópia de link e envio por DM não aparecem para quem está de fora do X, então o painel não mostra. A aba Métricas usa o que dá para ler: replies, citações, reposts e curtidas, com os pesos de 2026.</p>
               </section>
               <section class="info-sec glow" id="algo-fontes">
                 <h3 class="font-display">De onde vem isso</h3>
-                <p class="text-sm text-mute">Código aberto do algoritmo do X publicado em 2023 (home-mixer, visibilitylib, simclusters_v2, interaction_graph, earlybird e outros) e estudos com milhões de posts (Buffer, Metricool, Teract). Onde está cada número no código: janela de 24 h (RecosConfig.scala:33) · fora da rede ×0,75 (ScoredTweetsParam.scala:466) · +75 da reply respondida (PredictedScoreFeature.scala:40-45) · nsfwUser e nsfwAdmin (Rules.scala:52, 64, 70, 76) · TweepCred 65 (earlybird.thrift:410) · ÷50 com 2.500 seguindo (Reputation.scala:36). O X muda regras sem avisar: trate os números como direção, não como lei.</p>
+                <p class="text-sm text-mute">Código aberto do "Para você" publicado pela xAI (xai-org/x-algorithm: home-mixer, thunder, phoenix, candidate-pipeline): as etapas, os 17 filtros, o AgeFilter de 48 h, o OONNsfwSimclustersFilter, a lista de ações e a regra de que o peso multiplica a chance prevista. Os valores dos pesos, a fórmula da diversidade de autor, o ×0,75 de fora da rede, o empurrão de autor novo e o mínimo de 10 s de vídeo vêm da leitura do código feita pelo X Algorithm Playbook (tang-vu) e pela análise do Akita (julho de 2026), porque o arquivo de parâmetros não foi publicado junto. Horários: guia X Growth Master (novembro de 2026). O X muda regras sem avisar: trate os números como direção, não como lei.</p>
               </section>
             </div>
           </div>
@@ -851,10 +901,10 @@
                 <h3 id="rede-rules-title" class="font-display text-lg text-white">Regras para não derrubar todas</h3>
                 <ol class="steps">
                   <li><b>Só conta saudável entra.</b> Conta com ghost ban, search ban ou suspensa sai da rede na hora: tudo que ela toca é puxado para baixo junto.</li>
-                  <li><b>Citação vale mais que repost.</b> Citar com um comentário seu entra em 3 sistemas e vale 3 vezes mais que o repost puro.</li>
+                  <li><b>Citação vale mais que repost.</b> Citar com um comentário seu vale +5, cinco vezes o repost puro (+1), e só rende dentro das 48 h do post.</li>
                   <li><b>Espalhe ao longo do dia.</b> Nada de todas as contas repostarem no mesmo minuto: o X lê isso como rede coordenada.</li>
                   <li><b>Limite por dia.</b> Poucos reposts por conta por dia e só no que combina com o público dela.</li>
-                  <li><b>Horário de gente.</b> Das 7h às 23h, quando o seu público está acordado.</li>
+                  <li><b>Horário de gente.</b> Das 10h à 1h, quando os homens do seu público estão online, e só nas primeiras 48 h de cada post.</li>
                   <li><b>Interação real.</b> Rede entre as suas contas ajuda a largar. Quem segura o post são as replies de gente de verdade.</li>
                 </ol>
                 <p class="info-callout is-warn"><b>Este painel não reposta por você.</b> Nenhuma conta sua é logada aqui, de propósito: é o que mantém elas longe de bloqueio. A rede é feita à mão, com o mapa e as regras acima.</p>

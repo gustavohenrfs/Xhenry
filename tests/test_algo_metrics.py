@@ -81,12 +81,12 @@ def test_signals_points_and_comparison(client):
     assert t["posts"] == 3 and t["own_replies"] == 1, "a reply que a conta mandou não conta como post"
     assert (t["bookmarks"], t["replies"], t["quotes"]) == (180, 401, 25)
     assert t["bookmarks_per_post"] == 60.0 and t["replies_per_post"] == round(401 / 3, 2)
-    points = 700 * 0.5 + 17 * 1 + 25 * 3 + 180 * 10 + 401 * 13.5
+    points = 700 * 0.5 + 17 * 1 + 25 * 5 + 401 * 5  # pesos de 2026: salvar não soma
     assert t["points"] == round(points, 1) and t["points_per_k"] == round(points * 1000 / 17_000, 2)
     assert body["previous"]["posts"] == 1 and body["previous"]["bookmarks"] == 2, "período anterior do mesmo tamanho"
     assert body["available"] == {"dwell": False, "own_replies": True}, "tempo de leitura não existe para quem é de fora"
     mix = {m["key"]: m["points"] for m in body["mix"]}
-    assert mix["replies"] == round(401 * 13.5, 1) and mix["bookmarks"] == 1800
+    assert mix["replies"] == round(401 * 5, 1) and mix["quotes"] == 125 and "bookmarks" not in mix
     assert len(body["series"]) >= 14 and sum(d["bookmarks"] for d in body["series"]) == 180 + 2
     assert sum(slot["posts"] for slot in body["hours"]) == 3 and body["hours"][12]["posts"] == 3
 
@@ -97,7 +97,7 @@ def test_accounts_ranked_with_phase_and_status(client):
     rows = client.get("/api/metrics", params={"period": "7d"}, headers=h).json()["accounts"]
     assert [r["id"] for r in rows] == [ids["strong"], ids["weak"]], "mais pontos primeiro"
     strong, weak = rows
-    assert strong["phase"]["label"] == "1 mil a 10 mil" and strong["phase"]["kpi"] == "bookmarks"
+    assert strong["phase"]["label"] == "1 mil a 10 mil" and strong["phase"]["kpi"] == "replies"
     assert weak["phase"] is None and weak["status"] == "ghost_ban" and weak["status_label"]
     assert strong["bookmarks_per_post"] == 90.0 and weak["bookmarks_per_post"] == 0.0
     assert len(strong["spark"]) == 14 and strong["spark"][-1] > 0

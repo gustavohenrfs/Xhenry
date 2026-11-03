@@ -1622,6 +1622,8 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 .weight-row:nth-child(8) .weight-bar::before { animation-delay: .4s; }
 .weight-row:nth-child(9) .weight-bar::before { animation-delay: .45s; }
 .weight-row:nth-child(10) .weight-bar::before { animation-delay: .5s; }
+.weight-row:nth-child(11) .weight-bar::before { animation-delay: .55s; }
+.weight-row:nth-child(12) .weight-bar::before { animation-delay: .6s; }
 @keyframes weight-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .weight-value { text-align: right; font-size: .95rem; color: var(--fg); }
 .weight-row.is-neg .weight-value { color: var(--bad); }
@@ -1788,6 +1790,39 @@ button.radar-term-name { cursor: pointer; text-decoration: underline dotted; tex
 .week-table .is-head { font-size: .74rem; color: var(--muted); background: rgb(var(--c-neon) / .05); }
 .week-table .is-best { background: rgb(var(--c-neon) / .09); }
 .week-table .is-best span:first-child { color: var(--accent); font-weight: 600; }
+
+/* Vida de um post no "Para você": quatro trechos até o corte das 48 h. A primeira hora acesa; depois
+   das 48 h, riscado. */
+.life48 { display: grid; grid-template-columns: 1.4fr 1.6fr 1.4fr 1fr; gap: .3rem; margin: .9rem 0; padding: 0; list-style: none; }
+.life48 > li { position: relative; display: grid; gap: .2rem; align-content: start; padding: 1rem .8rem .8rem; border-radius: .9rem; background: var(--field); border: 1px solid var(--line); }
+.life48 > li::before { content: ""; position: absolute; inset: 0 0 auto; height: 4px; border-radius: .9rem .9rem 0 0; background: rgb(var(--c-neon) / .35); }
+.life48 > li.is-hot::before { background: linear-gradient(90deg, var(--laser-a), var(--laser-b)); box-shadow: 0 0 12px var(--laser-a); }
+.life48 > li.is-out { border-style: dashed; border-color: var(--bad-line); background: var(--bad-bg); }
+.life48 > li.is-out::before { background: var(--bad); }
+.life48 time { font-size: .76rem; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+.life48 > li.is-out time, .life48 > li.is-out b { color: var(--bad); }
+.life48 b { font-size: .95rem; }
+.life48 span { font-size: .8rem; line-height: 1.45; color: var(--muted); }
+@media (max-width: 767px) { .life48 { grid-template-columns: 1fr 1fr; } }
+
+/* Desconto por autor no mesmo feed: barras na proporção real (100% → piso de 25%). */
+.decay { display: grid; gap: .4rem; margin: .8rem 0; padding: 0; list-style: none; max-width: 34rem; }
+.decay > li { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr) 3.4rem; align-items: center; gap: .7rem; font-size: .84rem; }
+.decay span { color: var(--muted); }
+.decay i { height: .6rem; border-radius: 999px; background: rgb(var(--c-neon) / .07); position: relative; overflow: hidden; }
+.decay i::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); border-radius: inherit; background: linear-gradient(90deg, var(--laser-a), var(--laser-b)); }
+.decay > li:last-child i::before { background: rgb(var(--c-mute) / .55); }
+.decay b { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Antes e agora: duas colunas, o "agora" em destaque. */
+.change-table { display: grid; margin: .8rem 0; border: 1px solid var(--line); border-radius: 1rem; overflow: hidden; }
+.change-table > div { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; padding: .55rem .9rem; font-size: .84rem; line-height: 1.45; }
+.change-table > div + div { border-top: 1px solid var(--line); }
+.change-table > div span:first-child { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--bad-line); }
+.change-table > div span:last-child { color: var(--fg); }
+.change-table .is-head span:first-child, .change-table .is-head span:last-child { text-decoration: none; font-size: .74rem; color: var(--muted); }
+.change-table .is-head { background: rgb(var(--c-neon) / .05); }
+@media (max-width: 767px) { .change-table > div { grid-template-columns: 1fr; gap: .2rem; } }
 
 /* Rede de RT: mapa real ocupa a coluna da esquerda; exemplo e regras à direita. Os feixes das contas
    saudáveis correm da principal para fora, como o repost se espalhando. */

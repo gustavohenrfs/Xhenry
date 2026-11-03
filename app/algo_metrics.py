@@ -4,9 +4,10 @@ Não chama o X nem o Apify: usa as mesmas linhas de `tweet_samples` do dashboard
 tudo junto). O que o X não entrega para ninguém de fora (tempo de leitura, se você respondeu as replies)
 não é inventado: volta como indisponível, com a melhor pista no lugar.
 
-Pontos do algoritmo de um post = curtida 0,5 + repost 1 + citação 3 + salvamento 10 + reply 13,5 (pesos do
-código aberto do X; a citação entra em 3 sistemas, por isso 3 reposts). "Nota por mil views" é esse total
-dividido pelas views: mede a qualidade, não o tamanho da conta.
+Pontos do algoritmo de um post = curtida 0,5 + repost 1 + citação 5 + reply 5 (pesos do "Para você" de 2026, o
+Phoenix: multiplicam a chance de cada ação). Salvar saiu da lista de ações do código novo, então não soma ponto
+(continua na tela como pista de leitura). Copiar o link (+20) e DM (+5) não aparecem para quem é de fora do X.
+"Nota por mil views" é esse total dividido pelas views: mede a qualidade, não o tamanho da conta.
 """
 
 from __future__ import annotations
@@ -23,14 +24,14 @@ from app.services import (
     STATUS_LABELS, as_utc, latest_metrics, load_samples, now_utc, period_window, selected_accounts, within,
 )
 
-POINTS = {"likes": 0.5, "retweets": 1.0, "quotes": 3.0, "bookmarks": 10.0, "replies": 13.5}
+POINTS = {"likes": 0.5, "retweets": 1.0, "quotes": 5.0, "bookmarks": 0.0, "replies": 5.0}
 SIGNAL_LABELS = {"replies": "Replies", "bookmarks": "Salvamentos", "quotes": "Citações", "retweets": "Reposts",
                  "likes": "Curtidas"}
 # Fase pelo número de seguidores e o KPI que mais importa nela (playbook do guia).
 PHASES = [
     (1_000, "0 a 1 mil", "replies", "Replies em contas maiores: 70% do tempo respondendo, 30% postando."),
-    (10_000, "1 mil a 10 mil", "bookmarks", "Salvamentos por post: o KPI número 1 desta fase."),
-    (50_000, "10 mil a 50 mil", "quotes", "Citações recebidas: entram em 3 sistemas do X."),
+    (10_000, "1 mil a 10 mil", "replies", "Replies por post no seu texto: siga de volta quem comenta (reply de mútuo vale +20)."),
+    (50_000, "10 mil a 50 mil", "quotes", "Citações recebidas: valem 5 reposts."),
     (10 ** 12, "50 mil ou mais", "points", "Nota por mil views: volume sem perder qualidade."),
 ]
 TOP = 5
@@ -137,8 +138,8 @@ def vanity(now: dict[str, Any], rows: list, followers: dict[str, Any]) -> list[d
             if followers["gained"] is not None else "Mil seguidores que conversam valem mais que 100 mil parados."),
          "fix": "Olhe a nota por mil views, não só o número de seguidores."},
         {"key": "retweets", "title": "Repost sem comentário", "value": now["retweets"], "fact": (
-            f"Para cada citação, {str(ratio).replace('.', ',')} reposts puros. A citação vale 3 vezes mais." if ratio is not None
-            else "A citação entra em 3 sistemas e vale 3 vezes o repost puro."), "fix": "Na sua rede, cite com comentário em vez de só repostar."},
+            f"Para cada citação, {str(ratio).replace('.', ',')} reposts puros. A citação vale 5 vezes mais." if ratio is not None
+            else "A citação vale +5, cinco vezes o repost puro (+1)."), "fix": "Na sua rede, cite com comentário em vez de só repostar."},
     ]
 
 
@@ -196,7 +197,7 @@ def algo_metrics(db: Session, owner_id: int, period: str, folder_id: int | None)
 
     # De onde vêm os pontos (o que mais pesa na conta de cada um).
     mix = [{"key": key, "label": SIGNAL_LABELS[key], "points": round(now[key] * POINTS[key], 1), "count": now[key],
-            "weight": POINTS[key]} for key in ("replies", "bookmarks", "quotes", "retweets", "likes")]
+            "weight": POINTS[key]} for key in ("replies", "quotes", "retweets", "likes", "bookmarks") if POINTS[key]]
 
     # Hora do post × pontos por post (média): quando o algoritmo mais premia as suas contas.
     hours = [{"hour": h, "posts": 0, "points": 0.0} for h in range(24)]
