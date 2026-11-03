@@ -130,3 +130,16 @@ def test_results_card_markup():
     assert 'if (tab === "postar") { loadDrafts(); loadDraftResults(); }' in js
     assert "loadDraftResults();" in js.split("function setFolder(id)")[1].split("\n}\n")[0], "o filtro de pasta vale aqui também"
     assert "Deu certo no seu lote" in js
+
+
+@pytest.mark.parametrize("draft, tweet, same", [
+    ("Quem tá vendo o jogo comigo?", "Quem tá vendo o jogo comigo? https://t.co/abc", True),  # o X junta o link da foto
+    ("Quem tá vendo o jogo comigo?", "quem ta vendo o jogo comigo", True),
+    ("Bom dia, quem acordou pensando em mim hoje?", "bom dia", False),  # tweet curto não é prefixo de tudo
+    ("rs", "rs, hoje eu tô impossível com vocês", False),
+    ("Texto bem longo que o X cortou na leitura " * 4, ("Texto bem longo que o X cortou na leitura " * 4)[:90], True),
+])
+def test_same_post_does_not_match_on_a_short_prefix(draft, tweet, same):
+    from app.postar import same_post
+
+    assert same_post(draft, tweet) is same

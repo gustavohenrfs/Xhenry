@@ -289,3 +289,26 @@ def test_account_detail_drawer(client, folder):
         assert client.get("/api/accounts/999999/detail").status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+def test_followers_come_from_the_last_reading_that_had_them():
+    """Hoje o robô gravou posts sem os seguidores (o item veio sem author.followers): o cartão e o KPI usam a
+    última leitura com seguidores, não somem."""
+    from app.services import latest_metrics
+
+    tag = uuid4().hex[:6]
+    with SessionLocal() as db:
+        admin = ensure_admin(db)
+        folder = Folder(owner_id=admin.id, name=f"Seg {tag}")
+        db.add(folder)
+        db.flush()
+        account = XAccount(folder_id=folder.id, owner_id=admin.id, username=f"s{tag}")
+        db.add(account)
+        db.flush()
+        db.add_all([
+            DailyMetric(account_id=account.id, metric_date=DAY - timedelta(days=1), followers_count=1200, following_count=80),
+            DailyMetric(account_id=account.id, metric_date=DAY, followers_count=None, views=50, posts_count=1),
+        ])
+        db.commit()
+        latest = latest_metrics(db, [account.id])[account.id]
+        assert latest.followers_count == 1200 and latest.following_count == 80

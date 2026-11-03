@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
   <link rel="stylesheet" href="/static/css/styles.css?v=49">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=70"></script>
+  <script defer src="/static/js/app.js?v=71"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -337,7 +337,7 @@
           <!-- Tela 1: só as pastas. Clicar numa pasta abre a tela 2 com as contas dela. -->
           <div id="ops-folders-view" class="space-y-6">
             <form id="folder-form" class="glow flex flex-wrap gap-2 rounded-3xl border border-neon/25 bg-card p-4">
-              <input id="folder-name" required maxlength="120" placeholder="Nome da pasta" class="min-w-56 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <input id="new-folder-name" required maxlength="120" autocomplete="off" aria-label="Nome da pasta" placeholder="Nome da pasta" class="min-w-56 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
               <button class="rounded-2xl bg-neon px-5 py-3 text-sm font-medium text-ink" type="submit">Criar pasta</button>
             </form>
             <div id="folder-cards" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
@@ -350,7 +350,7 @@
               <button id="ops-folder-delete" type="button" class="rounded-full border border-neon/40 px-3 py-1 text-xs text-mute">Excluir pasta</button>
             </div>
             <form id="account-form" class="glow flex flex-wrap gap-2 rounded-3xl border border-neon/25 bg-card p-4">
-              <input id="account-handle" maxlength="16" required placeholder="@handle" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
+              <input id="account-handle" maxlength="200" required autocomplete="off" placeholder="@handle ou link do perfil" class="min-w-40 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
               <input id="account-label" maxlength="80" placeholder="Nome de exibição, ex: Conta 01" class="min-w-48 flex-1 rounded-2xl border border-neon/25 bg-ink px-3 py-3 text-sm outline-none focus:border-neon">
               <button class="rounded-2xl bg-neon px-4 py-3 text-sm font-medium text-ink" type="submit">Adicionar conta</button>
             </form>

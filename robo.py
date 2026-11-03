@@ -60,6 +60,7 @@ import json
 import logging
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -875,22 +876,67 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             if is_repost(item):
                 continue
             by_author.setdefault(handle, []).append(item)
-        if report is not None:
-            seen = {apify_author(item)[0] for item in items}
-            for account in batch:
-                name = account["username"]
-                if name.lower() not in seen:
-                    report.setdefault("sem_post", []).append(name)
-                elif by_profile.get(name):
-                    report.setdefault("perfil", []).append(name)
         with conn.cursor() as cur:
             for account in batch:
                 handle = account["username"].lower()
                 if handle in followers:
                     save_followers(cur, account, midnight.date(), followers[handle])
-                saved += save_tweets(cur, account, by_author.get(handle, []), midnight)
+                today = save_tweets(cur, account, by_author.get(handle, []), midnight)
+                saved += today
+                if report is not None:
+                    # Lida pelo perfil e, à parte, sem post de hoje nesta leitura (o perfil traz os mais
+                    # novos, que podem ser de ontem: a conta não pode passar como "com post").
+                    if by_profile.get(account["username"]):
+                        report.setdefault("perfil", []).append(account["username"])
+                    if not today:
+                        report.setdefault("sem_post", []).append(account["username"])
         conn.commit()
     return saved
+
+
+READ_LOCK_NS = 5_817_001  # namespace do advisory lock "lendo as contas deste dono"
+
+
+@contextmanager
+def reading_lock(conn, owner_id: int) -> Iterator[bool]:
+    """Uma leitura por dono de cada vez: o "Atualizar dados" (thread do painel) e o cron usam conexões
+    diferentes e, sem isto, liam o mesmo dono juntos (duas execuções do ator, que só aceita uma, e crédito
+    em dobro). Advisory lock de sessão do Postgres: sobrevive aos commits e some se a conexão cair.
+    False = outra leitura deste dono está rodando agora."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_try_advisory_lock(%s, %s) AS ok", (READ_LOCK_NS, owner_id))
+        row = cur.fetchone()
+    conn.commit()
+    got = bool(row and (row["ok"] if isinstance(row, dict) else row[0]))
+    try:
+        yield got
+    finally:
+        if got:
+            try:
+                conn.rollback()  # se a leitura quebrou no meio, a transação precisa sair do erro antes
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pg_advisory_unlock(%s, %s)", (READ_LOCK_NS, owner_id))
+                conn.commit()
+            except Exception:  # conexão caída: o Postgres solta o lock sozinho
+                log.warning("não soltou a trava de leitura do dono %s", owner_id)
+
+
+OTHER_READ_WAIT = 12 * 60  # o painel desiste de esperar em 12 min (ROBO_RUN_MS no app.js)
+
+
+def wait_other_read(conn, owner_id: int, timeout: float | None = None, step: float = 2.0) -> bool:
+    """"Atualizar dados" com o cron já lendo este dono: espera essa leitura acabar em vez de pagar outra.
+    True = havia outra leitura (e ela acabou ou o prazo passou); False = ninguém lendo, pode ler."""
+    with reading_lock(conn, owner_id) as alone:
+        if alone:
+            return False
+    deadline = time.monotonic() + (OTHER_READ_WAIT if timeout is None else timeout)
+    while time.monotonic() < deadline:
+        time.sleep(step)
+        with reading_lock(conn, owner_id) as alone:
+            if alone:
+                break
+    return True
 
 
 def stored_today(cur, account_ids: list[int], midnight: datetime) -> int:
@@ -916,7 +962,16 @@ def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name:
 
 
 def apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str, Any]:
-    """Lê pelo Apify as contas vencidas de um usuário, numa chamada só. Devolve o resumo."""
+    """Lê pelo Apify as contas vencidas de um usuário, numa chamada só. Devolve o resumo. Se outra leitura
+    desse usuário já está rodando (o botão ou o cron), sai sem ler: ela já traz os números."""
+    with reading_lock(conn, user["id"]) as alone:
+        if not alone:
+            log.info("apify: usuário %s já está sendo lido; esta passada espera", user["id"])
+            return {"owner": user["id"], "contas": 0, "ocupado": True}
+        return _apify_user_round(conn, user, midnight)
+
+
+def _apify_user_round(conn, user: dict[str, Any], midnight: datetime) -> dict[str, Any]:
     owner_id = user["id"]
     summary = summary_read_due(user)
     if summary:
@@ -1215,7 +1270,17 @@ def admin_accounts(cur, folder_id: int | None = None) -> list[dict[str, Any]]:
 def apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: datetime, manual: bool,
                      folder: dict[str, Any] | None = None) -> str | None:
     """Lê as contas do admin pelo Apify e grava o batimento. None = deu certo; texto = motivo da falha.
-    Com folder ({"id", "name"}): só as contas dessa pasta ("Atualizar dados" com a pasta selecionada)."""
+    Com folder ({"id", "name"}): só as contas dessa pasta ("Atualizar dados" com a pasta selecionada).
+    Com outra leitura do admin rodando (botão e cron juntos), não lê de novo: o batimento dela vem já já."""
+    with reading_lock(conn, admin["id"]) as alone:
+        if not alone:
+            log.info("apify do admin já está lendo; esta passada espera")
+            return None
+        return _apify_admin_read(conn, admin, started, midnight, manual, folder)
+
+
+def _apify_admin_read(conn, admin: dict[str, Any], started: datetime, midnight: datetime, manual: bool,
+                      folder: dict[str, Any] | None = None) -> str | None:
     with conn.cursor() as cur:
         accounts = admin_accounts(cur, folder["id"] if folder else None)
     conn.commit()
@@ -1287,6 +1352,9 @@ def read_now(owner_id: int, folder_id: int | None = None) -> str:
             conn.commit()
             if folder is None:
                 return "sem_pasta"
+        if wait_other_read(conn, owner_id):
+            log.info("leitura na hora do usuário %s: o cron já estava lendo; usa a leitura dele", owner_id)
+            return "ok"
         if user["is_admin"]:
             error = apify_admin_read(conn, {"id": owner_id, "token": user["apify_token"].strip()}, started, midnight,
                                      True, folder)

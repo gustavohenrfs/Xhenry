@@ -164,11 +164,19 @@ def _words(text: str) -> set[str]:
     return set(norm(text).split())
 
 
+PREFIX_MIN = 20  # letras do começo para valer como o mesmo post
+
+
 def same_post(draft_text: str, tweet_text: str) -> bool:
     a, b = norm(draft_text), norm(tweet_text)
     if not a or not b:
         return False
-    if a == b or a.startswith(b[:60]) or b.startswith(a[:60]):
+    if a == b:
+        return True
+    # Prefixo: o X junta o link da foto no fim e o robô corta em 280. Mas só com um começo comprido o
+    # bastante, senão um tweet curto ("bom dia") casaria com todo rascunho que começa igual.
+    short, longer = sorted((a, b), key=len)
+    if len(short) >= PREFIX_MIN and longer.startswith(short[:60]):
         return True
     wa, wb = _words(a), _words(b)
     return len(wa & wb) / max(1, len(wa | wb)) >= .75

@@ -591,3 +591,28 @@ def test_read_says_what_is_stored_when_apify_brings_nothing(w, monkeypatch):
     detail = w.q("select apify_detail from user_settings where owner_id=:o", o=admin_id(w))[0][0]
     assert f"{stored} posts de hoje" in detail and f"{accounts} contas sem post hoje" in detail
     admin_token(w, None)
+
+
+def test_button_and_cron_never_read_the_same_owner_together(w, monkeypatch):
+    """Botão e cron juntos (conexões diferentes): enquanto uma leitura do dono roda, a outra não chama o Apify;
+    o botão espera a leitura do cron acabar e devolve ok sem pagar outra."""
+    import psycopg
+    from psycopg.rows import dict_row
+
+    import robo
+
+    owner = admin_id(w)
+    admin_token(w, "tok")
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: pytest.fail("leu duas vezes o mesmo dono"))
+    monkeypatch.setattr(robo, "OTHER_READ_WAIT", 0.3)  # prazo lido na hora da chamada
+    with psycopg.connect(PG_URL) as cron:  # "o cron" segurando a trava do admin
+        cron.execute("SELECT pg_advisory_lock(%s, %s)", (robo.READ_LOCK_NS, owner))
+        with psycopg.connect(PG_URL, row_factory=dict_row) as other:
+            assert robo.apify_admin_read(other, {"id": owner, "token": "tok"}, datetime.now(timezone.utc),
+                                         robo.today_start_br(), False) is None
+        monkeypatch.setattr(robo.time, "sleep", lambda s: None)
+        assert robo.read_now(owner) == "ok", "o botão usa a leitura que já está rodando"
+    # Trava solta (a conexão do cron fechou): agora o botão lê de verdade.
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(handles) or admin_items(w))
+    assert robo.read_now(owner) == "ok" and calls, "sem outra leitura, o botão lê"

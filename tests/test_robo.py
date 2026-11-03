@@ -5,7 +5,7 @@ Nada sai para a internet.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -246,6 +246,20 @@ def test_profile_reads_accounts_the_search_missed(monkeypatch):
     assert report == {"perfil": ["escondida", "pequena"]}, "lidas pelo perfil e não ficam como sem post"
 
 
+def test_profile_with_only_old_posts_still_counts_as_no_post_today(monkeypatch):
+    """O perfil devolve os posts mais novos, que podem ser de ontem: a conta foi lida pelo perfil, mas não
+    teve post hoje, e o aviso do fim da leitura tem que dizer isso."""
+    monkeypatch.setattr(robo, "save_followers", lambda *a: None)
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
+    old = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    monkeypatch.setattr(robo, "apify_profile", lambda token, handles: [
+        {"id": "7", "createdAt": old, "author": {"userName": "quieta", "followers": 3}}])
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: 0)  # nada de hoje
+    report = {}
+    assert robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "quieta"}], robo.today_start_br(), report) == 0
+    assert report == {"perfil": ["quieta"], "sem_post": ["quieta"]}
+
+
 def test_profile_failure_does_not_break_the_read(monkeypatch):
     monkeypatch.setattr(robo, "save_followers", lambda *a: None)
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: len(tweets))
@@ -283,3 +297,66 @@ def test_views_never_go_down():
     sql = log[0][0]
     assert "view_count = GREATEST(tweet_samples.view_count, EXCLUDED.view_count)" in sql
     assert "impression_count = GREATEST(tweet_samples.impression_count, EXCLUDED.impression_count)" in sql
+
+
+class LockConn(FakeConn):
+    """Conexão falsa que responde ao pg_try_advisory_lock com `free`."""
+
+    def __init__(self, free):
+        super().__init__()
+        self.free = free
+
+    def cursor(self):
+        conn = self
+
+        class Cur(FakeCursor):
+            def fetchone(self):
+                return {"ok": conn.free}
+
+        return Cur(self.log)
+
+
+def test_reading_lock_skips_a_second_read_of_the_same_owner(monkeypatch):
+    """Botão e cron juntos: a segunda leitura do mesmo dono não chama o Apify (o ator só aceita uma)."""
+    calls = []
+    monkeypatch.setattr(robo, "_apify_user_round", lambda conn, user, midnight: calls.append("user") or {"contas": 1})
+    monkeypatch.setattr(robo, "_apify_admin_read", lambda *a, **k: calls.append("admin"))
+    busy = LockConn(False)
+    assert robo.apify_user_round(busy, {"id": 7}, robo.today_start_br())["ocupado"] is True
+    assert robo.apify_admin_read(busy, {"id": 1, "token": "t"}, datetime.now(timezone.utc), robo.today_start_br(), True) is None
+    assert calls == [] and not any("unlock" in sql for sql, _ in busy.log), "sem a trava não solta nada"
+    free = LockConn(True)
+    assert robo.apify_user_round(free, {"id": 7}, robo.today_start_br()) == {"contas": 1}
+    assert calls == ["user"]
+    sqls = [sql for sql, _ in free.log]
+    assert sqls[0].startswith("SELECT pg_try_advisory_lock") and sqls[-1].startswith("SELECT pg_advisory_unlock")
+    assert free.log[0][1] == (robo.READ_LOCK_NS, 7)
+
+
+def test_reading_lock_is_released_when_the_read_breaks(monkeypatch):
+    def boom(conn, user, midnight):
+        raise RuntimeError("quebrou")
+
+    monkeypatch.setattr(robo, "_apify_user_round", boom)
+    free = LockConn(True)
+    with pytest.raises(RuntimeError):
+        robo.apify_user_round(free, {"id": 3}, robo.today_start_br())
+    assert free.log[-1][0].startswith("SELECT pg_advisory_unlock")
+
+
+def test_read_now_waits_for_the_cron_read_instead_of_paying_another(monkeypatch):
+    answers = iter([False, False, True])  # ocupado, ocupado, livre
+
+    class Seq(LockConn):
+        def cursor(self):
+            class Cur(FakeCursor):
+                def fetchone(self):
+                    return {"ok": next(answers)}
+
+            return Cur(self.log)
+
+    monkeypatch.setattr(robo.time, "sleep", lambda s: None)
+    conn = Seq(True)
+    assert robo.wait_other_read(conn, 5) is True
+    assert sum("pg_try_advisory_lock" in sql for sql, _ in conn.log) == 3
+    assert robo.wait_other_read(LockConn(True), 5) is False, "ninguém lendo: pode ler"

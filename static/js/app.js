@@ -113,10 +113,22 @@ function toast(message, kind) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => box.classList.add("hidden"), TOAST_MS);
 }
+const FOLDER_GONE = "Pasta não encontrada.";  // detail do 404 de owned_folder / dashboard
+const FIELD_LABELS = { name: "nome", username: "@ da conta", folder_id: "pasta", text: "texto", email: "e-mail", password: "senha" };
+function fieldError(item) {
+  if (!item || typeof item !== "object") return String(item);
+  const field = Array.isArray(item.loc) ? item.loc[item.loc.length - 1] : "";
+  const label = FIELD_LABELS[field] || field || "campo";
+  if (item.type === "missing") return "Preencha o campo " + label + ".";
+  if (item.type === "string_too_long") return "O campo " + label + " está longo demais.";
+  if (item.type === "string_too_short") return "O campo " + label + " está vazio.";
+  return "O campo " + label + " está inválido.";
+}
 function detailOf(body, fallback) {
   if (!body) return fallback;
   if (typeof body.detail === "string") return body.detail;
-  if (Array.isArray(body.detail)) return body.detail.map((item) => item.msg || String(item)).join(" ");
+  // 422 do FastAPI vem em inglês ("Field required"): diz em português qual campo faltou ou veio errado.
+  if (Array.isArray(body.detail)) return body.detail.map(fieldError).join(" ");
   return fallback;
 }
 function token() { return localStorage.getItem(TOKEN_KEY) || ""; }
@@ -1425,7 +1437,7 @@ function renderAccounts(accounts) {
 function renderFolders(folders) {
   const host = document.getElementById("folder-cards");
   if (!folders.length) {
-    host.replaceChildren(emptyState("ops", "Nenhuma pasta ainda", "Pastas agrupam as contas monitoradas (por nicho, cliente ou como preferir).", "Criar pasta", () => document.getElementById("folder-name").focus()));
+    host.replaceChildren(emptyState("ops", "Nenhuma pasta ainda", "Pastas agrupam as contas monitoradas (por nicho, cliente ou como preferir).", "Criar pasta", () => document.getElementById("new-folder-name").focus()));
     return;
   }
   host.replaceChildren(...folders.map((folder) => {
@@ -1779,6 +1791,8 @@ async function load({ silent = false } = {}) {
     if (!silent) prefetchPeriods();
   } catch (error) {
     if (error.message === PENDING || error.message === SESSION_EXPIRED) return;
+    // A pasta do seletor sumiu (apagada aqui ou em outro aparelho): volta para "Todas as pastas".
+    if (folderId && error.message === FOLDER_GONE && seq === loadSeq) { loadInflight = false; setFolder(null); return; }
     if (!silent) toast(error.message || "Falha ao carregar.");
     else markLive(false);
   } finally {
@@ -1823,6 +1837,8 @@ async function deleteFolder(folder) {
   try {
     await api("/api/folders/" + folder.id, { method: "DELETE" });
     if (state.opsFolderId === folder.id) state.opsFolderId = null;
+    // Era a pasta do seletor do topo: volta para "Todas" (senão o dashboard pediria a pasta apagada, 404).
+    if (state.folderId === folder.id) { setFolder(null); return; }
     await load();
   } catch (error) { toast(error.message || "Não excluiu a pasta."); }
 }
@@ -1915,7 +1931,7 @@ document.getElementById("folder-form").addEventListener("submit", async (event) 
     const created = await api("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: document.getElementById("folder-name").value, color: "#FF2EC8" })
+      body: JSON.stringify({ name: document.getElementById("new-folder-name").value, color: "#FF2EC8" })
     });
     event.target.reset();
     state.opsFolderId = created.id;

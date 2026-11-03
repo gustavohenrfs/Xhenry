@@ -34,6 +34,14 @@ from app.services import (
 router = APIRouter()
 
 
+def folder_name(raw: str) -> str:
+    """Nome da pasta aparado; só espaços é 400 (o min_length do modelo vale antes do strip)."""
+    name = raw.strip()
+    if not name:
+        raise HTTPException(400, "Dê um nome para a pasta.")
+    return name
+
+
 class FolderIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     kind: FolderKind = FolderKind.CUSTOM
@@ -43,7 +51,7 @@ class FolderIn(BaseModel):
 
 class AccountIn(BaseModel):
     folder_id: int
-    username: str = Field(min_length=1, max_length=16)
+    username: str = Field(min_length=1, max_length=200)  # @ ou link do perfil (normalize_username)
     display_name: str | None = Field(default=None, max_length=80)
 
 
@@ -74,7 +82,7 @@ def list_folders(user: User = Depends(approved_user), db: Session = Depends(get_
 def create_folder(payload: FolderIn, owner: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
     if not payload.color.startswith("#") or len(payload.color) != 7:
         raise HTTPException(400, "Cor inválida. Use #RRGGBB.")
-    name = payload.name.strip()
+    name = folder_name(payload.name)
     exists = db.scalar(select(Folder).where(Folder.owner_id == owner.id, Folder.name == name))
     if exists:
         raise HTTPException(409, "Já existe uma pasta com esse nome.")
@@ -96,7 +104,7 @@ def update_folder(
     folder_id: int, payload: FolderIn, user: User = Depends(approved_user), db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     folder = owned_folder(db, user.id, folder_id)
-    name = payload.name.strip()
+    name = folder_name(payload.name)
     exists = db.scalar(select(Folder).where(Folder.owner_id == folder.owner_id, Folder.name == name, Folder.id != folder.id))
     if exists:
         raise HTTPException(409, "Já existe uma pasta com esse nome.")

@@ -465,3 +465,58 @@ def test_apify_reading_test_shows_what_each_way_brings(client, monkeypatch):
     assert [a for _, _, a in seen].count("apidojo~twitter-scraper-lite") == 1, "a 4ª linha usa o Unlimited"
     other, other_account = make_account(make_user())
     assert client.post(f"/api/apify/test/{other_account}", headers=headers).status_code == 404
+
+
+def test_folder_create_rename_trim_and_refuse_blank_names(client):
+    """Criar pasta: nome é aparado, nome em branco é 400 (antes virava uma pasta sem nome), repetido é 409."""
+    headers = bearer(make_user())
+    tag = uuid4().hex[:6]
+    created = client.post("/api/folders", json={"name": f"  Nova {tag}  "}, headers=headers)
+    assert created.status_code == 201 and created.json()["name"] == f"Nova {tag}"
+    assert client.post("/api/folders", json={"name": f"Nova {tag}"}, headers=headers).status_code == 409
+    assert client.post("/api/folders", json={"name": "   "}, headers=headers).status_code == 400
+    folder_id = created.json()["id"]
+    assert client.patch(f"/api/folders/{folder_id}", json={"name": "  "}, headers=headers).status_code == 400
+    renamed = client.patch(f"/api/folders/{folder_id}", json={"name": f" Outra {tag} "}, headers=headers)
+    assert renamed.status_code == 200 and renamed.json()["name"] == f"Outra {tag}"
+    names = [row["name"] for row in client.get("/api/folders", headers=headers).json()]
+    assert names == [f"Outra {tag}"]
+
+
+@pytest.mark.parametrize("typed, handle", [
+    ("@Fulana_1", "fulana_1"),
+    ("https://x.com/Fulana_1", "fulana_1"),
+    ("x.com/fulana_1?s=20", "fulana_1"),
+    ("https://twitter.com/fulana_1/status/123", "fulana_1"),
+    ("  fulana_1  ", "fulana_1"),
+])
+def test_account_accepts_handle_or_profile_link(client, typed, handle):
+    """Colar o link do perfil é o jeito mais comum de adicionar conta: vira o @."""
+    uid = make_user()
+    headers = bearer(uid)
+    folder = client.post("/api/folders", json={"name": f"P {uuid4().hex[:6]}"}, headers=headers).json()
+    created = client.post("/api/accounts", json={"folder_id": folder["id"], "username": typed}, headers=headers)
+    assert created.status_code == 201, created.text
+    assert created.json()["username"] == handle
+
+
+def test_account_refuses_bad_handle_in_portuguese(client):
+    headers = bearer(make_user())
+    folder = client.post("/api/folders", json={"name": f"P {uuid4().hex[:6]}"}, headers=headers).json()
+    for bad in ("tem espaço", "https://x.com/home", "a" * 16):
+        answer = client.post("/api/accounts", json={"folder_id": folder["id"], "username": bad}, headers=headers)
+        assert answer.status_code == 400 and "Handle inválido" in answer.json()["detail"], bad
+
+
+def test_dashboard_of_a_deleted_folder_says_what_the_panel_expects(client):
+    """O app.js volta para "Todas as pastas" quando o dashboard responde FOLDER_GONE (pasta apagada)."""
+    from pathlib import Path
+    import re
+
+    js = (Path(__file__).resolve().parent.parent / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    expected = re.search(r'const FOLDER_GONE = "([^"]+)"', js).group(1)
+    headers = bearer(make_user())
+    folder = client.post("/api/folders", json={"name": f"Some {uuid4().hex[:6]}"}, headers=headers).json()
+    assert client.delete(f"/api/folders/{folder['id']}", headers=headers).status_code == 204
+    gone = client.get(f"/api/dashboard?period=today&folder_id={folder['id']}", headers=headers)
+    assert gone.status_code == 404 and gone.json()["detail"] == expected

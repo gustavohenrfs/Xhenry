@@ -288,8 +288,17 @@ def robot_interval(settings: AppSetting) -> int:
     return settings.apify_interval_min or 30
 
 
+# Link do perfil colado no campo do @ ("https://x.com/fulana", "twitter.com/fulana/status/1").
+PROFILE_LINK_RE = re.compile(r"(?<![A-Za-z0-9-])(?:x|twitter)\.com/(?:#!/)?@?([^/?#\s]+)", re.IGNORECASE)
+RESERVED_PATHS = {"home", "search", "i", "intent", "explore", "notifications", "messages", "settings"}
+
+
 def normalize_username(value: str) -> str:
-    handle = value.strip().lstrip("@").lower()
+    text = (value or "").strip()
+    link = PROFILE_LINK_RE.search(text)
+    handle = (link.group(1) if link else text).strip().lstrip("@").lower()
+    if link and handle in RESERVED_PATHS:
+        handle = ""
     if not handle or len(handle) > 15 or not all(ch.isalnum() or ch == "_" for ch in handle):
         raise HTTPException(400, "Handle inválido. Use 1 a 15 caracteres: letras, números ou _.")
     return handle
@@ -1543,12 +1552,13 @@ def account_detail(db: Session, owner_id: int, account_id: int, period: str) -> 
 
 
 def latest_metrics(db: Session, ids: list[int]) -> dict[int, DailyMetric]:
-    """Leitura mais recente de cada conta (seguidores), todas numa consulta."""
+    """Leitura mais recente de cada conta com seguidores, todas numa consulta. A linha de hoje pode existir só
+    com os posts (item do Apify sem author.followers): aí vale a última com o número, senão o cartão some."""
     if not ids:
         return {}
     newest = (
         select(DailyMetric.account_id, func.max(DailyMetric.metric_date).label("day"))
-        .where(DailyMetric.account_id.in_(ids))
+        .where(DailyMetric.account_id.in_(ids), DailyMetric.followers_count.is_not(None))
         .group_by(DailyMetric.account_id)
         .subquery()
     )
