@@ -50,7 +50,11 @@ Fica na raiz do repositório do painel e lê o mesmo .env (DATABASE_URL). Precis
 Variáveis próprias (ambiente do cron):
 - ROBO_ENV_FILE: outro .env, se o usuário do cron não puder ler o do painel.
 - ROBO_STATE_DIR: onde ficam a trava e o estado (padrão ~/.xhenry-robo).
-- APIFY_ACTOR: ator do Apify que lê as timelines (padrão apidojo~tweet-scraper).
+- APIFY_ACTOR: ator do Apify que lê as timelines (padrão apidojo~tweet-scraper; eiv~twitter-scraper lê pela linha
+  do tempo do perfil, que não esconde contas +18 como a busca).
+- APIFY_FALLBACK_ACTOR: quem relê as contas que a busca não trouxe (padrão apidojo~twitter-scraper-lite; com
+  eiv~twitter-scraper relê todas, não só 5).
+- APIFY_PROFILE_TWEETS: posts mais novos por conta no ator de linha do tempo (padrão 10).
 - APIFY_INTERVAL_MIN: intervalo dos usuários sem o próprio (painel antigo; padrão 60).
 """
 
@@ -650,10 +654,28 @@ def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, 
             "sort": "Latest"}
 
 
-def apify_profile_input(handles: list[str]) -> dict[str, Any]:
-    """Pedido pelo perfil (a linha do tempo de cada conta), não pela busca."""
+def apify_profile_input(handles: list[str], actor: str | None = None) -> dict[str, Any]:
+    """Pedido pelo perfil, não pela busca. No ator de linha do tempo (eiv) é o formato dele."""
+    if is_timeline_actor(actor or apify_fallback_actor()):
+        return timeline_input(handles)
     return {"startUrls": [f"https://x.com/{handle}" for handle in handles],
             "maxItems": APIFY_PROFILE_ITEMS * len(handles), "sort": "Latest"}
+
+
+# Ator que lê a linha do tempo do perfil, não a busca do X (eiv/twitter-scraper, "Twitter / X Scraper - Tweets,
+# Profiles & Engagement"). A busca do X esconde contas +18 das contas do Apify; a linha do tempo não passa por
+# ela. Entrada: profiles + maxTweetsPerProfile; saída achatada (authorHandle, authorFollowers, tweetId).
+TIMELINE_OWNERS = ("eiv",)
+
+
+def is_timeline_actor(actor: str) -> bool:
+    return actor.split("~", 1)[0].lower() in TIMELINE_OWNERS
+
+
+def timeline_input(handles: list[str]) -> dict[str, Any]:
+    per = env_int("APIFY_PROFILE_TWEETS", 10, 3, 100)  # os mais novos de cada conta; paga-se por post lido
+    return {"profiles": list(handles), "maxTweetsPerProfile": per, "maxTotalTweets": per * len(handles),
+            "includeRetweets": False, "includeReplies": False}
 
 
 def apify_fallback_actor() -> str:
@@ -662,7 +684,8 @@ def apify_fallback_actor() -> str:
 
 def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
     """Leitura normal: a busca de hoje de cada conta (apify_input)."""
-    return apify_call(token, apify_input(handles))
+    actor = apify_actor()
+    return apify_call(token, timeline_input(handles) if is_timeline_actor(actor) else apify_input(handles))
 
 
 def apify_profile(token: str, handles: list[str]) -> list[dict[str, Any]]:
@@ -855,8 +878,10 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
                for account in batch if account["username"].lower() not in {apify_author(i)[0] for i in items}]
     by_profile: dict[str, list[dict[str, Any]]] = {}
 
-    if missing:
-        wanted = missing[:APIFY_PROFILE_MAX]
+    # Com o ator de linha do tempo como principal, quem faltou não tem para onde ir (já foi pelo perfil).
+    if missing and not is_timeline_actor(apify_actor()):
+        # O ator de linha do tempo cobra por post, não por perfil: lê todas as que faltaram, não só 5.
+        wanted = missing if is_timeline_actor(apify_fallback_actor()) else missing[:APIFY_PROFILE_MAX]
         try:
             for item in apify_profile(token, wanted):  # uma execução só, com todas as que faltaram
                 author = apify_author(item)[0]

@@ -279,7 +279,7 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
         "busca_hoje": robo_mod.apify_input([handle]),
         "busca": {"searchTerms": [f"from:{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
         "perfil": {"startUrls": [f"https://x.com/{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
-        "unlimited": robo_mod.apify_profile_input([handle]),
+        "unlimited": robo_mod.apify_profile_input([handle], robo_mod.APIFY_UNLIMITED),
     }
     answers: dict[str, tuple[list[dict[str, Any]] | None, str | None]] = {}
     for key in payloads:

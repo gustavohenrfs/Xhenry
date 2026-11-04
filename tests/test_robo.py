@@ -372,3 +372,43 @@ def test_eiv_item_is_understood():
     assert robo.apify_author(item) == ("conta1", 900)
     assert robo.tweet_metrics(item)["view_count"] == 17
     assert not robo.is_repost(item)
+
+
+def test_timeline_actor_reads_profiles(monkeypatch):
+    """Com APIFY_ACTOR=eiv~twitter-scraper a leitura pede pelo perfil (profiles), não pela busca."""
+    import robo
+
+    sent = {}
+    monkeypatch.setenv("APIFY_ACTOR", "eiv/twitter-scraper")
+    monkeypatch.setattr(robo, "apify_call", lambda token, payload, actor=None: sent.update(payload) or [])
+    robo.apify_fetch("tok", ["a", "b"])
+    assert sent["profiles"] == ["a", "b"] and sent["maxTweetsPerProfile"] == 10
+    assert "searchTerms" not in sent
+
+
+def test_timeline_fallback_rereads_every_missing_account(monkeypatch):
+    """Com o eiv na reserva, todas as contas que a busca não trouxe são relidas (não só 5)."""
+    import robo
+
+    monkeypatch.setenv("APIFY_FALLBACK_ACTOR", "eiv~twitter-scraper")
+    asked = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
+    monkeypatch.setattr(robo, "apify_profile", lambda token, handles: asked.extend(handles) or [])
+    accounts = [{"id": i, "username": f"c{i}"} for i in range(12)]
+
+    class Conn:
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: 0)
+    robo.apify_read(Conn(), "tok", accounts, robo.today_start_br())
+    assert len(asked) == 12
