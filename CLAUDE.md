@@ -69,6 +69,8 @@ Tests: `python -m pip install -r requirements-dev.txt` then `python -m pytest -q
 
 ## Operations (VPS)
 
+The panel runs on the VPS (and Render), never on Vercel: the GitHub repo got linked to a Vercel project, which failed every push; `vercel.json` (`git.deploymentEnabled: false`) turns those deploys off. Empty reads now explain themselves: `apify_read` fills `report["diag"]` (items Apify returned, own posts from before today, other authors, items without author, non-post items) and `read_detail` appends `why_empty` when an account had no post today.
+
 `scripts/backup.sh` is the daily backup (cron): `pg_dump -Fc` verified with `pg_restore --list`, a tar.gz of the legacy `data/avatars`, retention by `BACKUP_KEEP_DAYS` (14) in `BACKUP_DIR` (`/var/backups/xhenry`), and a Telegram message naming the failed step (token from env/.env only). It reads only the keys it needs from `.env` (never sources it). `.gitattributes` keeps `*.sh` LF.
 
 ## Frontend

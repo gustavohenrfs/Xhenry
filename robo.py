@@ -892,6 +892,19 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
             log.warning("reserva pelo perfil (%s) falhou: %s", ", ".join(wanted), exc)
     answers = [items + [i for account in batch for i in by_profile.get(account["username"], [])]
                for batch, items in zip(batches, answers)]
+    if report is not None:
+        # Diagnóstico de leitura vazia: o Apify não trouxe nada, só posts antigos, ou posts de outras contas?
+        ours = {a["username"].lower() for a in accounts}
+        everything = [i for items in answers for i in items]
+        authors = [apify_author(i)[0] for i in everything if tweet_id_of(i)]
+        report["diag"] = diag = {}
+        diag["itens"] = len(everything)
+        diag["outros"] = sorted({a for a in authors if a and a not in ours})[:3]
+        diag["sem_autor"] = sum(1 for i in everything if tweet_id_of(i) and not apify_author(i)[0])
+        diag["antigos"] = sum(
+            1 for i in everything if apify_author(i)[0] in ours and not is_repost(i)
+            and (parse_created_at(pick(i, "created_at", "createdAt", "date", "posted_at")) or midnight) < midnight)
+        diag["vazios"] = [i for i in everything if not tweet_id_of(i)][:1]
     saved = 0
     for batch, items in zip(batches, answers):
         by_author: dict[str, list[dict[str, Any]]] = {}
@@ -978,6 +991,24 @@ def stored_today(cur, account_ids: list[int], midnight: datetime) -> int:
     return int((row["n"] if isinstance(row, dict) else row[0]) or 0)
 
 
+def why_empty(report: dict[str, Any]) -> str:
+    """O que o Apify devolveu, quando faltou post: é o que separa "a busca não acha" de "o robô descarta"."""
+    total = report.get("itens") or 0
+    if not total:
+        return "o Apify devolveu 0 itens"
+    parts = [f"o Apify devolveu {total} itens"]
+    if report.get("antigos"):
+        parts.append(f"{report['antigos']} posts de antes de hoje")
+    if report.get("sem_autor"):
+        parts.append(f"{report['sem_autor']} sem a @ do autor")
+    if report.get("outros"):
+        parts.append("de outras contas: " + ", ".join("@" + h for h in report["outros"]))
+    empty = report.get("vazios") or []
+    if empty and total == len(empty):
+        parts.append("nenhum é post (" + ", ".join(sorted(empty[0])[:4]) + ")")
+    return "; ".join(parts)
+
+
 def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name: str | None = None) -> str:
     """Texto do fim da leitura: contas lidas, posts de hoje guardados e as contas sem post de hoje."""
     text = f"{accounts} contas lidas, {stored} posts de hoje"
@@ -987,6 +1018,8 @@ def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name:
     profile = len(report.get("perfil") or [])
     if profile:
         text += f" · {profile} {'lida' if profile == 1 else 'lidas'} pelo perfil"
+    if empty and "diag" in report:
+        text += " · " + why_empty(report["diag"])
     return f"Pasta {folder_name}: {text}" if folder_name else text
 
 

@@ -211,7 +211,7 @@ def test_apify_read_reports_accounts_apify_brought_nothing_for(monkeypatch):
     report = {}
     accounts = [{"id": 1, "username": "cheia"}, {"id": 2, "username": "vazia"}]
     assert robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report) == 1
-    assert report == {"sem_post": ["vazia"]} and saved == [("cheia", 1), ("vazia", 0)]
+    assert {k: v for k, v in report.items() if k != "diag"} == {"sem_post": ["vazia"]} and saved == [("cheia", 1), ("vazia", 0)]
 
 
 def test_read_detail_says_stored_total_folder_and_empty_accounts():
@@ -243,7 +243,7 @@ def test_profile_reads_accounts_the_search_missed(monkeypatch):
     assert robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report) == 3
     assert asked == [["escondida", "pequena"]], "uma execução só, com as contas que a busca não trouxe"
     assert ("escondida", ["2"]) in saved and ("pequena", ["3"]) in saved and ("escondida", 40) in followers
-    assert report == {"perfil": ["escondida", "pequena"]}, "lidas pelo perfil e não ficam como sem post"
+    assert {k: v for k, v in report.items() if k != 'diag'} == {"perfil": ["escondida", "pequena"]}, "lidas pelo perfil e não ficam como sem post"
 
 
 def test_profile_with_only_old_posts_still_counts_as_no_post_today(monkeypatch):
@@ -257,7 +257,8 @@ def test_profile_with_only_old_posts_still_counts_as_no_post_today(monkeypatch):
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: 0)  # nada de hoje
     report = {}
     assert robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "quieta"}], robo.today_start_br(), report) == 0
-    assert report == {"perfil": ["quieta"], "sem_post": ["quieta"]}
+    assert {k: v for k, v in report.items() if k != 'diag'} == {"perfil": ["quieta"], "sem_post": ["quieta"]}
+    assert report["diag"]["antigos"] == 1, "o post de ontem aparece no diagnóstico"
 
 
 def test_profile_failure_does_not_break_the_read(monkeypatch):
@@ -271,7 +272,7 @@ def test_profile_failure_does_not_break_the_read(monkeypatch):
     monkeypatch.setattr(robo, "apify_profile", broken)
     report = {}
     assert robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "a"}], robo.today_start_br(), report) == 0
-    assert report == {"sem_post": ["a"]}
+    assert {k: v for k, v in report.items() if k != 'diag'} == {"sem_post": ["a"]}
 
 
 def test_profile_input_and_actor(monkeypatch):
@@ -412,3 +413,12 @@ def test_timeline_fallback_rereads_every_missing_account(monkeypatch):
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: 0)
     robo.apify_read(Conn(), "tok", accounts, robo.today_start_br())
     assert len(asked) == 12
+
+
+def test_read_detail_explains_an_empty_read():
+    """Leitura sem post diz o que o Apify devolveu: nada, posts antigos, ou de outras contas."""
+    assert robo.read_detail(2, 0, {"sem_post": ["a", "b"], "diag": {"itens": 0}}).endswith("o Apify devolveu 0 itens")
+    text = robo.read_detail(2, 0, {"sem_post": ["a", "b"], "diag": {"itens": 9, "antigos": 4, "outros": ["fulano"]}})
+    assert "9 itens" in text and "4 posts de antes de hoje" in text and "@fulano" in text
+    text = robo.read_detail(1, 0, {"sem_post": ["a"], "diag": {"itens": 1, "vazios": [{"noResults": True}]}})
+    assert "nenhum é post (noResults)" in text

@@ -33,8 +33,8 @@ sys.path.insert(0, str(ROOT))
 import robo  # noqa: E402
 
 API = robo.APIFY_API
-WAYS = ("busca_hoje", "busca", "handles", "perfil", "profiles")
-FIELD = {"busca_hoje": "searchTerms", "busca": "searchTerms", "handles": "twitterHandles", "perfil": "startUrls", "profiles": "profiles"}
+WAYS = ("robo", "busca_hoje", "busca", "handles", "perfil", "profiles")
+FIELD = {"robo": "searchTerms", "busca_hoje": "searchTerms", "busca": "searchTerms", "handles": "twitterHandles", "perfil": "startUrls", "profiles": "profiles"}
 RUN_LIMIT = 280  # segundos por execução
 
 
@@ -64,6 +64,8 @@ def input_fields(actor: str, token: str) -> set[str] | None:
 
 
 def payload(way: str, handles: list[str], day: str, max_items: int) -> dict[str, Any]:
+    if way == "robo":  # exatamente o que o robô manda hoje (buscas com OR de até 8 contas e since:)
+        return robo.apify_input(handles)
     if way == "busca_hoje":
         terms = [f"from:{h} since:{day}" for h in handles]
     elif way == "busca":
