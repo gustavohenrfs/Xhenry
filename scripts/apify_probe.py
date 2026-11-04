@@ -33,8 +33,8 @@ sys.path.insert(0, str(ROOT))
 import robo  # noqa: E402
 
 API = robo.APIFY_API
-WAYS = ("busca_hoje", "busca", "handles", "perfil")
-FIELD = {"busca_hoje": "searchTerms", "busca": "searchTerms", "handles": "twitterHandles", "perfil": "startUrls"}
+WAYS = ("busca_hoje", "busca", "handles", "perfil", "profiles")
+FIELD = {"busca_hoje": "searchTerms", "busca": "searchTerms", "handles": "twitterHandles", "perfil": "startUrls", "profiles": "profiles"}
 RUN_LIMIT = 280  # segundos por execução
 
 
@@ -70,6 +70,9 @@ def payload(way: str, handles: list[str], day: str, max_items: int) -> dict[str,
         terms = [f"from:{h}" for h in handles]
     if way in ("busca_hoje", "busca"):
         return {"searchTerms": terms, "maxItems": max_items * len(handles), "sort": "Latest"}
+    if way == "profiles":  # eiv/twitter-scraper: a linha do tempo do perfil, não a busca
+        return {"profiles": handles, "maxTweetsPerProfile": 20, "maxTotalTweets": 20 * len(handles),
+                "includeRetweets": False, "includeReplies": False}
     if way == "handles":
         return {"twitterHandles": handles, "maxItems": max_items * len(handles), "sort": "Latest"}
     return {"startUrls": [f"https://x.com/{h}" for h in handles], "maxItems": max_items * len(handles),
@@ -91,8 +94,8 @@ def run(actor: str, token: str, body: dict[str, Any]) -> tuple[dict[str, Any], l
 def summarize(items: list[dict[str, Any]], handles: list[str], midnight: datetime) -> dict[str, Any]:
     wanted = {h.lower() for h in handles}
     own = [i for i in items if robo.apify_author(i)[0] in wanted and robo.tweet_id_of(i) and not robo.is_repost(i)]
-    today = [i for i in own if (robo.parse_created_at(robo.pick(i, "createdAt", "created_at")) or midnight) >= midnight
-             and robo.parse_created_at(robo.pick(i, "createdAt", "created_at"))]
+    today = [i for i in own if (robo.parse_created_at(robo.pick(i, "createdAt", "created_at", "postedAt")) or midnight) >= midnight
+             and robo.parse_created_at(robo.pick(i, "createdAt", "created_at", "postedAt"))]
     found = {robo.apify_author(i)[0] for i in own}
     views = [robo.tweet_metrics(i)["view_count"] for i in today]
     has_views = any(any(k in i for k in ("viewCount", "views", "view_count")) for i in today) if today else None

@@ -360,3 +360,15 @@ def test_read_now_waits_for_the_cron_read_instead_of_paying_another(monkeypatch)
     assert robo.wait_other_read(conn, 5) is True
     assert sum("pg_try_advisory_lock" in sql for sql, _ in conn.log) == 3
     assert robo.wait_other_read(LockConn(True), 5) is False, "ninguém lendo: pode ler"
+
+
+def test_eiv_item_is_understood():
+    """eiv/twitter-scraper (linha do tempo do perfil) devolve o autor achatado e o id em tweetId."""
+    import robo
+
+    item = {"tweetId": "123", "createdAt": "2026-11-03T13:16:05.000Z", "viewCount": 17, "likeCount": 2,
+            "authorHandle": "Conta1", "authorFollowers": 900, "text": "oi", "isRetweet": False}
+    assert robo.tweet_id_of(item) == "123"
+    assert robo.apify_author(item) == ("conta1", 900)
+    assert robo.tweet_metrics(item)["view_count"] == 17
+    assert not robo.is_repost(item)

@@ -176,7 +176,7 @@ def today_start_br() -> datetime:
 
 
 def tweet_id_of(tweet: Any) -> str:
-    raw = pick(tweet, "id", "tweet_id", "rest_id", "id_str")
+    raw = pick(tweet, "id", "tweet_id", "tweetId", "rest_id", "id_str")
     return str(raw).strip() if raw is not None else ""
 
 
@@ -721,8 +721,12 @@ def is_repost(item: dict[str, Any]) -> bool:
 def apify_author(item: dict[str, Any]) -> tuple[str, int | None]:
     """(@ em minúsculas, seguidores) do autor do post."""
     author = item.get("author") if isinstance(item.get("author"), dict) else {}
-    handle = pick(author, "userName", "username", "screen_name", default="") or ""
+    # eiv/twitter-scraper devolve o autor achatado no item (authorHandle, authorFollowers).
+    handle = (pick(author, "userName", "username", "screen_name", default="")
+              or pick(item, "authorHandle", "authorUsername", default="") or "")
     raw = pick(author, "followers", "followers_count", "followersCount")
+    if raw is None:
+        raw = pick(item, "authorFollowers")
     return str(handle).lower(), (as_int(raw) if raw is not None else None)
 
 
