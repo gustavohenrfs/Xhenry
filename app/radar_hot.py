@@ -278,6 +278,12 @@ def library(db: Session, owner_id: int, fmt: str | None = None, limit: int = SHO
 
 def hunt_body(handles: list[str]) -> dict[str, Any]:
     """O mesmo pedido do robô (leitura por perfil, que o ator faz bem): posts mais novos de cada conta."""
+    import robo
+
+    if robo.is_kaito():  # o kaito não tem twitterHandles: a mesma busca "from:", até 8 contas por busca
+        groups = [handles[i:i + robo.APIFY_QUERY_ACCOUNTS] for i in range(0, len(handles), robo.APIFY_QUERY_ACCOUNTS)]
+        return {"searchTerms": [" OR ".join(f"from:{h}" for h in g) for g in groups],
+                "maxItems": PER_ACCOUNT * len(handles), "queryType": "Latest"}
     return {"twitterHandles": handles, "maxItems": PER_ACCOUNT * len(handles), "sort": "Latest"}
 
 

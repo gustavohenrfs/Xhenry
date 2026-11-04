@@ -132,9 +132,10 @@ def test_apify_item_parses():
 
 def test_apify_input_and_actor(monkeypatch):
     monkeypatch.delenv("APIFY_ACTOR", raising=False)
-    assert robo.apify_actor() == "apidojo~tweet-scraper"
+    assert robo.apify_actor() == robo.APIFY_ACTOR_DEFAULT and robo.is_kaito(), "padrão: kaito (roda no plano grátis)"
     monkeypatch.setenv("APIFY_ACTOR", "outro/ator")
     assert robo.apify_actor() == "outro~ator"
+    monkeypatch.setenv("APIFY_ACTOR", robo.APIFY_V2)
     # Regras do Tweet Scraper V2: até 5 buscas por execução e cada busca precisa trazer bastante coisa. As contas
     # vão juntas numa busca ("from:a OR from:b"), só com os posts desde hoje (since:, o formato da documentação).
     midnight = datetime(2026, 11, 2, 0, 0, tzinfo=robo.BR_TZ)
@@ -422,3 +423,26 @@ def test_read_detail_explains_an_empty_read():
     assert "9 itens" in text and "4 posts de antes de hoje" in text and "@fulano" in text
     text = robo.read_detail(1, 0, {"sem_post": ["a"], "diag": {"itens": 1, "vazios": [{"noResults": True}]}})
     assert "nenhum é post (noResults)" in text
+
+
+def test_kaito_input_uses_since_time_and_drops_fake_items(monkeypatch):
+    """O kaito não entende since:dia (devolve itens falsos): o pedido usa since_time, e o aviso falso não é post."""
+    monkeypatch.delenv("APIFY_ACTOR", raising=False)
+    midnight = datetime(2026, 11, 4, 0, 0, tzinfo=robo.BR_TZ)
+    body = robo.apify_input(["juli", "lily"], midnight)
+    assert body["searchTerms"] == [f"(from:juli OR from:lily) since_time:{int(midnight.timestamp())}"]
+    assert body["queryType"] == "Latest"
+    fake = {"type": "mock_tweet", "id": "-1", "text": "From KaitoEasyAPI, a reminder"}
+    assert robo.is_fake_item(fake) and not robo.is_fake_item(APIFY_ITEM)
+    assert robo.apify_author(fake) == ("", None), "sem autor: a leitura já pula"
+
+
+def test_kaito_skips_profile_fallback(monkeypatch):
+    """Com o kaito, conta que não veio só não postou hoje: não há segunda execução pelo perfil."""
+    monkeypatch.delenv("APIFY_ACTOR", raising=False)
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [{"type": "mock_tweet", "id": "-1"}])
+    monkeypatch.setattr(robo, "apify_profile", lambda token, handles: pytest.fail("kaito não relê pelo perfil"))
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: 0)
+    report = {}
+    robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "a"}], robo.today_start_br(), report)
+    assert report["sem_post"] == ["a"] and report["diag"]["itens"] == 0

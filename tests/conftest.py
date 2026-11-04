@@ -14,6 +14,8 @@ from pathlib import Path
 os.environ["DATABASE_URL"] = "sqlite:///" + (Path(tempfile.mkdtemp()) / "test.db").as_posix()
 # Sem vigia em segundo plano nos testes: eles chamam as funções do watchdog direto.
 os.environ["WATCHDOG"] = "off"
+# Os testes antigos do robô foram escritos para o V2 do apidojo; os do kaito (padrão) trocam a variável.
+os.environ["APIFY_ACTOR"] = "apidojo~tweet-scraper"
 os.environ["RADAR"] = "off"  # o radar nunca vai à rede nos testes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

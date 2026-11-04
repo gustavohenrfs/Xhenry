@@ -50,8 +50,9 @@ Fica na raiz do repositório do painel e lê o mesmo .env (DATABASE_URL). Precis
 Variáveis próprias (ambiente do cron):
 - ROBO_ENV_FILE: outro .env, se o usuário do cron não puder ler o do painel.
 - ROBO_STATE_DIR: onde ficam a trava e o estado (padrão ~/.xhenry-robo).
-- APIFY_ACTOR: ator do Apify que lê as timelines (padrão apidojo~tweet-scraper; eiv~twitter-scraper lê pela linha
-  do tempo do perfil, que não esconde contas +18 como a busca).
+- APIFY_ACTOR: ator do Apify que lê as timelines (padrão kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-
+  cheapest, que roda no plano grátis; apidojo~tweet-scraper só no plano pago; eiv~twitter-scraper lê pela linha do
+  tempo do perfil sem login, que não mostra contas novas).
 - APIFY_FALLBACK_ACTOR: quem relê as contas que a busca não trouxe (padrão apidojo~twitter-scraper-lite; com
   eiv~twitter-scraper relê todas, não só 5).
 - APIFY_PROFILE_TWEETS: posts mais novos por conta no ator de linha do tempo (padrão 10).
@@ -609,7 +610,12 @@ def check_day_totals(cur, owner_id: int | None, today: date) -> None:
 # ---- Apify ----
 
 APIFY_API = "https://api.apify.com/v2"
-APIFY_ACTOR_DEFAULT = "apidojo~tweet-scraper"
+# Padrão: o Tweet Scraper da KaitoEasyAPI. Testado nas contas reais em 2026-11-04: roda pela API no plano grátis do
+# Apify (o V2 do apidojo não: no grátis devolve só {"noResults": true}), traz views, e cobra por post
+# (US$0,25/mil, mínimo de 15 por execução). Não entende "since:dia" (devolve itens falsos), só since_time.
+APIFY_ACTOR_DEFAULT = "kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-cheapest"
+APIFY_V2 = "apidojo~tweet-scraper"
+KAITO_OWNERS = ("kaitoeasyapi",)
 APIFY_INTERVAL_DEFAULT = 60
 APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
 # Regras do Tweet Scraper V2 (apidojo/tweet-scraper, documentação do ator): no máximo 1 execução por vez, com
@@ -638,6 +644,15 @@ def apify_actor() -> str:
     return (os.getenv("APIFY_ACTOR") or APIFY_ACTOR_DEFAULT).strip().replace("/", "~")
 
 
+def is_kaito(actor: str | None = None) -> bool:
+    return (actor or apify_actor()).split("~", 1)[0].lower() in KAITO_OWNERS
+
+
+def is_fake_item(item: dict[str, Any]) -> bool:
+    """Aviso que o kaito põe no dataset quando a busca vem vazia (type mock_tweet, id -1): não é post."""
+    return item.get("type") == "mock_tweet" or str(item.get("id")) == "-1"
+
+
 def apify_interval() -> timedelta:
     return timedelta(minutes=env_int("APIFY_INTERVAL_MIN", APIFY_INTERVAL_DEFAULT, 5, 24 * 60))
 
@@ -646,12 +661,18 @@ def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, 
     """Os posts de hoje das contas: até APIFY_QUERY_ACCOUNTS contas juntas por busca
     ("(from:a OR from:b) since:2026-11-02"), dentro das regras do ator (até 5 buscas por execução, buscas
     maiores). since: é a data de Brasília; o X lê em UTC, então vem um pouco de ontem, que o robô descarta."""
-    day = (since or today_start_br()).date().isoformat()
+    midnight = since or today_start_br()
+    kaito = is_kaito()
+    # O kaito só entende since_time (segundos); "since:dia" volta com itens falsos.
+    limit = f" since_time:{int(midnight.timestamp())}" if kaito else f" since:{midnight.date().isoformat()}"
     groups = [handles[i:i + APIFY_QUERY_ACCOUNTS] for i in range(0, len(handles), APIFY_QUERY_ACCOUNTS)]
-    terms = [(f"from:{g[0]}" if len(g) == 1 else "(" + " OR ".join(f"from:{h}" for h in g) + ")") + f" since:{day}"
+    terms = [(f"from:{g[0]}" if len(g) == 1 else "(" + " OR ".join(f"from:{h}" for h in g) + ")") + limit
              for g in groups]
-    return {"searchTerms": terms, "maxItems": max(APIFY_MIN_PER_QUERY * len(terms), APIFY_TODAY_PER_ACCOUNT * len(handles)),
+    body = {"searchTerms": terms, "maxItems": max(APIFY_MIN_PER_QUERY * len(terms), APIFY_TODAY_PER_ACCOUNT * len(handles)),
             "sort": "Latest"}
+    if kaito:
+        body["queryType"] = "Latest"
+    return body
 
 
 def apify_profile_input(handles: list[str], actor: str | None = None) -> dict[str, Any]:
@@ -879,7 +900,8 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     by_profile: dict[str, list[dict[str, Any]]] = {}
 
     # Com o ator de linha do tempo como principal, quem faltou não tem para onde ir (já foi pelo perfil).
-    if missing and not is_timeline_actor(apify_actor()):
+    # O kaito relê pela mesma busca (não tem leitura por perfil): quem faltou só não postou hoje.
+    if missing and not is_timeline_actor(apify_actor()) and not is_kaito():
         # O ator de linha do tempo cobra por post, não por perfil: lê todas as que faltaram, não só 5.
         wanted = missing if is_timeline_actor(apify_fallback_actor()) else missing[:APIFY_PROFILE_MAX]
         try:
@@ -895,7 +917,7 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     if report is not None:
         # Diagnóstico de leitura vazia: o Apify não trouxe nada, só posts antigos, ou posts de outras contas?
         ours = {a["username"].lower() for a in accounts}
-        everything = [i for items in answers for i in items]
+        everything = [i for items in answers for i in items if not is_fake_item(i)]
         authors = [apify_author(i)[0] for i in everything if tweet_id_of(i)]
         report["diag"] = diag = {}
         diag["itens"] = len(everything)

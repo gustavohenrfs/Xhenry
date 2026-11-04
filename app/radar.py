@@ -518,7 +518,8 @@ APIFY_ERRORS = {
 
 def apify_search(token: str, term: str) -> list[dict[str, Any]]:
     """Busca os posts em português mais fortes do momento sobre o termo (mesmo ator do robô, sort Top)."""
-    return apify_run(token, {"searchTerms": [term], "sort": "Top", "tweetLanguage": "pt", "maxItems": 20})
+    return apify_run(token, {"searchTerms": [term], "sort": "Top", "queryType": "Top", "tweetLanguage": "pt", "lang": "pt",
+                             "maxItems": 20})
 
 
 def apify_run(token: str, body: dict[str, Any], timeout: float = APIFY_SEARCH_TIMEOUT) -> list[dict[str, Any]]:
