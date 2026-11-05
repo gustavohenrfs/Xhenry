@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import json
+
 import pytest
 
 import robo
@@ -132,12 +134,14 @@ def test_apify_item_parses():
 
 def test_apify_input_and_actor(monkeypatch):
     monkeypatch.delenv("APIFY_ACTOR", raising=False)
-    assert robo.apify_actor() == robo.APIFY_ACTOR_DEFAULT and robo.is_kaito(), "padrão: kaito (roda no plano grátis)"
+    assert robo.apify_actor() == robo.APIFY_V2 and robo.by_handle(), "padrão: V2 pelo @ (achou 46 de 46 contas)"
+    assert robo.batch_size() == robo.APIFY_HANDLES_PER_RUN and robo.parallel_runs() == robo.APIFY_HANDLES_PARALLEL
+    assert robo.handles_input(["a", "b"]) == {
+        "twitterHandles": ["a", "b"], "maxItems": 2 * robo.APIFY_HANDLE_ITEMS, "sort": "Latest"}
+    assert robo.apify_fallback_actor() == robo.APIFY_V2, "a reserva do V2 é ele mesmo, com mais itens por conta"
     monkeypatch.setenv("APIFY_ACTOR", "outro/ator")
-    assert robo.apify_actor() == "outro~ator"
-    monkeypatch.setenv("APIFY_ACTOR", robo.APIFY_V2)
-    # Regras do Tweet Scraper V2: até 5 buscas por execução e cada busca precisa trazer bastante coisa. As contas
-    # vão juntas numa busca ("from:a OR from:b"), só com os posts desde hoje (since:, o formato da documentação).
+    assert robo.apify_actor() == "outro~ator" and not robo.by_handle()
+    # Pela busca (outro ator): as contas vão juntas numa busca ("from:a OR from:b"), só os posts desde hoje.
     midnight = datetime(2026, 11, 2, 0, 0, tzinfo=robo.BR_TZ)
     assert robo.apify_input(["a", "b"], midnight) == {
         "searchTerms": ["(from:a OR from:b) since:2026-11-02"],
@@ -146,44 +150,100 @@ def test_apify_input_and_actor(monkeypatch):
     many = [f"c{n}" for n in range(robo.APIFY_QUERY_ACCOUNTS + 1)]
     terms = robo.apify_input(many, midnight)["searchTerms"]
     assert len(terms) == 2 and terms[1] == f"from:c{robo.APIFY_QUERY_ACCOUNTS} since:2026-11-02"
-    assert robo.APIFY_MAX_ACCOUNTS <= robo.APIFY_MAX_QUERIES * robo.APIFY_QUERY_ACCOUNTS and robo.APIFY_MAX_QUERIES <= 5
-    assert robo.APIFY_PARALLEL == 1, "o ator só aceita uma execução por vez"
 
 
-@pytest.mark.parametrize(("code", "text"), [(401, "recusou o token"), (402, "sem crédito"), (500, "respondeu 500")])
-def test_apify_errors_become_readable(monkeypatch, code, text):
+class Answer:
+    def __init__(self, data):
+        self.data = json.dumps(data).encode()
+
+    def read(self):
+        return self.data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def fake_apify(monkeypatch, items, status="SUCCEEDED", fail=None):
+    """urlopen falso com a API assíncrona: POST /runs, GET /actor-runs/{id}, GET /datasets/{id}/items."""
+    seen = []
+    monkeypatch.setattr(robo, "APIFY_RETRY_WAIT", 0)
+
+    def answer(req, timeout):
+        seen.append((req.get_method(), req.full_url, json.loads(req.data) if req.data else None))
+        assert req.headers["Authorization"] == "Bearer tok"
+        if fail:
+            return fail(req, len(seen))
+        if "/runs?" in req.full_url:
+            return Answer({"data": {"id": "r1", "status": "RUNNING", "defaultDatasetId": "d1"}})
+        if "/actor-runs/r1" in req.full_url:
+            return Answer({"data": {"id": "r1", "status": status, "defaultDatasetId": "d1", "statusMessage": "x"}})
+        if "/datasets/d1/items" in req.full_url:
+            return Answer(items)
+        raise AssertionError(req.full_url)
+
+    monkeypatch.setattr(robo.urllib.request, "urlopen", answer)
+    return seen
+
+
+@pytest.mark.parametrize(("code", "text", "tries"), [
+    (401, "recusou o token", 1), (402, "sem crédito", 1), (500, "respondeu 500", 3)])
+def test_apify_errors_become_readable(monkeypatch, code, text, tries):
     import urllib.error
 
-    def refuse(req, timeout):
-        assert req.headers["Authorization"] == "Bearer tok" and "run-sync-get-dataset-items" in req.full_url
+    def refuse(req, n):
         raise urllib.error.HTTPError(req.full_url, code, "x", {}, None)
 
-    monkeypatch.setattr(robo.urllib.request, "urlopen", refuse)
+    seen = fake_apify(monkeypatch, [], fail=refuse)
     with pytest.raises(robo.ApifyError, match=text):
+        robo.apify_fetch("tok", ["fulana"])
+    assert len(seen) == tries, "5xx tenta de novo; 4xx não"
+
+
+def test_apify_network_error_is_retried_and_explained(monkeypatch):
+    """O "sem resposta do Apify (URLError)" do VPS: a chamada tenta de novo e, se não der, diz o motivo."""
+    import urllib.error
+
+    def flaky(req, n):
+        if n == 1:
+            raise urllib.error.URLError("Temporary failure in name resolution")
+        if "/runs?" in req.full_url:
+            return Answer({"data": {"id": "r1", "status": "SUCCEEDED", "defaultDatasetId": "d1"}})
+        return Answer([APIFY_ITEM])
+
+    fake_apify(monkeypatch, [], fail=flaky)
+    assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM], "uma queda de rede não derruba a leitura"
+
+    def down(req, n):
+        raise urllib.error.URLError("Temporary failure in name resolution")
+
+    fake_apify(monkeypatch, [], fail=down)
+    with pytest.raises(robo.ApifyError, match="URLError: Temporary failure in name resolution"):
         robo.apify_fetch("tok", ["fulana"])
 
 
 def test_apify_fetch_returns_items(monkeypatch):
-    import io
-    import json
-
-    class Answer(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    sent = {}
-
-    def answer(req, timeout):
-        sent["body"] = json.loads(req.data)
-        return Answer(json.dumps([APIFY_ITEM, "lixo"]).encode())
-
-    monkeypatch.setattr(robo.urllib.request, "urlopen", answer)
+    seen = fake_apify(monkeypatch, [APIFY_ITEM, "lixo"])
     assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM]
-    day = robo.today_start_br().date().isoformat()
-    assert sent["body"]["searchTerms"] == [f"from:fulana since:{day}"], "só os posts de hoje da conta"
+    method, url, body = seen[0]
+    assert method == "POST" and f"/acts/{robo.APIFY_V2}/runs?" in url
+    assert body == robo.handles_input(["fulana"]), "pelo @ da conta"
+    assert "waitForFinish=" in seen[1][1] and "/datasets/d1/items" in seen[-1][1]
+
+
+def test_apify_failed_run_is_an_error(monkeypatch):
+    fake_apify(monkeypatch, [], status="FAILED")
+    with pytest.raises(robo.ApifyError, match="falhou no Apify"):
+        robo.apify_fetch("tok", ["fulana"])
+
+
+def test_apify_slow_run_is_aborted_and_keeps_what_came(monkeypatch):
+    seen = fake_apify(monkeypatch, [APIFY_ITEM], status="RUNNING")
+    monkeypatch.setattr(robo, "APIFY_TIMEOUT", 0)
+    assert robo.apify_fetch("tok", ["fulana"]) == [APIFY_ITEM]
+    assert any(url.endswith("/actor-runs/r1/abort") for _, url, _ in seen)
 
 
 @pytest.mark.parametrize(("item", "repost"), [
@@ -226,6 +286,7 @@ def test_read_detail_says_stored_total_folder_and_empty_accounts():
 def test_profile_reads_accounts_the_search_missed(monkeypatch):
     """A busca do Apify esconde algumas contas (conteúdo sensível para as contas do ator): a conta que veio
     vazia é lida de novo pelo perfil, só ela, e os posts e seguidores entram."""
+    monkeypatch.setenv("APIFY_ACTOR", "outro~busca")  # ator pela busca, com a reserva pelo perfil
     posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
     saved, followers, asked = [], [], []
     monkeypatch.setattr(robo, "save_followers", lambda cur, account, day, n: followers.append((account["username"], n)))
@@ -250,6 +311,7 @@ def test_profile_reads_accounts_the_search_missed(monkeypatch):
 def test_profile_with_only_old_posts_still_counts_as_no_post_today(monkeypatch):
     """O perfil devolve os posts mais novos, que podem ser de ontem: a conta foi lida pelo perfil, mas não
     teve post hoje, e o aviso do fim da leitura tem que dizer isso."""
+    monkeypatch.setenv("APIFY_ACTOR", "outro~busca")  # ator pela busca, com a reserva pelo perfil
     monkeypatch.setattr(robo, "save_followers", lambda *a: None)
     monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
     old = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%a %b %d %H:%M:%S +0000 %Y")
@@ -263,6 +325,7 @@ def test_profile_with_only_old_posts_still_counts_as_no_post_today(monkeypatch):
 
 
 def test_profile_failure_does_not_break_the_read(monkeypatch):
+    monkeypatch.setenv("APIFY_ACTOR", "outro~busca")  # ator pela busca, com a reserva pelo perfil
     monkeypatch.setattr(robo, "save_followers", lambda *a: None)
     monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: len(tweets))
     monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [])
@@ -279,6 +342,7 @@ def test_profile_failure_does_not_break_the_read(monkeypatch):
 def test_profile_input_and_actor(monkeypatch):
     """A reserva vai pelo Twitter Scraper Unlimited (sem o mínimo de 50 tweets por busca do V2): conta pequena,
     com poucos posts, só é lida assim."""
+    monkeypatch.setenv("APIFY_ACTOR", "outro~busca")  # ator pela busca, com a reserva pelo perfil
     assert robo.apify_profile_input(["fulana", "beltrana"]) == {
         "startUrls": ["https://x.com/fulana", "https://x.com/beltrana"],
         "maxItems": 2 * robo.APIFY_PROFILE_ITEMS, "sort": "Latest"}
@@ -390,6 +454,7 @@ def test_timeline_actor_reads_profiles(monkeypatch):
 
 def test_timeline_fallback_rereads_every_missing_account(monkeypatch):
     """Com o eiv na reserva, todas as contas que a busca não trouxe são relidas (não só 5)."""
+    monkeypatch.setenv("APIFY_ACTOR", "outro~busca")  # ator pela busca, com a reserva pelo perfil
     import robo
 
     monkeypatch.setenv("APIFY_FALLBACK_ACTOR", "eiv~twitter-scraper")
@@ -427,7 +492,7 @@ def test_read_detail_explains_an_empty_read():
 
 def test_kaito_input_uses_since_time_and_drops_fake_items(monkeypatch):
     """O kaito não entende since:dia (devolve itens falsos): o pedido usa since_time, e o aviso falso não é post."""
-    monkeypatch.delenv("APIFY_ACTOR", raising=False)
+    monkeypatch.setenv("APIFY_ACTOR", robo.APIFY_KAITO)
     midnight = datetime(2026, 11, 4, 0, 0, tzinfo=robo.BR_TZ)
     body = robo.apify_input(["juli", "lily"], midnight)
     assert body["searchTerms"] == [f"(from:juli OR from:lily) since_time:{int(midnight.timestamp())}"]
@@ -440,7 +505,7 @@ def test_kaito_input_uses_since_time_and_drops_fake_items(monkeypatch):
 def test_kaito_missing_accounts_go_to_v2_by_handle(monkeypatch):
     """Com o kaito, a busca que falhou (erro do X, só itens falsos) é repetida, e quem ainda faltou vai para o V2
     pelo @ (twitterHandles), todas numa execução, sem o teto de 5."""
-    monkeypatch.delenv("APIFY_ACTOR", raising=False)
+    monkeypatch.setenv("APIFY_ACTOR", robo.APIFY_KAITO)
     monkeypatch.delenv("APIFY_FALLBACK_ACTOR", raising=False)
     monkeypatch.setattr(robo, "KAITO_RETRY_WAIT", 0)
     calls = []
@@ -460,3 +525,43 @@ def test_kaito_missing_accounts_go_to_v2_by_handle(monkeypatch):
     assert sent["actor"] == robo.APIFY_V2
     assert sent["payload"]["twitterHandles"] == list("abcdef"), "todas as que faltaram, não só 5"
     assert report["perfil"] == ["f"] and "f" not in report["sem_post"]
+
+
+def test_v2_reads_by_handle_in_parallel_batches_and_survives_a_failed_batch(monkeypatch):
+    """V2 pelo @: lotes de APIFY_HANDLES_PER_RUN; lote que falha fica em "falha" (os outros gravam); a reserva
+    só relê conta de lote que bateu no maxItems (num lote que não encheu, a conta sem item não existe)."""
+    posted = datetime.now(timezone.utc).strftime("%a %b %d %H:%M:%S +0000 %Y")
+    per = robo.APIFY_HANDLE_ITEMS
+    accounts = [{"id": n, "username": f"c{n}"} for n in range(robo.APIFY_HANDLES_PER_RUN * 3)]
+    lots = [[a["username"] for a in accounts[i:i + robo.APIFY_HANDLES_PER_RUN]]
+            for i in range(0, len(accounts), robo.APIFY_HANDLES_PER_RUN)]
+
+    def fetch(token, handles):
+        if handles == lots[1]:
+            raise robo.ApifyError("sem resposta do Apify (URLError: x).")
+        if handles == lots[0]:  # cheio (bateu no maxItems) e sem a última conta: vai para a reserva
+            return [{"id": str(n), "createdAt": posted, "author": {"userName": handles[n % 7]}}
+                    for n in range(per * len(handles))]
+        return [{"id": "z", "createdAt": posted, "author": {"userName": handles[0]}}]  # não encheu: sem reserva
+
+    asked = []
+    monkeypatch.setattr(robo, "apify_fetch", fetch)
+    monkeypatch.setattr(robo, "apify_profile", lambda token, handles: asked.append(list(handles)) or [])
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: len(tweets))
+    monkeypatch.setattr(robo, "save_followers", lambda *a: None)
+    report = {}
+    robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report)
+    assert asked == [[lots[0][7]]]
+    assert report["falha"] == lots[1] and "URLError" in report["falha_motivo"]
+    assert not set(report["falha"]) & set(report.get("sem_post", []))
+    text = robo.read_detail(len(accounts), 9, report)
+    assert "8 contas não lidas agora" in text and "próxima leitura" in text
+
+
+def test_v2_every_batch_failing_fails_the_read(monkeypatch):
+    def fetch(token, handles):
+        raise robo.ApifyError("a conta do Apify está sem crédito (402).")
+
+    monkeypatch.setattr(robo, "apify_fetch", fetch)
+    with pytest.raises(robo.ApifyError, match="sem crédito"):
+        robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "a"}], robo.today_start_br(), {})

@@ -3660,7 +3660,7 @@ function drawerSection(title, ...children) {
 }
 async function testApifyReading(accountId, box, button) {
   button.disabled = true;
-  setCostLabel(button, "Testando no Apify… (até 3 min)");
+  setCostLabel(button, "Testando no Apify… (até 1 min)");
   try {
     const data = await api("/api/apify/test/" + accountId, { method: "POST" });
     const list = el("ul", "hc-list");

@@ -523,21 +523,14 @@ def apify_search(token: str, term: str) -> list[dict[str, Any]]:
 
 
 def apify_run(token: str, body: dict[str, Any], timeout: float = APIFY_SEARCH_TIMEOUT) -> list[dict[str, Any]]:
-    """Roda o ator do robô com o pedido dado e devolve os itens; erro vira RadarError legível."""
+    """Roda o ator do robô com o pedido dado e devolve os itens (a mesma chamada do robô: inicia, espera e baixa,
+    tentando de novo se a rede cair); erro vira RadarError legível."""
     import robo
 
-    url = f"{robo.APIFY_API}/acts/{robo.apify_actor()}/run-sync-get-dataset-items?timeout={int(timeout) - 10}"
     try:
-        response = httpx.post(url, json=body, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
-    except httpx.HTTPError as exc:
-        raise RadarError(f"sem resposta do Apify ({type(exc).__name__}).") from exc
-    if response.status_code >= 400:
-        raise RadarError(APIFY_ERRORS.get(response.status_code, f"o Apify respondeu {response.status_code}."))
-    try:
-        items = response.json()
-    except ValueError as exc:
-        raise RadarError("o Apify devolveu algo que não é JSON.") from exc
-    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+        return robo.apify_call(token, body)
+    except robo.ApifyError as exc:
+        raise RadarError(str(exc)) from exc
 
 
 def post_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

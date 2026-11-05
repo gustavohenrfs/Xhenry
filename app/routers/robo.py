@@ -238,10 +238,8 @@ def request_apify_run(folder_id: int | None = FOLDER, user: User = Depends(appro
 # ---- "Testar leitura no Apify" (gaveta da conta): o que cada jeito de pedir traz para essa conta ----
 
 APIFY_TEST_WAYS = (
-    ("busca_hoje", "Busca de hoje (a leitura normal)"),
-    ("busca", "Busca sem data"),
-    ("perfil", "Perfil pelo Tweet Scraper V2"),
-    ("unlimited", "Perfil pelo Twitter Scraper Unlimited (a reserva)"),
+    ("perfil", "Pelo @ da conta (a leitura normal)"),
+    ("busca_hoje", "Pela busca do X (comparação)"),
 )
 VIEW_FIELDS = ("viewCount", "view_count", "views", "impression_count")
 
@@ -265,9 +263,10 @@ def _test_summary(robo_mod: Any, handle: str, items: list[dict[str, Any]]) -> di
 
 @user_router.post("/api/apify/test/{account_id}")
 def test_apify_reading(account_id: int, user: User = Depends(approved_user), db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Pede a mesma conta de quatro jeitos (gasta crédito do Apify do usuário: quatro execuções pequenas, uma
-    depois da outra, porque o ator só aceita uma por vez) e mostra o que cada um trouxe: busca de hoje, busca
-    sem data, perfil e o perfil pelo Twitter Scraper Unlimited (que não pede mínimo de 50 tweets por busca)."""
+    """Pede a mesma conta de dois jeitos ao mesmo tempo (gasta crédito do Apify do usuário: duas execuções
+    pequenas) e mostra o que cada um trouxe: pelo @ (a leitura do robô) e pela busca do X."""
+    from concurrent.futures import ThreadPoolExecutor
+
     import robo as robo_mod
 
     account = owned_account(db, user.id, account_id)
@@ -276,19 +275,19 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
         raise HTTPException(400, "Token do Apify em falta. Cole o seu em Configurações.")
     handle = account.username
     payloads = {
-        "busca_hoje": robo_mod.apify_input([handle]),
-        "busca": {"searchTerms": [f"from:{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
-        "perfil": {"startUrls": [f"https://x.com/{handle}"], "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
-        "unlimited": robo_mod.apify_profile_input([handle], robo_mod.APIFY_UNLIMITED),
+        "perfil": robo_mod.handles_input([handle], robo_mod.APIFY_PROFILE_ITEMS),
+        "busca_hoje": {"searchTerms": [f"from:{handle} since:{robo_mod.today_start_br().date().isoformat()}"],
+                       "maxItems": robo_mod.APIFY_MIN_PER_QUERY, "sort": "Latest"},
     }
-    answers: dict[str, tuple[list[dict[str, Any]] | None, str | None]] = {}
-    for key in payloads:
+
+    def ask(key: str) -> tuple[list[dict[str, Any]] | None, str | None]:
         try:
-            actor = robo_mod.APIFY_UNLIMITED if key == "unlimited" else None
-            answers[key] = (robo_mod.apify_call(token, payloads[key], actor) if actor else
-                            robo_mod.apify_call(token, payloads[key]), None)
+            return robo_mod.apify_call(token, payloads[key], robo_mod.APIFY_V2), None
         except robo_mod.ApifyError as exc:
-            answers[key] = (None, str(exc))
+            return None, str(exc)
+
+    with ThreadPoolExecutor(max_workers=len(payloads)) as pool:
+        answers = dict(zip(payloads, pool.map(ask, payloads)))
     variants = []
     for key, label in APIFY_TEST_WAYS:
         items, error = answers[key]
@@ -296,17 +295,15 @@ def test_apify_reading(account_id: int, user: User = Depends(approved_user), db:
                    else {"items": 0, "posts": 0, "today": 0, "newest": None, "has_views": None})
         variants.append({"key": key, "label": label, "error": error, **summary})
     ways = {v["key"]: v for v in variants}
-    if ways["busca_hoje"]["today"]:
-        verdict = "A busca de hoje acha os posts dessa conta: a leitura normal funciona."
-    elif ways["unlimited"]["today"]:
-        verdict = ("A busca do V2 não traz essa conta, mas o Twitter Scraper Unlimited traz os posts de hoje"
-                   + (" com as views. A leitura já usa ele como reserva para ela." if ways["unlimited"]["has_views"]
-                      else ", só que SEM o campo de views: likes e respostas atualizam, as views não."))
-    elif ways["perfil"]["today"]:
-        verdict = ("Só o perfil pelo V2 trouxe os posts de hoje (a reserva usa o Unlimited, que não trouxe): "
-                   "mande esse resultado.")
-    elif ways["perfil"]["posts"] or ways["busca"]["posts"]:
-        verdict = "O Apify acha a conta, mas nenhum post de hoje: ela não postou hoje (ou o post é só repost)."
+    profile = ways["perfil"]
+    if profile["error"]:
+        verdict = f"O Apify falhou: {profile['error']}"
+    elif profile["today"]:
+        verdict = "Pelo @ vieram os posts de hoje com as views: a leitura normal funciona para essa conta."
+    elif profile["posts"]:
+        verdict = "O Apify acha a conta, mas nenhum post de hoje: ela não postou hoje (ou só repostou)."
+    elif profile["items"]:
+        verdict = "Pelo @ só vieram reposts: a conta não tem post próprio recente."
     else:
-        verdict = "Nenhum jeito trouxe post dessa conta: confira a @ ou se o Apify tem crédito."
+        verdict = "Nada veio pelo @: confira se a @ existe no X (nome trocado, suspensa) ou se o Apify tem crédito."
     return {"handle": handle, "variants": variants, "verdict": verdict}

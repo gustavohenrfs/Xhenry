@@ -613,11 +613,22 @@ APIFY_API = "https://api.apify.com/v2"
 # Padrão: o Tweet Scraper da KaitoEasyAPI. Testado nas contas reais em 2026-11-04: roda pela API no plano grátis do
 # Apify (o V2 do apidojo não: no grátis devolve só {"noResults": true}), traz views, e cobra por post
 # (US$0,25/mil, mínimo de 15 por execução). Não entende "since:dia" (devolve itens falsos), só since_time.
-APIFY_ACTOR_DEFAULT = "kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-cheapest"
 APIFY_V2 = "apidojo~tweet-scraper"
+APIFY_KAITO = "kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-cheapest"
+# Padrão: Tweet Scraper V2 pelo @ (twitterHandles = a página de cada perfil, não a busca do X, que esconde parte
+# das contas). 2026-11-04, 47 contas reais no plano Starter: 46 de 46 existentes em 15 s, lotes de 8 em paralelo.
+APIFY_ACTOR_DEFAULT = APIFY_V2
 KAITO_OWNERS = ("kaitoeasyapi",)
 APIFY_INTERVAL_DEFAULT = 60
-APIFY_TIMEOUT = 150  # o run-sync do Apify espera até 300 s; aqui bem menos, para não segurar o cron
+APIFY_TIMEOUT = 150  # tempo máximo de uma execução (inicia, espera e baixa os itens); depois é abortada
+APIFY_RETRIES = 3  # tentativas de cada chamada à API do Apify quando a rede falha ou ele responde 429/5xx
+APIFY_RETRY_WAIT = 2.0  # segundos entre tentativas (dobra a cada uma)
+APIFY_POLL = 20  # o GET da execução espera até isso por ela terminar (waitForFinish)
+# Pelo @ (twitterHandles): o V2 lê a página de cada perfil (2 a 20 itens, reposts inclusos) e para no maxItems
+# da execução. Lotes de 8 contas com 12 itens cada trouxeram todas; com 5 cada, contas ficaram de fora.
+APIFY_HANDLES_PER_RUN = 8
+APIFY_HANDLE_ITEMS = 12
+APIFY_HANDLES_PARALLEL = 8  # execuções ao mesmo tempo (o plano pago aceita 32)
 # Regras do Tweet Scraper V2 (apidojo/tweet-scraper, documentação do ator): no máximo 1 execução por vez, com
 # até 5 buscas; cada busca precisa trazer pelo menos 50 tweets; não repetir a mesma busca em intervalo curto.
 APIFY_TODAY_PER_ACCOUNT = 60  # teto de posts de hoje por conta na leitura (só se paga o que vier)
@@ -659,13 +670,27 @@ def is_fake_item(item: dict[str, Any]) -> bool:
     return item.get("type") == "mock_tweet" or str(item.get("id")) == "-1"
 
 
+def by_handle(actor: str | None = None) -> bool:
+    """O ator lê pelo @ da conta (twitterHandles): o V2."""
+    return (actor or apify_actor()) == APIFY_V2
+
+
 def batch_size() -> int:
-    """Contas por execução: uma busca só no kaito, até 5 buscas nos outros."""
+    """Contas por execução: 8 pelo @ (V2), uma busca só no kaito, até 5 buscas nos outros."""
+    if by_handle():
+        return APIFY_HANDLES_PER_RUN
     return APIFY_QUERY_ACCOUNTS if is_kaito() else APIFY_MAX_ACCOUNTS
 
 
 def parallel_runs() -> int:
+    if by_handle():
+        return APIFY_HANDLES_PARALLEL
     return KAITO_PARALLEL if is_kaito() else APIFY_PARALLEL
+
+
+def handles_input(handles: list[str], per: int = APIFY_HANDLE_ITEMS) -> dict[str, Any]:
+    """Pelo @: os itens mais novos da página de cada conta (o robô guarda só os de hoje)."""
+    return {"twitterHandles": list(handles), "maxItems": per * len(handles), "sort": "Latest"}
 
 
 def apify_interval() -> timedelta:
@@ -696,8 +721,8 @@ def apify_profile_input(handles: list[str], actor: str | None = None) -> dict[st
     actor = actor or apify_fallback_actor()
     if is_timeline_actor(actor):
         return timeline_input(handles)
-    if actor == APIFY_V2:
-        return {"twitterHandles": list(handles), "maxItems": APIFY_PROFILE_ITEMS * len(handles), "sort": "Latest"}
+    if by_handle(actor):
+        return handles_input(handles, APIFY_PROFILE_ITEMS)
     return {"startUrls": [f"https://x.com/{handle}" for handle in handles],
             "maxItems": APIFY_PROFILE_ITEMS * len(handles), "sort": "Latest"}
 
@@ -721,13 +746,16 @@ def timeline_input(handles: list[str]) -> dict[str, Any]:
 def apify_fallback_actor() -> str:
     # Com o kaito, a reserva é o V2 pelo @ da conta (2026-11-04, contas reais: o V2 por twitterHandles achou 46 de
     # 47 contas, o kaito 26 a 36, porque o X devolve "Internal server error" a parte das buscas dele).
-    default = APIFY_V2 if is_kaito() else APIFY_UNLIMITED
+    # Com o V2 pelo @, a reserva é ele mesmo com mais itens por conta (a conta que o maxItems do lote cortou).
+    default = APIFY_V2 if is_kaito() or by_handle() else APIFY_UNLIMITED
     return (os.getenv("APIFY_FALLBACK_ACTOR") or default).strip().replace("/", "~")
 
 
 def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
-    """Leitura normal: a busca de hoje de cada conta (apify_input)."""
+    """Leitura normal: pelo @ no V2 (handles_input), a linha do tempo no eiv, a busca de hoje nos outros."""
     actor = apify_actor()
+    if by_handle(actor):
+        return apify_call(token, handles_input(handles))
     return apify_call(token, timeline_input(handles) if is_timeline_actor(actor) else apify_input(handles))
 
 
@@ -737,32 +765,77 @@ def apify_profile(token: str, handles: list[str]) -> list[dict[str, Any]]:
     return apify_call(token, apify_profile_input(handles), apify_fallback_actor())
 
 
+APIFY_HTTP_ERRORS = {
+    401: "o Apify recusou o token (401). Confira o token em Configurações.",
+    402: "a conta do Apify está sem crédito (402).",
+    403: "o Apify negou o acesso (403). O plano gratuito não roda esse ator pela API.",
+    408: "o Apify demorou demais (408). Tenta de novo na próxima passada.",
+    429: "limite de chamadas do Apify (429). Tenta de novo na próxima passada.",
+}
+RETRY_CODES = (429, 500, 502, 503, 504)
+RUN_ACTIVE = ("READY", "RUNNING")
+
+
+def apify_api(token: str, method: str, path: str, body: Any = None, timeout: float = 60) -> Any:
+    """Uma chamada curta à API do Apify, com APIFY_RETRIES tentativas quando a rede cai (URLError, conexão
+    fechada, tempo esgotado) ou ele responde 429/5xx. Erros viram ApifyError legível, com o motivo da rede."""
+    data = json.dumps(body).encode() if body is not None else None
+    wait = APIFY_RETRY_WAIT
+    for attempt in range(1, APIFY_RETRIES + 1):
+        req = urllib.request.Request(f"{APIFY_API}{path}", data=data, method=method,
+                                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8") or "null")
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRY_CODES or attempt == APIFY_RETRIES:
+                if exc.code == 404 and path.startswith("/acts/"):
+                    raise ApifyError(f"ator {path.split('/')[2]} não encontrado no Apify (404).") from exc
+                raise ApifyError(APIFY_HTTP_ERRORS.get(exc.code, f"o Apify respondeu {exc.code}.")) from exc
+            problem = f"resposta {exc.code}"
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", None) or exc
+            problem = f"{type(exc).__name__}: {reason}"
+            if attempt == APIFY_RETRIES:
+                raise ApifyError(f"sem resposta do Apify ({problem})."[:200]) from exc
+        except ValueError as exc:
+            raise ApifyError("o Apify devolveu algo que não é JSON.") from exc
+        log.info("Apify %s %s: tentativa %d falhou (%s); de novo em %.0f s", method, path.split("?")[0], attempt,
+                 problem, wait)
+        time.sleep(wait)
+        wait *= 2
+    raise ApifyError("sem resposta do Apify.")  # não chega aqui
+
+
 def apify_call(token: str, payload: dict[str, Any], actor: str | None = None) -> list[dict[str, Any]]:
-    """Roda o ator (o do .env, ou outro com actor) e devolve os itens do dataset. Erros viram ApifyError."""
-    url = f"{APIFY_API}/acts/{actor or apify_actor()}/run-sync-get-dataset-items?timeout={APIFY_TIMEOUT - 10}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=APIFY_TIMEOUT) as response:
-            body = json.loads(response.read().decode("utf-8") or "[]")
-    except urllib.error.HTTPError as exc:
-        reason = {
-            401: "o Apify recusou o token (401). Confira o token em Configurações.",
-            402: "a conta do Apify está sem crédito (402).",
-            403: "o Apify negou o acesso (403). O plano gratuito não roda esse ator pela API.",
-            404: f"ator {apify_actor()} não encontrado no Apify (404).",
-            408: "o Apify demorou demais (408). Tenta de novo na próxima passada.",
-            429: "limite de chamadas do Apify (429). Tenta de novo na próxima passada.",
-        }.get(exc.code, f"o Apify respondeu {exc.code}.")
-        raise ApifyError(reason) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise ApifyError(f"sem resposta do Apify ({type(exc).__name__}).") from exc
-    except ValueError as exc:
-        raise ApifyError("o Apify devolveu algo que não é JSON.") from exc
+    """Roda o ator (o do .env, ou outro com actor) e devolve os itens do dataset. Em vez do run-sync (uma
+    conexão presa por minutos, que caía como URLError), inicia a execução, espera com GETs curtos
+    (waitForFinish) e baixa os itens; cada passo tenta de novo se a rede falhar. Passou de APIFY_TIMEOUT:
+    aborta e usa o que já veio. Erros viram ApifyError."""
+    actor = actor or apify_actor()
+    deadline = time.monotonic() + APIFY_TIMEOUT
+    started = apify_api(token, "POST", f"/acts/{actor}/runs?timeout={APIFY_TIMEOUT}", payload)
+    run = (started or {}).get("data") or {}
+    if not run.get("id"):
+        raise ApifyError("o Apify não iniciou a execução.")
+    while run.get("status") in RUN_ACTIVE:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            try:
+                apify_api(token, "POST", f"/actor-runs/{run['id']}/abort", {})
+            except ApifyError:
+                pass
+            log.warning("Apify: execução %s passou de %d s; abortada, uso o que já veio", run["id"], APIFY_TIMEOUT)
+            break
+        answer = apify_api(token, "GET", f"/actor-runs/{run['id']}?waitForFinish={max(1, min(APIFY_POLL, int(left)))}",
+                           timeout=APIFY_POLL + 30)
+        run = (answer or {}).get("data") or run
+    if run.get("status") == "FAILED":
+        raise ApifyError(f"a execução do ator falhou no Apify ({(run.get('statusMessage') or 'sem detalhe')[:120]}).")
+    dataset = run.get("defaultDatasetId")
+    if not dataset:
+        raise ApifyError("o Apify não devolveu a lista de posts.")
+    body = apify_api(token, "GET", f"/datasets/{dataset}/items?clean=1&format=json", timeout=90)
     if not isinstance(body, list):
         raise ApifyError("o Apify não devolveu a lista de posts.")
     return [item for item in body if isinstance(item, dict)]
@@ -926,14 +999,32 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     """
     size = batch_size()
     batches = [accounts[start:start + size] for start in range(0, len(accounts), size)]
+    errors: list[ApifyError | None] = [None] * len(batches)
+
+    def one(index: int) -> list[dict[str, Any]]:
+        # Um lote que falha não derruba os outros: as contas dele ficam em report["falha"].
+        try:
+            return fetch_batch(token, [a["username"] for a in batches[index]])
+        except ApifyError as exc:
+            errors[index] = exc
+            return []
+
     if len(batches) > 1:
         # Vários lotes: as chamadas vão juntas (cada uma é um run do ator); gravar fica numa conexão só.
         with ThreadPoolExecutor(max_workers=min(parallel_runs(), len(batches)), thread_name_prefix="apify-lote") as pool:
-            answers = list(pool.map(lambda batch: fetch_batch(token, [a["username"] for a in batch]), batches))
+            answers = list(pool.map(one, range(len(batches))))
     else:
-        answers = [fetch_batch(token, [a["username"] for a in batch]) for batch in batches]
-    # Reserva pelo perfil: contas sem item nenhum na busca (nem post antigo, nem repost).
-    missing = [account["username"] for batch, items in zip(batches, answers)
+        answers = [one(0)] if batches else []
+    if batches and all(errors):
+        raise errors[0]  # nenhum lote veio: a leitura falhou
+    failed = {a["username"] for batch, error in zip(batches, errors) if error for a in batch}
+    for error in {str(e) for e in errors if e}:
+        log.warning("um lote do Apify falhou: %s", error)
+    # Reserva pelo perfil: contas sem item nenhum na busca (nem post antigo, nem repost). Pelo @ (V2), só nos lotes
+    # que bateram no maxItems: num lote que não encheu, a conta sem item não existe ou não tem post nenhum.
+    per = APIFY_HANDLE_ITEMS if by_handle() else None
+    missing = [account["username"] for batch, items, error in zip(batches, answers, errors) if not error
+               if per is None or len(items) >= per * len(batch)
                for account in batch if account["username"].lower() not in {apify_author(i)[0] for i in items}]
     by_profile: dict[str, list[dict[str, Any]]] = {}
 
@@ -986,7 +1077,10 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
                     save_followers(cur, account, midnight.date(), followers[handle])
                 today = save_tweets(cur, account, by_author.get(handle, []), midnight)
                 saved += today
-                if report is not None:
+                if report is not None and account["username"] in failed:
+                    report.setdefault("falha", []).append(account["username"])
+                    report["falha_motivo"] = str(next(e for e in errors if e))
+                elif report is not None:
                     # Lida pelo perfil e, à parte, sem post de hoje nesta leitura (o perfil traz os mais
                     # novos, que podem ser de ontem: a conta não pode passar como "com post").
                     if by_profile.get(account["username"]):
@@ -1076,6 +1170,10 @@ def read_detail(accounts: int, stored: int, report: dict[str, Any], folder_name:
     empty = len(report.get("sem_post") or [])
     if empty:
         text += f" ({empty} {'conta' if empty == 1 else 'contas'} sem post hoje)"
+    failed = len(report.get("falha") or [])
+    if failed:
+        text += (f" · {failed} {'conta não lida' if failed == 1 else 'contas não lidas'} agora"
+                 f" ({report.get('falha_motivo') or 'erro no Apify'}); vão na próxima leitura")
     profile = len(report.get("perfil") or [])
     if profile:
         text += f" · {profile} {'lida' if profile == 1 else 'lidas'} pelo perfil"
