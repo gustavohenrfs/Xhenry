@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="/static/css/tailwind.css?v=11">
   <link rel="stylesheet" href="/static/css/styles.css?v=50">
   <script defer src="/static/vendor/chart-4.4.6.umd.min.js?v=1"></script>
-  <script defer src="/static/js/app.js?v=73"></script>
+  <script defer src="/static/js/app.js?v=74"></script>
 </head>
 <body class="bg-ink text-blush">
   <!-- Intro "ignição": o laser acende, vira o anel em volta do logo, o nome sobe e a barra segue o carregamento
@@ -209,6 +209,7 @@
               <h2 class="font-display text-xl text-white">Melhor conta</h2>
               <p class="mb-3 text-xs text-mute">Views por conta no período</p>
               <div class="chart-skel h-64"><canvas id="bar-chart"></canvas></div>
+              <button id="bar-more" type="button" class="mt-3 hidden w-full rounded-2xl border border-neon/40 px-4 py-2 text-sm" aria-expanded="false" aria-controls="bar-chart"></button>
             </article>
           </div>
           <article class="glow rounded-3xl border border-neon/20 bg-card p-4">

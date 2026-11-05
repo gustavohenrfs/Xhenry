@@ -1237,13 +1237,31 @@ function renderGrowth(data) {
   if (lineChart) updateChart(lineChart, { labels, datasets }, options);
   else lineChart = markChart(new Chart(document.getElementById("line-chart"), { type: "line", data: { labels, datasets }, options }));
 }
+const BAR_TOP = 10;
+let lastBarData = null;
+let barAll = false;
+try { barAll = localStorage.getItem("bar_all") === "1"; } catch { /* sem storage: top 10 */ }
+function barShowAll() { return barAll; }
+document.getElementById("bar-more").addEventListener("click", () => {
+  barAll = !barAll;
+  try { localStorage.setItem("bar_all", barAll ? "1" : "0"); } catch { /* sem storage: vale só nesta aba */ }
+  if (lastBarData) renderCharts(lastBarData);
+});
 function renderCharts(data) {
   if (!window.Chart) return;
   document.querySelectorAll(".chart-skel").forEach((node) => node.classList.remove("chart-skel"));
   renderGrowth(data);
   // Melhor conta: barras deitadas, da maior para a menor. O @ fica legível com muitas contas e no
   // celular (em pé, os nomes ficavam inclinados e espremidos); a altura cresce com o nº de contas.
-  const rows = [...data.by_account].sort((a, b) => (b.views || 0) - (a.views || 0));
+  // Mostra as BAR_TOP primeiras; "Ver todas" abre a lista inteira (lembrado em localStorage.bar_all).
+  const sorted = [...data.by_account].sort((a, b) => (b.views || 0) - (a.views || 0));
+  const showAll = barShowAll();
+  const rows = showAll ? sorted : sorted.slice(0, BAR_TOP);
+  const more = document.getElementById("bar-more");
+  more.classList.toggle("hidden", sorted.length <= BAR_TOP);
+  more.textContent = showAll ? "Mostrar só o top " + BAR_TOP : "Ver todas (" + sorted.length + ")";
+  more.setAttribute("aria-expanded", String(showAll));
+  lastBarData = data;
   const canvas = document.getElementById("bar-chart");
   canvas.parentElement.style.height = Math.max(256, rows.length * 34 + 48) + "px";
   const barData = {
