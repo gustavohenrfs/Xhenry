@@ -626,6 +626,12 @@ APIFY_QUERY_ACCOUNTS = 8  # contas juntas numa busca ("(from:a OR from:b …) si
 APIFY_MAX_QUERIES = 5  # buscas por execução
 APIFY_MAX_ACCOUNTS = APIFY_QUERY_ACCOUNTS * APIFY_MAX_QUERIES  # contas por execução; mais que isso vira outra, em seguida
 APIFY_PARALLEL = 1  # o ator só aceita uma execução por vez
+# Kaito: quando o X responde "Internal server error" a uma busca, ele não tenta de novo e devolve só itens falsos
+# (2026-11-04, no log do ator; mais comum com várias buscas ao mesmo tempo). Então uma busca por execução, poucas
+# ao mesmo tempo, e a busca que voltou só com itens falsos é repetida (até KAITO_RETRIES vezes, US$0,004 cada).
+KAITO_PARALLEL = 2
+KAITO_RETRIES = 2
+KAITO_RETRY_WAIT = 3  # segundos antes de repetir
 APIFY_PROFILE_ITEMS = 20  # reserva pelo perfil: os posts mais novos de cada conta (o Unlimited inclui ~40 por busca)
 APIFY_PROFILE_MAX = 5  # contas lidas pelo perfil numa leitura (uma execução, até 5 perfis: a faixa mais barata)
 # Twitter Scraper Unlimited: sem o mínimo de 50 tweets por busca do V2. É o ator da reserva (conta pequena ou que a
@@ -653,6 +659,15 @@ def is_fake_item(item: dict[str, Any]) -> bool:
     return item.get("type") == "mock_tweet" or str(item.get("id")) == "-1"
 
 
+def batch_size() -> int:
+    """Contas por execução: uma busca só no kaito, até 5 buscas nos outros."""
+    return APIFY_QUERY_ACCOUNTS if is_kaito() else APIFY_MAX_ACCOUNTS
+
+
+def parallel_runs() -> int:
+    return KAITO_PARALLEL if is_kaito() else APIFY_PARALLEL
+
+
 def apify_interval() -> timedelta:
     return timedelta(minutes=env_int("APIFY_INTERVAL_MIN", APIFY_INTERVAL_DEFAULT, 5, 24 * 60))
 
@@ -676,9 +691,13 @@ def apify_input(handles: list[str], since: datetime | None = None) -> dict[str, 
 
 
 def apify_profile_input(handles: list[str], actor: str | None = None) -> dict[str, Any]:
-    """Pedido pelo perfil, não pela busca. No ator de linha do tempo (eiv) é o formato dele."""
-    if is_timeline_actor(actor or apify_fallback_actor()):
+    """Pedido pelo perfil, não pela busca. No ator de linha do tempo (eiv) é o formato dele; no V2, twitterHandles
+    (ele lê a página de cada perfil, ~20 posts por conta, todas ao mesmo tempo)."""
+    actor = actor or apify_fallback_actor()
+    if is_timeline_actor(actor):
         return timeline_input(handles)
+    if actor == APIFY_V2:
+        return {"twitterHandles": list(handles), "maxItems": APIFY_PROFILE_ITEMS * len(handles), "sort": "Latest"}
     return {"startUrls": [f"https://x.com/{handle}" for handle in handles],
             "maxItems": APIFY_PROFILE_ITEMS * len(handles), "sort": "Latest"}
 
@@ -700,7 +719,10 @@ def timeline_input(handles: list[str]) -> dict[str, Any]:
 
 
 def apify_fallback_actor() -> str:
-    return (os.getenv("APIFY_FALLBACK_ACTOR") or APIFY_UNLIMITED).strip().replace("/", "~")
+    # Com o kaito, a reserva é o V2 pelo @ da conta (2026-11-04, contas reais: o V2 por twitterHandles achou 46 de
+    # 47 contas, o kaito 26 a 36, porque o X devolve "Internal server error" a parte das buscas dele).
+    default = APIFY_V2 if is_kaito() else APIFY_UNLIMITED
+    return (os.getenv("APIFY_FALLBACK_ACTOR") or default).strip().replace("/", "~")
 
 
 def apify_fetch(token: str, handles: list[str]) -> list[dict[str, Any]]:
@@ -877,6 +899,21 @@ def set_apify_status(cur, owner_id: int, status: str, detail: str | None) -> Non
     )
 
 
+def fetch_batch(token: str, handles: list[str]) -> list[dict[str, Any]]:
+    """apify_fetch; no kaito, repete a busca que voltou só com itens falsos (erro do X que o ator engole).
+    Conta que de fato não postou também volta assim: custa as repetições, mas não perde post."""
+    items = apify_fetch(token, handles)
+    if not is_kaito():
+        return items
+    for _ in range(KAITO_RETRIES):
+        if any(not is_fake_item(item) for item in items):
+            break
+        time.sleep(KAITO_RETRY_WAIT)
+        log.info(f"Apify: busca de {', '.join(handles[:3])}… voltou vazia; repetindo")
+        items = apify_fetch(token, handles)
+    return items
+
+
 def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datetime,
                report: dict[str, Any] | None = None) -> int:
     """Lê as contas pelo Apify (lotes de APIFY_MAX_ACCOUNTS) e grava: posts de hoje, alertas de views,
@@ -887,23 +924,25 @@ def apify_read(conn, token: str, accounts: list[dict[str, Any]], midnight: datet
     (apify_profile, só ela; erro aí não derruba a leitura). Com report, anota em report["perfil"] as contas
     lidas pelo perfil e em report["sem_post"] as que nem assim trouxeram nada (o que já estava guardado fica).
     """
-    batches = [accounts[start:start + APIFY_MAX_ACCOUNTS] for start in range(0, len(accounts), APIFY_MAX_ACCOUNTS)]
+    size = batch_size()
+    batches = [accounts[start:start + size] for start in range(0, len(accounts), size)]
     if len(batches) > 1:
         # Vários lotes: as chamadas vão juntas (cada uma é um run do ator); gravar fica numa conexão só.
-        with ThreadPoolExecutor(max_workers=min(APIFY_PARALLEL, len(batches)), thread_name_prefix="apify-lote") as pool:
-            answers = list(pool.map(lambda batch: apify_fetch(token, [a["username"] for a in batch]), batches))
+        with ThreadPoolExecutor(max_workers=min(parallel_runs(), len(batches)), thread_name_prefix="apify-lote") as pool:
+            answers = list(pool.map(lambda batch: fetch_batch(token, [a["username"] for a in batch]), batches))
     else:
-        answers = [apify_fetch(token, [a["username"] for a in batch]) for batch in batches]
+        answers = [fetch_batch(token, [a["username"] for a in batch]) for batch in batches]
     # Reserva pelo perfil: contas sem item nenhum na busca (nem post antigo, nem repost).
     missing = [account["username"] for batch, items in zip(batches, answers)
                for account in batch if account["username"].lower() not in {apify_author(i)[0] for i in items}]
     by_profile: dict[str, list[dict[str, Any]]] = {}
 
     # Com o ator de linha do tempo como principal, quem faltou não tem para onde ir (já foi pelo perfil).
-    # O kaito relê pela mesma busca (não tem leitura por perfil): quem faltou só não postou hoje.
-    if missing and not is_timeline_actor(apify_actor()) and not is_kaito():
-        # O ator de linha do tempo cobra por post, não por perfil: lê todas as que faltaram, não só 5.
-        wanted = missing if is_timeline_actor(apify_fallback_actor()) else missing[:APIFY_PROFILE_MAX]
+    # Com o kaito, quem faltou vai para o V2 pelo perfil (a busca dele falha com erro do X em parte das contas).
+    if missing and not is_timeline_actor(apify_actor()):
+        # Linha do tempo e V2 cobram por post, não por perfil: lê todas as que faltaram, não só 5.
+        fallback = apify_fallback_actor()
+        wanted = missing if is_timeline_actor(fallback) or fallback == APIFY_V2 else missing[:APIFY_PROFILE_MAX]
         try:
             for item in apify_profile(token, wanted):  # uma execução só, com todas as que faltaram
                 author = apify_author(item)[0]

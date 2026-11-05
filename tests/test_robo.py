@@ -437,12 +437,26 @@ def test_kaito_input_uses_since_time_and_drops_fake_items(monkeypatch):
     assert robo.apify_author(fake) == ("", None), "sem autor: a leitura já pula"
 
 
-def test_kaito_skips_profile_fallback(monkeypatch):
-    """Com o kaito, conta que não veio só não postou hoje: não há segunda execução pelo perfil."""
+def test_kaito_missing_accounts_go_to_v2_by_handle(monkeypatch):
+    """Com o kaito, a busca que falhou (erro do X, só itens falsos) é repetida, e quem ainda faltou vai para o V2
+    pelo @ (twitterHandles), todas numa execução, sem o teto de 5."""
     monkeypatch.delenv("APIFY_ACTOR", raising=False)
-    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: [{"type": "mock_tweet", "id": "-1"}])
-    monkeypatch.setattr(robo, "apify_profile", lambda token, handles: pytest.fail("kaito não relê pelo perfil"))
-    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: 0)
+    monkeypatch.delenv("APIFY_FALLBACK_ACTOR", raising=False)
+    monkeypatch.setattr(robo, "KAITO_RETRY_WAIT", 0)
+    calls = []
+    monkeypatch.setattr(robo, "apify_fetch", lambda token, handles: calls.append(list(handles)) or [{"type": "mock_tweet", "id": "-1"}])
+    sent = {}
+
+    def fake_call(token, payload, actor=None):
+        sent.update(actor=actor, payload=payload)
+        return [dict(APIFY_ITEM, author={"userName": "f", "followers": 7})]
+
+    monkeypatch.setattr(robo, "apify_call", fake_call)
+    monkeypatch.setattr(robo, "save_tweets", lambda cur, account, tweets, midnight: len(tweets))
+    accounts = [{"id": n, "username": h} for n, h in enumerate("abcdef")]
     report = {}
-    robo.apify_read(FakeConn(), "tok", [{"id": 1, "username": "a"}], robo.today_start_br(), report)
-    assert report["sem_post"] == ["a"] and report["diag"]["itens"] == 0
+    robo.apify_read(FakeConn(), "tok", accounts, robo.today_start_br(), report)
+    assert calls == [list("abcdef")] * (1 + robo.KAITO_RETRIES), "uma busca, repetida quando volta só com falsos"
+    assert sent["actor"] == robo.APIFY_V2
+    assert sent["payload"]["twitterHandles"] == list("abcdef"), "todas as que faltaram, não só 5"
+    assert report["perfil"] == ["f"] and "f" not in report["sem_post"]
